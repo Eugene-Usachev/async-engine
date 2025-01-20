@@ -1,218 +1,7 @@
+use crate::sync::channels::{RecvErr, SendErr, TryRecvErr, TrySendErr};
 use std::future::Future;
 use std::mem::MaybeUninit;
 use std::ptr::drop_in_place;
-
-/// The result of an asynchronous send operation.
-///
-/// Represents the possible outcomes of sending a value into a channel.
-///
-/// # Variants
-///
-/// - [`Ok`](SendResult::Ok): The value was successfully sent into the channel.
-///
-/// - [`Closed`](SendResult::Closed): The channel was closed before the value could be sent.
-#[must_use]
-pub enum SendResult<T> {
-    /// The value was successfully sent into the channel.
-    Ok,
-    /// The channel was closed before the value could be sent.
-    Closed(T),
-}
-
-impl<T> SendResult<T> {
-    /// # Panics
-    ///
-    /// If the channel is [`closed`](SendResult::Closed).
-    pub fn unwrap(self) {
-        if matches!(self, Self::Closed(_)) {
-            panic!("Unwrap on SendResult::Err: channel is closed");
-        }
-    }
-}
-
-/// The result of a non-blocking send attempt.
-///
-/// Used for scenarios where the sender attempts to send a value
-/// without waiting for the channel to become available.
-///
-/// # Variants
-///
-/// - [`Ok`](TrySendResult::Ok): The value was successfully sent.
-///
-/// - [`Full`](TrySendResult::Full): The channel is full. Contains the value that could not be sent.
-///
-/// - [`Locked`](TrySendResult::Locked): The channel is locked, indicating temporary unavailability.
-///   Contains the value that could not be sent.
-///
-/// - [`Closed`](TrySendResult::Closed): The channel is closed.
-///   Contains the value that could not be sent.
-#[must_use]
-pub enum TrySendResult<T> {
-    /// The value was successfully sent.
-    Ok,
-    /// The channel is full. Contains the value that could not be sent.
-    Full(T),
-    /// The channel is locked, indicating temporary unavailability.
-    /// Contains the value that could not be sent.
-    Locked(T),
-    /// The channel is closed. Contains the value that could not be sent.
-    Closed(T),
-}
-
-impl<T> TrySendResult<T> {
-    /// # Panics
-    ///
-    /// If the channel is [`closed`](TrySendResult::Closed), [`full`](TrySendResult::Full),
-    /// or [`locked`](TrySendResult::Locked).
-    pub fn unwrap(self) {
-        match self {
-            Self::Ok => (),
-            Self::Full(_) => panic!("Unwrap on TrySendResult::Full."),
-            Self::Locked(_) => panic!("Unwrap on TrySendResult::Locked."),
-            Self::Closed(_) => panic!("Unwrap on TrySendResult::Closed."),
-        }
-    }
-}
-
-/// The result of an asynchronous `receive` operation.
-///
-/// Indicates the result of attempting to receive a value from a channel.
-///
-/// # Variants
-///
-/// - [`Ok`](RecvInResult::Ok): The value was successfully received.
-///
-/// - [`Closed`](RecvInResult::Closed): The channel is closed, and no more values can be received.
-#[must_use]
-pub enum RecvInResult {
-    /// The value was successfully received.
-    Ok,
-    /// The channel is closed, and no more values can be received.
-    Closed,
-}
-
-impl RecvInResult {
-    /// # Panics
-    ///
-    /// If the channel is [`closed`](RecvInResult::Closed).
-    pub fn unwrap(self) {
-        if matches!(self, Self::Closed) {
-            panic!("Unwrap on RecvInResult::Closed.");
-        }
-    }
-}
-
-/// The result of a non-blocking receive attempt.
-///
-/// Used for scenarios where the receiver attempts to receive a value
-/// without waiting for one to be available in the channel.
-///
-/// # Variants
-///
-/// - [`Ok`](TryRecvInResult::Ok): The value was successfully received.
-///
-/// - [`Empty`](TryRecvInResult::Empty): The channel is empty; no values are currently available.
-///
-/// - [`Locked`](TryRecvInResult::Locked): The channel is locked, indicating temporary unavailability.
-///
-/// - [`Closed`](TryRecvInResult::Closed): The channel is closed, and no more values can be received.
-#[must_use]
-pub enum TryRecvInResult {
-    /// The value was successfully received.
-    Ok,
-    /// The channel is empty; no values are currently available.
-    Empty,
-    /// The channel is locked, indicating temporary unavailability.
-    Locked,
-    /// The channel is closed, and no more values can be received.
-    Closed,
-}
-
-impl TryRecvInResult {
-    /// # Panics
-    ///
-    /// If the channel is [`closed`](TryRecvInResult::Closed), [`empty`](TryRecvInResult::Empty),
-    /// or [`locked`](TryRecvInResult::Locked).
-    pub fn unwrap(self) {
-        match self {
-            Self::Ok => (),
-            Self::Empty => panic!("Unwrap on TryRecvInResult::Empty."),
-            Self::Locked => panic!("Unwrap on TryRecvInResult::Locked."),
-            Self::Closed => panic!("Unwrap on TryRecvInResult::Closed."),
-        }
-    }
-}
-
-/// The result of an asynchronous `receive` operation.
-///
-/// Represents a successful reception of a value from the channel or
-/// a notification that the channel is closed.
-///
-/// # Variants
-///
-/// - [`Ok`](RecvResult::Ok): A value was successfully received from the channel.
-///
-/// - [`Closed`](RecvResult::Closed): The channel is closed, and no more values can be received.
-#[must_use]
-pub enum RecvResult<T> {
-    /// A value was successfully received from the channel.
-    Ok(T),
-    /// The channel is closed, and no more values can be received.
-    Closed,
-}
-
-impl<T> RecvResult<T> {
-    /// # Panics
-    ///
-    /// If the channel is [`closed`](RecvResult::Closed).
-    pub fn unwrap(self) -> T {
-        match self {
-            Self::Ok(v) => v,
-            Self::Closed => panic!("Unwrap on RecvResult::Closed."),
-        }
-    }
-}
-
-/// The result of a non-blocking receive attempt.
-///
-/// Provides an outcome for an attempt to receive a value from the channel without
-/// waiting for one to become available.
-///
-/// # Variants
-///
-/// - [`Ok`](TryRecvResult::Ok): A value was successfully received from the channel.
-///
-/// - [`Empty`](TryRecvResult::Empty): The channel is empty; no values are currently available.
-///
-/// - [`Locked`](TryRecvResult::Locked): The channel is locked, indicating temporary unavailability.
-///
-/// - [`Closed`](TryRecvResult::Closed): The channel is closed, and no more values can be received.
-#[must_use]
-pub enum TryRecvResult<T> {
-    /// A value was successfully received from the channel.
-    Ok(T),
-    /// The channel is empty; no values are currently available.
-    Empty,
-    /// The channel is locked, indicating temporary unavailability.
-    Locked,
-    /// The channel is closed, and no more values can be received.
-    Closed,
-}
-
-impl<T> TryRecvResult<T> {
-    /// # Panics
-    ///
-    /// If the channel is [`closed`](TryRecvResult::Closed), [`empty`](TryRecvResult::Empty),
-    /// or [`locked`](TryRecvResult::Locked).
-    pub fn unwrap(self) -> T {
-        match self {
-            Self::Ok(v) => v,
-            Self::Empty => panic!("Unwrap on TryRecvResult::Empty."),
-            Self::Locked => panic!("Unwrap on TryRecvResult::Locked."),
-            Self::Closed => panic!("Unwrap on TryRecvResult::Closed."),
-        }
-    }
-}
 
 /// The `AsyncSender` allows sending values into the [`channel`](AsyncChannel).
 ///
@@ -264,15 +53,15 @@ pub trait AsyncSender<T> {
     ///     }).await;
     /// }
     /// ```
-    fn send(&self, value: T) -> impl Future<Output = SendResult<T>>;
+    fn send(&self, value: T) -> impl Future<Output = Result<(), SendErr<T>>>;
 
     /// Tries to send a value into the [`channel`](AsyncChannel).
     ///
-    /// If the [`channel`](AsyncChannel) is full, returns [`TrySendResult::Full`].
+    /// If the [`channel`](AsyncChannel) is full, returns [`TrySendErr::Full`].
     ///
-    /// If the [`channel`](AsyncChannel) is locked, returns [`TrySendResult::Locked`].
+    /// If the [`channel`](AsyncChannel) is locked, returns [`TrySendErr::Locked`].
     ///
-    /// If the [`channel`](AsyncChannel) is closed, returns [`TrySendResult::Closed`].
+    /// If the [`channel`](AsyncChannel) is closed, returns [`TrySendErr::Closed`].
     ///
     /// Else, the value is immediately sent.
     ///
@@ -281,19 +70,19 @@ pub trait AsyncSender<T> {
     /// # Example
     ///
     /// ```rust
-    /// use orengine::sync::{AsyncChannel, AsyncSender, TrySendResult};
+    /// use orengine::sync::{AsyncChannel, AsyncSender, TrySendErr};
     ///
     /// async fn foo() {
     ///     let channel = orengine::sync::Channel::bounded(1);
     ///     let (sender, receiver) = channel.split();
     ///
-    ///     assert!(matches!(sender.try_send(1), TrySendResult::Ok));
-    ///     assert!(matches!(sender.try_send(2), TrySendResult::Full(_)));
+    ///     assert!(sender.try_send(1).is_ok());
+    ///     assert!(matches!(sender.try_send(2).unwrap_err(), TrySendErr::Full(_)));
     ///     channel.close().await;
-    ///     assert!(matches!(sender.try_send(3), TrySendResult::Closed(_)));
+    ///     assert!(matches!(sender.try_send(3).unwrap_err(), TrySendErr::Closed(_)));
     /// }
     /// ```
-    fn try_send(&self, value: T) -> TrySendResult<T>;
+    fn try_send(&self, value: T) -> Result<(), TrySendErr<T>>;
 
     /// Closes the [`channel`](AsyncChannel) associated with this sender.
     fn sender_close(&self) -> impl Future<Output = ()>;
@@ -328,7 +117,7 @@ pub trait AsyncReceiver<T> {
     ///
     /// # On close
     ///
-    /// Returns [`RecvInResult::Closed`] if the [`channel`](AsyncChannel) is closed.
+    /// Returns `Err(`[`RecvErr::Closed`]`)` if the [`channel`](AsyncChannel) is closed.
     ///
     /// # Attention
     ///
@@ -344,7 +133,7 @@ pub trait AsyncReceiver<T> {
     ///
     /// ```rust
     /// use std::ptr::drop_in_place;
-    /// use orengine::sync::{AsyncReceiver, RecvInResult};
+    /// use orengine::sync::AsyncReceiver;
     ///
     /// # type Payload = i32;
     ///
@@ -359,25 +148,28 @@ pub trait AsyncReceiver<T> {
     ///     loop {
     ///         // SAFETY: previous value is dropped or absent
     ///         match unsafe { receiver.recv_in_ptr(msg.as_mut_ptr()) }.await {
-    ///             RecvInResult::Ok => {
+    ///             Ok(()) => {
     ///                 process_msg(unsafe { msg.assume_init_ref() });
     ///                 // SAFETY: value exists
     ///                 unsafe { drop_in_place(msg.as_mut_ptr()) };
     ///             }
-    ///             RecvInResult::Closed => return
+    ///             Err(_) => return // closed
     ///         }
     ///     }
     /// }
     /// ```
-    unsafe fn recv_in_ptr(&self, slot: *mut T) -> impl Future<Output = RecvInResult>;
+    unsafe fn recv_in_ptr(&self, slot: *mut T) -> impl Future<Output = Result<(), RecvErr>>;
 
     /// Tries to receive a value from the [`channel`](AsyncChannel) to the provided `slot`.
     ///
-    /// If the [`channel`](AsyncChannel) is empty, the receiver returns [`TryRecvInResult::Empty`].
+    /// If the [`channel`](AsyncChannel) is empty, the receiver
+    /// returns `Err(`[`TryRecvErr::Empty`]`)`.
     ///
-    /// If the [`channel`](AsyncChannel) is locked, the receiver returns [`TryRecvInResult::Locked`].
+    /// If the [`channel`](AsyncChannel) is locked, the receiver
+    /// returns `Err(`[`TryRecvErr::Locked`]`)`.
     ///
-    /// If the [`channel`](AsyncChannel) is closed, the receiver returns [`TryRecvInResult::Closed`].
+    /// If the [`channel`](AsyncChannel) is closed, the receiver
+    /// returns `Err(`[`TryRecvErr::Closed`]`)`.
     ///
     /// Else, the value is immediately received.
     ///
@@ -399,7 +191,7 @@ pub trait AsyncReceiver<T> {
     ///
     /// ```rust
     /// use std::ptr::drop_in_place;
-    /// use orengine::sync::{AsyncReceiver, TryRecvInResult};
+    /// use orengine::sync::{AsyncReceiver, TryRecvErr};
     ///
     /// # type Payload = i32;
     ///
@@ -415,21 +207,21 @@ pub trait AsyncReceiver<T> {
     ///     loop {
     ///         // SAFETY: previous value is dropped or absent
     ///         match unsafe { receiver.try_recv_in_ptr(msg.as_mut_ptr()) } {
-    ///             TryRecvInResult::Ok => {
+    ///             Ok(()) => {
     ///                 process_msg(unsafe { msg.assume_init_ref() });
     ///                 // SAFETY: value exists
     ///                 unsafe { drop_in_place(msg.as_mut_ptr()) };
     ///                 processed += 1;
     ///             }
-    ///             TryRecvInResult::Empty | TryRecvInResult::Locked => {
-    ///                 return Ok(processed);
-    ///             },
-    ///             TryRecvInResult::Closed => return Err(())
+    ///             Err(e) => return match e {
+    ///                 TryRecvErr::Empty | TryRecvErr::Locked => Ok(processed),
+    ///                 TryRecvErr::Closed => Err(())
+    ///             }
     ///         }
     ///     }
     /// }
     /// ```
-    unsafe fn try_recv_in_ptr(&self, slot: *mut T) -> TryRecvInResult;
+    unsafe fn try_recv_in_ptr(&self, slot: *mut T) -> Result<(), TryRecvErr>;
 
     /// Asynchronously receives a value from the [`channel`](AsyncChannel) to the provided `slot`.
     ///
@@ -440,7 +232,7 @@ pub trait AsyncReceiver<T> {
     ///
     /// # On close
     ///
-    /// Returns [`RecvInResult::Closed`] if the [`channel`](AsyncChannel) is closed.
+    /// Returns `Err(`[`RecvErr::Closed`]`)` if the [`channel`](AsyncChannel) is closed.
     ///
     /// # Attention
     ///
@@ -449,7 +241,7 @@ pub trait AsyncReceiver<T> {
     /// # Example
     ///
     /// ```rust
-    /// use orengine::sync::{AsyncReceiver, RecvInResult, RecvResult};
+    /// use orengine::sync::{AsyncReceiver, RecvErr};
     ///
     /// # type Payload = i32;
     ///
@@ -460,25 +252,25 @@ pub trait AsyncReceiver<T> {
     ///
     /// async fn handle_messages<R: AsyncReceiver<Msg>>(receiver: R) {
     ///     let mut msg = match receiver.recv().await {
-    ///         RecvResult::Ok(msg) => {
+    ///         Ok(msg) => {
     ///             process_msg(&msg);
     ///             msg
     ///         },
-    ///         RecvResult::Closed => return
+    ///         Err(_) => return // closed
     ///     };
     ///
     ///     loop {
     ///         match receiver.recv_in(&mut msg).await {
-    ///             RecvInResult::Ok => {
+    ///             Ok(()) => {
     ///                 process_msg(&msg);
     ///             }
-    ///             RecvInResult::Closed => return
+    ///             Err(_) => return // closed
     ///         }
     ///     }
     /// }
     /// ```
     #[inline]
-    fn recv_in(&self, slot: &mut T) -> impl Future<Output = RecvInResult> {
+    fn recv_in(&self, slot: &mut T) -> impl Future<Output = Result<(), RecvErr>> {
         unsafe {
             drop_in_place(slot);
 
@@ -488,11 +280,14 @@ pub trait AsyncReceiver<T> {
 
     /// Tries to receive a value from the [`channel`](AsyncChannel) to the provided `slot`.
     ///
-    /// If the [`channel`](AsyncChannel) is empty, returns [`TryRecvInResult::Empty`].
+    /// If the [`channel`](AsyncChannel) is empty,
+    /// returns `Err(`[`TryRecvErr::Empty`]`)`.
     ///
-    /// If the [`channel`](AsyncChannel) is locked, returns [`TryRecvInResult::Locked`].
+    /// If the [`channel`](AsyncChannel) is locked,
+    /// returns `Err(`[`TryRecvErr::Locked`]`)`.
     ///
-    /// If the [`channel`](AsyncChannel) is closed, returns [`TryRecvInResult::Closed`].
+    /// If the [`channel`](AsyncChannel) is closed,
+    /// returns `Err(`[`TryRecvErr::Closed`]`)`.
     ///
     /// Else, the value is immediately received.
     ///
@@ -508,7 +303,7 @@ pub trait AsyncReceiver<T> {
     ///
     /// ```rust
     /// use std::ptr::drop_in_place;
-    /// use orengine::sync::{AsyncReceiver, TryRecvInResult, TryRecvResult};
+    /// use orengine::sync::{AsyncReceiver, TryRecvErr};
     ///
     /// # type Payload = i32;
     ///
@@ -519,31 +314,33 @@ pub trait AsyncReceiver<T> {
     ///
     /// async fn handle_new_messages<R: AsyncReceiver<Msg>>(receiver: R) -> Result<usize, ()> {
     ///     let mut msg = match receiver.try_recv() {
-    ///         TryRecvResult::Ok(msg) => {
+    ///         Ok(msg) => {
     ///             process_msg(&msg);
     ///             msg
     ///         },
-    ///         TryRecvResult::Empty | TryRecvResult::Locked => return Ok(0),
-    ///         TryRecvResult::Closed => return Err(())
+    ///         Err(e) => return match e {
+    ///             TryRecvErr::Empty | TryRecvErr::Locked => Ok(0),
+    ///             TryRecvErr::Closed => Err(())
+    ///         }
     ///     };
     ///     let mut processed = 1;
     ///
     ///     loop {
     ///         match receiver.try_recv_in(&mut msg) {
-    ///             TryRecvInResult::Ok => {
+    ///             Ok(()) => {
     ///                 process_msg(&msg);
     ///                 processed += 1;
     ///             }
-    ///             TryRecvInResult::Empty | TryRecvInResult::Locked => {
-    ///                 return Ok(processed);
-    ///             },
-    ///             TryRecvInResult::Closed => return Err(())
+    ///             Err(e) => return match e {
+    ///                 TryRecvErr::Empty | TryRecvErr::Locked => Ok(processed),
+    ///                 TryRecvErr::Closed => Err(())
+    ///             }
     ///         }
     ///     }
     /// }
     /// ```
     #[inline]
-    fn try_recv_in(&self, slot: &mut T) -> TryRecvInResult {
+    fn try_recv_in(&self, slot: &mut T) -> Result<(), TryRecvErr> {
         unsafe {
             drop_in_place(slot);
 
@@ -553,18 +350,21 @@ pub trait AsyncReceiver<T> {
 
     /// Asynchronously receives a value from the [`channel`](AsyncChannel).
     ///
-    /// If the [`channel`](AsyncChannel) is empty, returns [`TryRecvInResult::Empty`].
+    /// If the [`channel`](AsyncChannel) is empty,
+    /// returns `Err(`[`TryRecvErr::Empty`]`)`.
     ///
-    /// If the [`channel`](AsyncChannel) is locked, returns [`TryRecvInResult::Locked`].
+    /// If the [`channel`](AsyncChannel) is locked,
+    /// returns `Err(`[`TryRecvErr::Locked`]`)`.
     ///
-    /// If the [`channel`](AsyncChannel) is closed, returns [`TryRecvInResult::Closed`].
+    /// If the [`channel`](AsyncChannel) is closed,
+    /// returns `Err(`[`TryRecvErr::Closed`]`)`.
     ///
     /// Else, the value is immediately received.
     ///
     /// # Example
     ///
     /// ```rust
-    /// use orengine::sync::{AsyncReceiver, TryRecvResult};
+    /// use orengine::sync::{AsyncReceiver, TryRecvErr};
     ///
     /// # type Payload = i32;
     ///
@@ -578,26 +378,26 @@ pub trait AsyncReceiver<T> {
     ///
     ///     loop {
     ///         match receiver.try_recv() {
-    ///             TryRecvResult::Ok(msg) => {
+    ///             Ok(msg) => {
     ///                 process_msg(&msg);
     ///                 processed += 1;
     ///             },
-    ///             TryRecvResult::Empty | TryRecvResult::Locked => {
-    ///                 return Ok(processed);
-    ///             },
-    ///             TryRecvResult::Closed => return Err(())
+    ///             Err(e) => return match e {
+    ///                 TryRecvErr::Empty | TryRecvErr::Locked => Ok(processed),
+    ///                 TryRecvErr::Closed => Err(())
+    ///             }
     ///         }
     ///     }
     /// }
     /// ```
     #[inline]
-    fn recv(&self) -> impl Future<Output = RecvResult<T>> {
+    fn recv(&self) -> impl Future<Output = Result<T, RecvErr>> {
         async {
             let mut slot = MaybeUninit::uninit();
             unsafe {
                 match self.recv_in_ptr(slot.as_mut_ptr()).await {
-                    RecvInResult::Ok => RecvResult::Ok(slot.assume_init()),
-                    RecvInResult::Closed => RecvResult::Closed,
+                    Ok(()) => Ok(slot.assume_init()),
+                    Err(_) => Err(RecvErr::Closed),
                 }
             }
         }
@@ -605,18 +405,21 @@ pub trait AsyncReceiver<T> {
 
     /// Tries to receive a value from the [`channel`](AsyncChannel).
     ///
-    /// If the [`channel`](AsyncChannel) is empty, returns [`TryRecvInResult::Empty`].
+    /// If the [`channel`](AsyncChannel) is empty,
+    /// returns `Err(`[`TryRecvErr::Empty`]`)`.
     ///
-    /// If the [`channel`](AsyncChannel) is locked, returns [`TryRecvInResult::Locked`].
+    /// If the [`channel`](AsyncChannel) is locked,
+    /// returns `Err(`[`TryRecvErr::Locked`]`)`.
     ///
-    /// If the [`channel`](AsyncChannel) is closed, returns [`TryRecvInResult::Closed`].
+    /// If the [`channel`](AsyncChannel) is closed,
+    /// returns `Err(`[`TryRecvErr::Closed`]`)`.
     ///
     /// Else, the value is immediately received.
     ///
     /// # Example
     ///
     /// ```rust
-    /// use orengine::sync::{AsyncReceiver, RecvResult};
+    /// use orengine::sync::{AsyncReceiver, RecvErr};
     ///
     /// # type Payload = i32;
     ///
@@ -628,23 +431,21 @@ pub trait AsyncReceiver<T> {
     /// async fn handle_messages<R: AsyncReceiver<Msg>>(receiver: R) {
     ///     loop {
     ///         match receiver.recv().await {
-    ///             RecvResult::Ok(msg) => {
+    ///             Ok(msg) => {
     ///                 process_msg(&msg);
     ///             }
-    ///             RecvResult::Closed => return
+    ///             Err(_) => return // closed
     ///         }
     ///     }
     /// }
     /// ```
     #[inline]
-    fn try_recv(&self) -> TryRecvResult<T> {
+    fn try_recv(&self) -> Result<T, TryRecvErr> {
         let mut slot = MaybeUninit::uninit();
         unsafe {
             match self.try_recv_in_ptr(slot.as_mut_ptr()) {
-                TryRecvInResult::Ok => TryRecvResult::Ok(slot.assume_init()),
-                TryRecvInResult::Empty => TryRecvResult::Empty,
-                TryRecvInResult::Locked => TryRecvResult::Locked,
-                TryRecvInResult::Closed => TryRecvResult::Closed,
+                Ok(()) => Ok(slot.assume_init()),
+                Err(e) => Err(e),
             }
         }
     }

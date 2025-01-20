@@ -1,5 +1,6 @@
 pub use channels::{
     async_trait::*,
+    errors::*,
     local::{LocalChannel, LocalReceiver, LocalSender},
     shared::{Channel, Receiver, Sender},
 };

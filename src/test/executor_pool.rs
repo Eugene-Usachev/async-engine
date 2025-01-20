@@ -2,7 +2,7 @@
 //! [`sched_future_to_another_thread`] or [`sched_future`](ExecutorPool::sched_future).
 use crate::bug_message::BUG_MESSAGE;
 use crate::runtime::Config;
-use crate::sync::{AsyncChannel, AsyncReceiver, AsyncSender, Channel, RecvResult, SendResult};
+use crate::sync::{AsyncChannel, AsyncReceiver, AsyncSender, Channel};
 use crate::{local_executor, Executor};
 use crossbeam::queue::SegQueue;
 use std::future::Future;
@@ -73,7 +73,7 @@ impl Future for Job {
                             sender,
                         })
                         .await;
-                    assert!(matches!(send_res, SendResult::Ok), "{BUG_MESSAGE}");
+                    assert!(send_res.is_ok(), "{BUG_MESSAGE}");
                 });
 
                 return Poll::Ready(());
@@ -90,7 +90,7 @@ impl Future for Job {
                         sender,
                     })
                     .await;
-                assert!(matches!(send_res, SendResult::Ok), "{BUG_MESSAGE}");
+                assert!(send_res.is_ok(), "{BUG_MESSAGE}");
             });
 
             Poll::Ready(())
@@ -191,7 +191,7 @@ impl ExecutorPool {
         thread::spawn(move || {
             let ex = Executor::init_with_config(executor_pool_cfg());
             ex.run_and_block_on_shared(async move {
-                while let RecvResult::Ok(job) = channel_clone.recv().await {
+                while let Ok(job) = channel_clone.recv().await {
                     job.await;
                 }
             })
@@ -259,7 +259,7 @@ impl ExecutorPool {
         let send_res = sender
             .send(Job::new(future, sender.clone(), result_channel.clone()))
             .await;
-        assert!(matches!(send_res, SendResult::Ok), "{BUG_MESSAGE}");
+        assert!(send_res.is_ok(), "{BUG_MESSAGE}");
 
         ExecutorPoolJoinHandle::new(result_channel, &EXECUTOR_POOL)
     }

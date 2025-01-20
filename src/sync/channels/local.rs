@@ -3,8 +3,7 @@ use crate::runtime::local_executor;
 use crate::sync::channels::pools::{channel_inner_vec_deque_pool, DequesPoolGuard};
 use crate::sync::channels::states::{RecvCallState, SendCallState};
 use crate::sync::{
-    AsyncChannel, AsyncReceiver, AsyncSender, RecvInResult, SendResult, TryRecvInResult,
-    TrySendResult,
+    AsyncChannel, AsyncReceiver, AsyncSender, RecvErr, SendErr, TryRecvErr, TrySendErr,
 };
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
@@ -58,7 +57,7 @@ impl<'future, T> WaitLocalSend<'future, T> {
 }
 
 impl<T> Future for WaitLocalSend<'_, T> {
-    type Output = SendResult<T>;
+    type Output = Result<(), SendErr<T>>;
 
     #[inline]
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -71,9 +70,9 @@ impl<T> Future for WaitLocalSend<'_, T> {
         match this.call_state {
             SendCallState::FirstCall => {
                 if this.inner.is_closed {
-                    return Poll::Ready(SendResult::Closed(unsafe {
+                    return Poll::Ready(Err(SendErr::Closed(unsafe {
                         ManuallyDrop::take(&mut this.value)
-                    }));
+                    })));
                 }
 
                 if !this.inner.deques.receivers.is_empty() {
@@ -84,7 +83,7 @@ impl<T> Future for WaitLocalSend<'_, T> {
                         call_state.write(RecvCallState::WokenToReturnReady);
                     };
                     local_executor().exec_task(task);
-                    return Poll::Ready(SendResult::Ok);
+                    return Poll::Ready(Ok(()));
                 }
 
                 let len = this.inner.storage.len();
@@ -103,12 +102,12 @@ impl<T> Future for WaitLocalSend<'_, T> {
                         .storage
                         .push_back(ManuallyDrop::take(&mut this.value));
                 }
-                Poll::Ready(SendResult::Ok)
+                Poll::Ready(Ok(()))
             }
-            SendCallState::WokenToReturnReady => Poll::Ready(SendResult::Ok),
-            SendCallState::WokenByClose => Poll::Ready(SendResult::Closed(unsafe {
+            SendCallState::WokenToReturnReady => Poll::Ready(Ok(())),
+            SendCallState::WokenByClose => Poll::Ready(Err(SendErr::Closed(unsafe {
                 ManuallyDrop::take(&mut this.value)
-            })),
+            }))),
         }
     }
 }
@@ -148,7 +147,7 @@ impl<'future, T> WaitLocalRecv<'future, T> {
 }
 
 impl<T> Future for WaitLocalRecv<'_, T> {
-    type Output = RecvInResult;
+    type Output = Result<(), RecvErr>;
 
     #[inline]
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -157,7 +156,7 @@ impl<T> Future for WaitLocalRecv<'_, T> {
         match this.call_state {
             RecvCallState::FirstCall => {
                 if this.inner.is_closed {
-                    return Poll::Ready(RecvInResult::Closed);
+                    return Poll::Ready(Err(RecvErr::Closed));
                 }
 
                 let l = this.inner.storage.len();
@@ -169,7 +168,7 @@ impl<T> Future for WaitLocalRecv<'_, T> {
                             ptr::copy_nonoverlapping(value_ptr, this.slot, 1);
                             local_executor().exec_task(task);
 
-                            return Poll::Ready(RecvInResult::Ok);
+                            return Poll::Ready(Ok(()));
                         }
                     }
 
@@ -195,12 +194,12 @@ impl<T> Future for WaitLocalRecv<'_, T> {
                     }
                 }
 
-                Poll::Ready(RecvInResult::Ok)
+                Poll::Ready(Ok(()))
             }
 
-            RecvCallState::WokenToReturnReady => Poll::Ready(RecvInResult::Ok),
+            RecvCallState::WokenToReturnReady => Poll::Ready(Ok(())),
 
-            RecvCallState::WokenByClose => Poll::Ready(RecvInResult::Closed),
+            RecvCallState::WokenByClose => Poll::Ready(Err(RecvErr::Closed)),
         }
     }
 }
@@ -230,10 +229,10 @@ fn close<T>(inner: &mut Inner<T>) {
 
 macro_rules! generate_try_send {
     () => {
-        fn try_send(&self, value: T) -> TrySendResult<T> {
+        fn try_send(&self, value: T) -> Result<(), TrySendErr<T>> {
             let inner = unsafe { &mut *self.inner.get() };
             if inner.is_closed {
-                return TrySendResult::Closed(value);
+                return Err(TrySendErr::Closed(value));
             }
 
             if let Some((task, call_state, slot)) = inner.deques.receivers.pop_front() {
@@ -242,17 +241,17 @@ macro_rules! generate_try_send {
                     call_state.write(RecvCallState::WokenToReturnReady);
                 };
                 local_executor().exec_task(task);
-                return TrySendResult::Ok;
+                return Ok(());
             }
 
             let len = inner.storage.len();
             if len >= inner.capacity {
-                return TrySendResult::Full(value);
+                return Err(TrySendErr::Full(value));
             }
 
             inner.storage.push_back(value);
 
-            TrySendResult::Ok
+            Ok(())
         }
     };
 }
@@ -299,7 +298,7 @@ impl<'channel, T> LocalSender<'channel, T> {
 
 impl<T> AsyncSender<T> for LocalSender<'_, T> {
     #[allow(clippy::future_not_send, reason = "Because it is `local`")]
-    fn send(&self, value: T) -> impl Future<Output = SendResult<T>> {
+    fn send(&self, value: T) -> impl Future<Output = Result<(), SendErr<T>>> {
         WaitLocalSend::new(value, unsafe { &mut *self.inner.get() })
     }
 
@@ -355,10 +354,10 @@ pub struct LocalReceiver<'channel, T> {
 
 macro_rules! generate_try_recv_in_ptr {
     () => {
-        unsafe fn try_recv_in_ptr(&self, slot: *mut T) -> TryRecvInResult {
+        unsafe fn try_recv_in_ptr(&self, slot: *mut T) -> Result<(), TryRecvErr> {
             let inner = unsafe { &mut *self.inner.get() };
             if inner.is_closed {
-                return TryRecvInResult::Closed;
+                return Err(TryRecvErr::Closed);
             }
 
             let l = inner.storage.len();
@@ -370,11 +369,11 @@ macro_rules! generate_try_recv_in_ptr {
                         ptr::copy_nonoverlapping(value_ptr, slot, 1);
                         local_executor().exec_task(task);
 
-                        return TryRecvInResult::Ok;
+                        return Ok(());
                     }
                 }
 
-                return TryRecvInResult::Empty;
+                return Err(TryRecvErr::Empty);
             }
 
             unsafe {
@@ -390,7 +389,7 @@ macro_rules! generate_try_recv_in_ptr {
                 }
             }
 
-            TryRecvInResult::Ok
+            Ok(())
         }
     };
 }
@@ -408,7 +407,7 @@ impl<'channel, T> LocalReceiver<'channel, T> {
 
 impl<T> AsyncReceiver<T> for LocalReceiver<'_, T> {
     #[allow(clippy::future_not_send, reason = "Because it is `local`")]
-    unsafe fn recv_in_ptr(&self, slot: *mut T) -> impl Future<Output = RecvInResult> {
+    unsafe fn recv_in_ptr(&self, slot: *mut T) -> impl Future<Output = Result<(), RecvErr>> {
         WaitLocalRecv::new(unsafe { &mut *self.inner.get() }, slot)
     }
 
@@ -543,7 +542,7 @@ impl<T> AsyncChannel<T> for LocalChannel<T> {
 
 impl<T> AsyncReceiver<T> for LocalChannel<T> {
     #[allow(clippy::future_not_send, reason = "Because it is `local`")]
-    unsafe fn recv_in_ptr(&self, slot: *mut T) -> impl Future<Output = RecvInResult> {
+    unsafe fn recv_in_ptr(&self, slot: *mut T) -> impl Future<Output = Result<(), RecvErr>> {
         WaitLocalRecv::new(unsafe { &mut *self.inner.get() }, slot)
     }
 
@@ -557,7 +556,7 @@ impl<T> AsyncReceiver<T> for LocalChannel<T> {
 
 impl<T> AsyncSender<T> for LocalChannel<T> {
     #[allow(clippy::future_not_send, reason = "Because it is `local`")]
-    fn send(&self, value: T) -> impl Future<Output = SendResult<T>> {
+    fn send(&self, value: T) -> impl Future<Output = Result<(), SendErr<T>>> {
         WaitLocalSend::new(value, unsafe { &mut *self.inner.get() })
     }
 
@@ -647,7 +646,7 @@ fn test_compile_local_channel() {}
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::sync::{local_scope, RecvResult, TryRecvResult};
+    use crate::sync::{local_scope, RecvErr, TryRecvErr};
     use crate::utils::droppable_element::DroppableElement;
     use crate::utils::SpinLock;
     use crate::{yield_now, Local};
@@ -673,9 +672,8 @@ mod tests {
             let res = ch.recv().await.unwrap();
             assert_eq!(res, 2);
 
-            match ch.send(2).await {
-                SendResult::Closed(value) => assert_eq!(value, 2),
-                SendResult::Ok => panic!("should be closed"),
+            match ch.send(2).await.expect_err("should be closed") {
+                SendErr::Closed(value) => assert_eq!(value, 2),
             };
         })
         .await;
@@ -707,7 +705,10 @@ mod tests {
             }
 
             assert!(
-                matches!(ch.recv().await, RecvResult::Closed),
+                matches!(
+                    ch.recv().await.expect_err("should be closed"),
+                    RecvErr::Closed
+                ),
                 "should be closed"
             );
         })
@@ -719,32 +720,26 @@ mod tests {
         let ch = LocalChannel::bounded(1);
 
         assert!(
-            matches!(ch.try_recv(), TryRecvResult::Empty),
+            matches!(
+                ch.try_recv().expect_err("should be closed"),
+                TryRecvErr::Empty
+            ),
             "should be empty"
         );
+        assert!(ch.try_send(1).is_ok(), "should be empty");
         assert!(
-            matches!(ch.try_send(1), TrySendResult::Ok),
-            "should be empty"
-        );
-        assert!(
-            matches!(ch.try_recv(), TryRecvResult::Ok(1)),
+            matches!(ch.try_recv().expect("should be not empty"), 1),
             "should be not empty"
         );
-        assert!(
-            matches!(ch.try_send(2), TrySendResult::Ok),
-            "should be empty"
-        );
-        match ch.try_send(3) {
-            TrySendResult::Ok => {
-                panic!("should be full")
-            }
-            TrySendResult::Full(value) => {
+        assert!(ch.try_send(2).is_ok(), "should be empty");
+        match ch.try_send(3).expect_err("should be full") {
+            TrySendErr::Full(value) => {
                 assert_eq!(value, 3);
             }
-            TrySendResult::Locked(_) => {
+            TrySendErr::Locked(_) => {
                 panic!("unreachable")
             }
-            TrySendResult::Closed(_) => {
+            TrySendErr::Closed(_) => {
                 panic!("should not be closed")
             }
         }
@@ -752,20 +747,20 @@ mod tests {
         ch.close().await;
 
         assert!(
-            matches!(ch.try_recv(), TryRecvResult::Closed),
+            matches!(
+                ch.try_recv().expect_err("should be closed"),
+                TryRecvErr::Closed
+            ),
             "should be closed"
         );
-        match ch.try_send(4) {
-            TrySendResult::Ok => {
-                panic!("should be not empty")
-            }
-            TrySendResult::Full(_) => {
+        match ch.try_send(4).expect_err("should be closed") {
+            TrySendErr::Full(_) => {
                 panic!("should be not full")
             }
-            TrySendResult::Locked(_) => {
+            TrySendErr::Locked(_) => {
                 panic!("unreachable")
             }
-            TrySendResult::Closed(value) => {
+            TrySendErr::Closed(value) => {
                 assert_eq!(value, 4);
             }
         }
@@ -800,7 +795,10 @@ mod tests {
             }
 
             assert!(
-                matches!(ch.recv().await, RecvResult::Closed),
+                matches!(
+                    ch.recv().await.expect_err("should be closed"),
+                    RecvErr::Closed
+                ),
                 "should be closed"
             );
         })
@@ -923,12 +921,12 @@ mod tests {
         match channel
             .send(DroppableElement::new(5, dropped.clone()))
             .await
+            .expect_err("should be closed")
         {
-            SendResult::Closed(elem) => {
+            SendErr::Closed(elem) => {
                 assert_eq!(elem.value, 5);
                 assert_eq!(dropped.lock().as_slice(), [2]);
             }
-            SendResult::Ok => panic!("should be closed"),
         }
         assert_eq!(dropped.lock().as_slice(), [2, 5]);
     }
@@ -954,12 +952,12 @@ mod tests {
         match channel
             .send(DroppableElement::new(5, dropped.clone()))
             .await
+            .expect_err("should be closed")
         {
-            SendResult::Closed(elem) => {
+            SendErr::Closed(elem) => {
                 assert_eq!(elem.value, 5);
                 assert_eq!(dropped.lock().as_slice(), [2]);
             }
-            SendResult::Ok => panic!("should be closed"),
         }
         assert_eq!(dropped.lock().as_slice(), [2, 5]);
     }
@@ -979,11 +977,13 @@ mod tests {
                             for j in 0..COUNT {
                                 loop {
                                     match channel.try_send(j) {
-                                        TrySendResult::Ok => break,
-                                        TrySendResult::Full(_) | TrySendResult::Locked(_) => {
-                                            yield_now().await;
-                                        }
-                                        TrySendResult::Closed(_) => panic!("send failed"),
+                                        Ok(()) => break,
+                                        Err(e) => match e {
+                                            TrySendErr::Full(_) | TrySendErr::Locked(_) => {
+                                                yield_now().await;
+                                            }
+                                            TrySendErr::Closed(_) => panic!("send failed"),
+                                        },
                                     }
                                 }
                             }
@@ -999,14 +999,16 @@ mod tests {
                             for _ in 0..COUNT {
                                 loop {
                                     match channel.try_recv() {
-                                        TryRecvResult::Ok(v) => {
+                                        Ok(v) => {
                                             *res.borrow_mut() += v;
                                             break;
                                         }
-                                        TryRecvResult::Empty | TryRecvResult::Locked => {
-                                            yield_now().await;
-                                        }
-                                        TryRecvResult::Closed => panic!("recv failed"),
+                                        Err(e) => match e {
+                                            TryRecvErr::Empty | TryRecvErr::Locked => {
+                                                yield_now().await;
+                                            }
+                                            TryRecvErr::Closed => panic!("recv failed"),
+                                        },
                                     }
                                 }
                             }

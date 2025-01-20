@@ -394,14 +394,13 @@ mod tests {
     #[orengine::test::test_local]
     fn test_unix_timeout() {
         const ADDR: &str = "/tmp/orengine_test_unix_timeout";
-
-        let _ = fs::remove_file(ADDR).await;
-
         const SEND: usize = 0;
         const POLL: usize = 1;
         const RECV: usize = 2;
         const PEEK: usize = 3;
         const TIMEOUT: Duration = Duration::from_millis(100);
+
+        let _ = fs::remove_file(ADDR).await;
 
         let state = Rc::new(LocalMutex::new(SEND));
         let state_cond_var = Rc::new(LocalCondVar::new());

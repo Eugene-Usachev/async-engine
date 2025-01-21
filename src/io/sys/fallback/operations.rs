@@ -72,7 +72,10 @@ pub(crate) fn accept_op(
     with_socket(raw_listener, |listener| {
         listener.accept_raw().map(|(socket, addr)| {
             socket.set_nonblocking(true).unwrap();
-            socket.set_cloexec(true).unwrap();
+            #[cfg(unix)]
+            {
+                socket.set_cloexec(true).unwrap();
+            }
 
             #[allow(
                 clippy::cast_ptr_alignment,

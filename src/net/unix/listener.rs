@@ -1,9 +1,7 @@
 //! This module contains [`UnixListener`].
-use socket2::{SockAddr, SockRef};
+use socket2::SockRef;
 use std::ffi::c_int;
 use std::fmt::{Debug, Formatter};
-use std::io;
-use std::io::ErrorKind::InvalidInput;
 use std::io::Result;
 use std::mem::ManuallyDrop;
 
@@ -112,10 +110,7 @@ impl AsyncBind for UnixListener {
         addr: Self::Addr,
         config: &BindConfig,
     ) -> Result<()> {
-        sock_ref
-            .bind(&SockAddr::unix(addr.as_pathname().ok_or_else(|| {
-                io::Error::new(InvalidInput, "Invalid address.")
-            })?)?)?;
+        sock_ref.bind(addr.as_ref())?;
         #[allow(clippy::cast_possible_truncation, reason = "we have to cast it")]
         sock_ref.listen(config.backlog_size as c_int)?;
 
@@ -176,6 +171,7 @@ mod tests {
     use super::*;
     use crate as orengine;
     use crate::fs;
+    use std::io;
     use std::time::Duration;
 
     #[orengine::test::test_local]

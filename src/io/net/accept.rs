@@ -185,7 +185,7 @@ unsafe impl<S: FromRawSocket> Send for AcceptWithDeadline<S> {}
 pub trait AsyncAccept<S: Stream>: Socket {
     /// Asynchronously accepts a new incoming connection.
     ///
-    /// This method listens for and accepts a new connection from a remote client. It returns the
+    /// This method accepts a new connection from a remote client. It returns the
     /// stream (`S`) and the remote socket address once a connection is successfully
     /// established.
     ///

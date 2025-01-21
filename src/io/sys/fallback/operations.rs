@@ -70,8 +70,9 @@ pub(crate) fn accept_op(
     sockaddr_len_ptr: *mut sys::socklen_t,
 ) -> io::Result<usize> {
     with_socket(raw_listener, |listener| {
-        listener.accept().map(|(socket, addr)| {
+        listener.accept_raw().map(|(socket, addr)| {
             socket.set_nonblocking(true).unwrap();
+            socket.set_cloexec(true).unwrap();
 
             #[allow(
                 clippy::cast_ptr_alignment,

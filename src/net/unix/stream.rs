@@ -165,7 +165,7 @@ mod tests {
         buffer, get_fixed_buffer, AsyncAccept, AsyncBind, AsyncConnectStream, AsyncPeek,
         AsyncPollSocket, AsyncRecv, AsyncSend, FixedBuffer,
     };
-    use crate::net::{BindConfig, UnixListener, UnixStream};
+    use crate::net::{UnixListener, UnixStream};
     use crate::sync::{
         AsyncCondVar, AsyncMutex, AsyncWaitGroup, LocalCondVar, LocalMutex, LocalWaitGroup,
     };
@@ -392,8 +392,8 @@ mod tests {
     }
 
     #[orengine::test::test_local]
-    fn test_unix_timeout() {
-        const ADDR: &str = "/tmp/orengine_test_unix_timeout";
+    fn test_unix_stream_timeout() {
+        const ADDR: &str = "/tmp/orengine_test_unix_stream_timeout";
         const SEND: usize = 0;
         const POLL: usize = 1;
         const RECV: usize = 2;
@@ -411,20 +411,18 @@ mod tests {
         let wg_clone = wg.clone();
 
         local_executor().spawn_local(async move {
-            let mut listener = UnixListener::bind_with_config(ADDR, &BindConfig::new())
-                .await
-                .expect("bind failed");
+            let mut listener = UnixListener::bind(ADDR).await.expect("bind failed");
             let mut expected_state = 0;
 
             wg_clone.done();
 
             loop {
-                let mut guard = state_clone.lock().await;
-                while *guard != expected_state {
-                    guard = state_cond_var_clone.wait(guard).await;
+                {
+                    let mut guard = state_clone.lock().await;
+                    while *guard != expected_state {
+                        guard = state_cond_var_clone.wait(guard).await;
+                    }
                 }
-
-                drop(guard);
 
                 match expected_state {
                     SEND => {

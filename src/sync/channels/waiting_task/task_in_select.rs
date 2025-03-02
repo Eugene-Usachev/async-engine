@@ -3,7 +3,7 @@
 use crate::runtime::Task;
 use crate::utils::defer;
 use crate::utils::hints::unreachable_hint;
-use std::cell::{Cell, UnsafeCell};
+use std::cell::UnsafeCell;
 use std::hint::spin_loop;
 use std::ptr;
 use std::ptr::NonNull;
@@ -39,7 +39,7 @@ impl TaskInSelect {
     pub fn acquire_for_task_with_lock(
         task: Task,
         resolved_branch_id: NonNull<usize>,
-    ) -> NonNull<TaskInSelect> {
+    ) -> NonNull<Self> {
         #[cfg(not(debug_assertions))]
         {
             task_in_select_pool().acquire_for_task(task, resolved_branch_id)
@@ -109,11 +109,10 @@ pub(crate) enum PopIfAcquiredResult {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct TaskInSelectBranch {
     inner_ptr: NonNull<TaskInSelect>,
     associated_branch_id: usize,
-    #[cfg(debug_assertions)]
-    was_dropped: Cell<bool>,
 }
 
 impl TaskInSelectBranch {
@@ -128,8 +127,6 @@ impl TaskInSelectBranch {
         TaskInSelectBranch {
             inner_ptr: task_in_select,
             associated_branch_id,
-            #[cfg(debug_assertions)]
-            was_dropped: Cell::new(false),
         }
     }
 
@@ -142,8 +139,6 @@ impl TaskInSelectBranch {
         TaskInSelectBranch {
             inner_ptr: task_in_select,
             associated_branch_id,
-            #[cfg(debug_assertions)]
-            was_dropped: Cell::new(false),
         }
     }
 
@@ -476,39 +471,11 @@ impl TaskInSelectBranch {
     }
 
     fn drop_ptr(&self) {
-        debug_assert!(
-            !self.was_dropped.get(),
-            "`TaskInSelect` or was dropped twice."
-        );
-
-        #[cfg(debug_assertions)]
-        {
-            self.was_dropped.set(true);
-        }
-
         unsafe { self.inner_ptr.as_ref() }.drop_ptr();
     }
 
     unsafe fn drop_ptr_local(&mut self) {
-        debug_assert!(!self.was_dropped.get(), "`TaskInSelect` was dropped twice.");
-
-        #[cfg(debug_assertions)]
-        {
-            self.was_dropped.set(true);
-        }
-
         unsafe { self.inner_ptr.as_mut().drop_ptr_local() };
-    }
-}
-
-#[cfg(debug_assertions)]
-impl Drop for TaskInSelectBranch {
-    fn drop(&mut self) {
-        debug_assert!(
-            self.was_dropped.get(),
-            "`TaskInSelectBranch` was not dropped with `TaskInSelectBranch::drop_ptr` \
-            or with `TaskInSelectBranch::drop_ptr_local`."
-        );
     }
 }
 

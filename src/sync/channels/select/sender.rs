@@ -35,3 +35,17 @@ pub trait SelectSender: AsyncSender<Self::Data> {
         is_all_local: bool,
     ) -> SelectNonBlockingBranchResult;
 }
+
+impl<G: SelectSender, T: std::ops::Deref<Target = G> + AsyncSender<G::Data>> SelectSender for T {
+    type Data = G::Data;
+
+    fn send_or_subscribe(
+        &self,
+        data: NonNull<Self::Data>,
+        state: PtrToCallState,
+        task_in_select_branch: TaskInSelectBranch,
+        is_all_local: bool,
+    ) -> SelectNonBlockingBranchResult {
+        (**self).send_or_subscribe(data, state, task_in_select_branch, is_all_local)
+    }
+}

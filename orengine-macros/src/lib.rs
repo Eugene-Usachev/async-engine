@@ -398,6 +398,7 @@ pub fn select(input: TokenStream) -> TokenStream {
                 }
 
                 // Let the compiler decide whether to inline the function or not.
+                #[allow(clippy::too_many_arguments)]
                 fn __select__<#(#select_generics),*>(#(#fn_select_args_types),*) -> __SelectReady__<#(#generics_names),*> {
                     let mut locked = [false; #branches_len];
                     let mut number_of_needed_to_retry_branches = 0;
@@ -477,7 +478,7 @@ pub fn select(input: TokenStream) -> TokenStream {
 
                     match_arms.push(quote! {
                         #idx => {
-                            let #var = if unsafe { general_state.as_recv_and_is_closed() } {
+                            let #var = if unsafe { !general_state.as_recv_and_is_closed() } {
                                 unsafe { Ok(std::mem::ManuallyDrop::take(&mut recv_slot.#variant)) }
                             } else {
                                 Err(RecvErr::Closed)
@@ -498,7 +499,7 @@ pub fn select(input: TokenStream) -> TokenStream {
                         match #receiver_name.recv_or_subscribe(
                             recv_slot.cast(),
                             general_state,
-                            unsafe { std::ptr::read(&#name_of_task_in_select_branch) },
+                            #name_of_task_in_select_branch,
                             __is_all_local
                         ) {
                             SelectNonBlockingBranchResult::Success => {
@@ -526,7 +527,7 @@ pub fn select(input: TokenStream) -> TokenStream {
                             match #receiver_name.recv_or_subscribe(
                                 recv_slot.cast(),
                                 general_state,
-                                unsafe { std::ptr::read(&#name_of_task_in_select_branch) },
+                                #name_of_task_in_select_branch,
                                 __is_all_local
                             ) {
                                 SelectNonBlockingBranchResult::Success => {
@@ -580,7 +581,7 @@ pub fn select(input: TokenStream) -> TokenStream {
 
                     match_arms.push(quote! {
                         #idx => {
-                            let #var = if unsafe { general_state.as_recv_and_is_closed() } {
+                            let #var = if unsafe { !general_state.as_recv_and_is_closed() } {
                                 Ok(())
                             } else {
                                 Err(SendErr::Closed(#var_name))
@@ -601,7 +602,7 @@ pub fn select(input: TokenStream) -> TokenStream {
                         match #sender_name.send_or_subscribe(
                             unsafe { NonNull::new_unchecked(#var_name.cast_mut()) },
                             general_state,
-                            unsafe { std::ptr::read(&#name_of_task_in_select_branch) },
+                            #name_of_task_in_select_branch,
                             __is_all_local
                         ) {
                             SelectNonBlockingBranchResult::Success => {
@@ -629,7 +630,7 @@ pub fn select(input: TokenStream) -> TokenStream {
                             match #sender_name.send_or_subscribe(
                                 unsafe { NonNull::new_unchecked(#var_name.cast_mut()) },
                                 general_state,
-                                unsafe { std::ptr::read(&#name_of_task_in_select_branch) },
+                                #name_of_task_in_select_branch,
                                 __is_all_local
                             ) {
                                 SelectNonBlockingBranchResult::Success => {
@@ -671,6 +672,7 @@ pub fn select(input: TokenStream) -> TokenStream {
                     #(#union_variants),*
                 }
 
+                #[allow(clippy::too_many_arguments)]
                 fn __select__<#(#generics),*>(
                     recv_slot: NonNull<__RecvSlot__<#(#union_generic_params),*>>,
                     resolved_branch_id: NonNull<usize>,

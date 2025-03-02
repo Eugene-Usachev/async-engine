@@ -2,7 +2,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use crate::{get_task_from_context, local_executor};
+use crate::local_executor;
+use crate::runtime::Task;
 
 /// `Yield` implements the [`Future`] trait for yielding the current task.
 ///
@@ -21,14 +22,14 @@ impl Future for Yield {
             Poll::Ready(())
         } else {
             this.was_yielded = true;
-            let task = unsafe { get_task_from_context!(cx) };
+            let task = unsafe { Task::from_context(cx) };
             if task.is_local() {
-                local_executor().add_task_at_the_start_of_lifo_local_queue(task);
+                local_executor().spawn_task_at_end_of_local_tasks_queue(task);
 
                 return Poll::Pending;
             }
 
-            local_executor().add_task_at_the_start_of_lifo_shared_queue(task);
+            local_executor().spawn_task_at_end_of_shared_tasks_queue(task);
 
             Poll::Pending
         }

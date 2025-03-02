@@ -1,3 +1,4 @@
+use crate::runtime::IsLocal;
 use crate::sync::OnceState;
 use crate::sync::{AsyncOnce, CallOnceResult};
 use std::cell::Cell;
@@ -67,6 +68,10 @@ impl LocalOnce {
 
         CallOnceResult::Called
     }
+}
+
+impl IsLocal for LocalOnce {
+    const IS_LOCAL: bool = true;
 }
 
 impl AsyncOnce for LocalOnce {

@@ -43,23 +43,11 @@ impl SyncTaskList {
     ///
     /// # Safety
     ///
-    /// - Provided task must be `shared`.
-    ///
-    /// - If called not in [`Future::poll`](std::future::Future::poll).
+    /// - Called not in [`Future::poll`](std::future::Future::poll) with current task.
     ///
     /// In [`Future::poll`](std::future::Future::poll) [`call`](crate::Executor::invoke_call)
     /// [`PushCurrentTaskTo`](crate::runtime::call::Call::PushCurrentTaskTo) instead.
-    ///
-    /// # Panics
-    ///
-    /// If provided task is `local` with `debug_assertions`,
-    /// else it is an undefined behavior.
     pub unsafe fn push(&self, task: Task) {
-        #[cfg(debug_assertions)]
-        {
-            assert!(!task.is_local());
-        }
-
         self.inner.lock().push(task);
     }
 

@@ -50,8 +50,8 @@ impl SockAddrRaw {
 /// `accept` io operation.
 #[repr(C)]
 pub struct Accept<S: FromRawSocket> {
-    raw_socket: RawSocket,
     addr: SockAddrRaw,
+    raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
     phantom_data: PhantomData<S>,
 }
@@ -101,8 +101,8 @@ unsafe impl<S: FromRawSocket> Send for Accept<S> {}
 /// `accept` io operation with deadline.
 #[repr(C)]
 pub struct AcceptWithDeadline<S: FromRawSocket> {
-    raw_socket: RawSocket,
     addr: SockAddrRaw,
+    raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
     deadline: Instant,
     pin: PhantomData<S>,

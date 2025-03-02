@@ -7,7 +7,7 @@ use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-/// `Task` is a wrapper of a future.
+/// `Task` is a pointer like wrapper of a future.
 ///
 /// If `debug_assertions` is enabled, it keeps additional information to check
 /// if the task is safe to be executed.
@@ -15,6 +15,28 @@ use std::task::{Context, Poll};
 /// # Be careful
 ///
 /// `Task` __must__ be executed via [`Executor::exec_task`](Executor::exec_task).
+///
+/// # The concept of task ownership
+///
+/// Orengine works correctly only if you follow the concept of task ownership.
+/// It means that a `Task` can be only moved. This follows:
+///
+/// - only one thread can own a `Task` at the same time,
+///   therefore `Task` can be executed without synchronization;
+///
+/// - only one `Task` instance can exist at the same time,
+///   therefore it can be dropped after it returns [`Poll::Ready`], so it doesn't use ref counters.
+///
+/// # Locality
+///
+/// Each `Task` has a locality. Read [`Executor`] for more details. You can get the locality
+/// with [`Task::is_local`].
+///
+/// The information about locality contains in [`Task`] but not under the pointer. So, you can read
+/// without dereferencing the pointer.
+///
+/// `Task` locality can be changed only via unsafe
+/// [`update_current_task_locality`](update_current_task_locality).
 pub struct Task {
     pub(crate) data: TaskData,
     #[cfg(debug_assertions)]
@@ -36,6 +58,49 @@ impl Task {
         TaskPool::acquire(future, locality)
     }
 
+    /// Returns a [`Task`] from the current `Orengine` [`Context`].
+    ///
+    /// Use it in [`Future::poll`], because in other cases you can use
+    /// [`Task::get_current_task`](Self::get_current).
+    ///
+    /// # Safety
+    ///
+    /// - Provided [`Context`] must be `Orengine's`
+    ///   (created from [`Orengine's waker`](crate::runtime::waker::create_waker));
+    ///
+    /// - Using this function must comply with the concept of task ownership (read [`Task`]).
+    #[inline]
+    pub unsafe fn from_context(cx: &Context) -> Self {
+        unsafe { std::ptr::read(cx.waker().data().cast()) }
+    }
+
+    /// Returns a [`Task`] from the current `Orengine` [`Context`].
+    ///
+    /// Use it outside [`Future::poll`], because in [`Future::poll`] you can use
+    /// [`Task::from_context`](Self::from_context) and it is more readable in this case.
+    ///
+    /// # Safety
+    ///
+    /// - Provided [`Context`] must be `Orengine's`
+    ///   (created from [`Orengine's waker`](crate::runtime::waker::create_waker));
+    ///
+    /// - Using this function must comply with the concept of task ownership (read [`Task`]).
+    #[inline(always)]
+    pub unsafe fn get_current() -> impl Future<Output = Self> {
+        struct GetCurrentTask {}
+
+        impl Future for GetCurrentTask {
+            type Output = Task;
+
+            #[inline(always)]
+            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                Poll::Ready(unsafe { Task::from_context(cx) })
+            }
+        }
+
+        GetCurrentTask {}
+    }
+
     /// Returns the future that are wrapped by this [`Task`].
     ///
     /// # Safety
@@ -50,20 +115,40 @@ impl Task {
     }
 
     /// Returns whether the task is local or not.
+    ///
+    /// The information about locality contains in [`Task`] but not under the pointer. So, this
+    /// method don't read the pointer and is very cheap.
     #[inline]
     pub fn is_local(&self) -> bool {
         self.data.is_local()
     }
 
-    /// Puts it back to the [`TaskPool`](TaskPool). It is unsafe because you
-    /// have to think about making sure it is no longer used.
-    ///
-    /// # Safety
-    ///
-    /// Provided [`Task`] is no longer used.
-    #[inline]
-    pub(crate) unsafe fn release(self, executor: &mut Executor) {
-        executor.task_pool().put(self);
+    // TODO docs
+    pub unsafe fn park_current_task() -> impl Future<Output = ()> {
+        #[repr(C)]
+        struct ParkCurrentTask {
+            was_called: bool,
+        }
+
+        impl Future for ParkCurrentTask {
+            type Output = ();
+
+            #[inline(always)]
+            fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+                let this = &mut *self;
+
+                match this.was_called {
+                    true => Poll::Ready(()),
+                    false => {
+                        this.was_called = true;
+
+                        Poll::Pending
+                    }
+                }
+            }
+        }
+
+        ParkCurrentTask { was_called: false }
     }
 
     /// Checks if the task is safe to be executed.
@@ -93,6 +178,23 @@ impl Task {
             }
         }
     }
+
+    /// Puts it back to the [`TaskPool`](TaskPool). It is unsafe because you
+    /// have to think about making sure it is no longer used.
+    ///
+    /// # Safety
+    ///
+    /// Provided [`Task`] is no longer used.
+    #[inline]
+    pub(crate) unsafe fn release(self, executor: &mut Executor) {
+        executor.task_pool().put(self);
+    }
+}
+
+impl PartialEq for Task {
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+    }
 }
 
 unsafe impl Send for Task {}
@@ -117,7 +219,7 @@ macro_rules! check_task_local_safety {
                         "[BUG] Local task has been moved to another executor.\
                         Please report it. Provide details about the place where the problem occurred \
                         and the conditions under which it happened. \
-                        Thank you for helping us make orengine better!"
+                        Thank you for helping us make Orengine better!"
                     );
                 }
             }
@@ -134,7 +236,7 @@ macro_rules! check_task_local_safety {
 /// # Safety
 ///
 /// Provided context contains a valid [`Task`] in `data` field (always true if you call it in
-/// orengine runtime).
+/// Orengine runtime).
 #[macro_export]
 macro_rules! panic_if_local_in_future {
     ($cx:expr, $name_of_future:expr) => {
@@ -144,7 +246,7 @@ macro_rules! panic_if_local_in_future {
             reason = "else we need to allow unused `unsafe` for `release`"
         )]
         unsafe {
-            let task = $crate::get_task_from_context!($cx);
+            let task = $crate::runtime::Task::from_context($cx);
             if task.is_local() {
                 panic!(
                     "You cannot call a local task in {}, because it can be moved! \
@@ -182,7 +284,7 @@ pub async unsafe fn update_current_task_locality(locality: Locality) {
                 this.was_called = true;
 
                 unsafe {
-                    local_executor().invoke_call(Call::ChangeCurrentTaskLocality(this.locality));
+                    local_executor().invoke_call(Call::change_current_task_locality(this.locality));
                 };
 
                 return Poll::Pending;
@@ -203,7 +305,8 @@ pub async unsafe fn update_current_task_locality(locality: Locality) {
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::get_task_from_context;
+    use crate::{yield_now, Local};
+    use std::ptr;
 
     #[orengine::test::test_local]
     fn test_update_current_task_locality() {
@@ -213,7 +316,7 @@ mod tests {
             type Output = bool;
 
             fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-                let task = unsafe { get_task_from_context!(cx) };
+                let task = unsafe { Task::from_context(cx) };
 
                 Poll::Ready(task.is_local())
             }
@@ -226,5 +329,47 @@ mod tests {
         }
 
         assert!(!GetCurrentTaskLocality {}.await);
+    }
+
+    #[orengine::test::test_local]
+    fn test_park_current_task() {
+        // TODO test it and write docs with it
+        let task_to_unpark = Local::new(None);
+        let task_to_unpark_clone = task_to_unpark.clone();
+        let value = Local::new(0);
+
+        local_executor().spawn_local(async {
+            *task_to_unpark_clone.borrow_mut() = Some(unsafe { Task::get_current().await });
+
+            *value.borrow_mut() += 1;
+
+            unsafe { Task::park_current_task().await };
+
+            *value.borrow_mut() += 1;
+        });
+
+        loop {
+            yield_now().await;
+
+            if let Some(task_to_unpark) = task_to_unpark.borrow_mut().take() {
+                assert_eq!(*value.borrow(), 1);
+
+                local_executor().exec_task(task_to_unpark);
+
+                break;
+            }
+        }
+
+        assert_eq!(*value.borrow(), 2);
+    }
+
+    #[orengine::test::test_local]
+    fn test_task_eq() {
+        let task1 = unsafe { Task::from_future(async {}, Locality::local()) };
+        let task1_copy = unsafe { ptr::read(&task1) };
+        let task2 = unsafe { Task::from_future(async {}, Locality::local()) };
+
+        assert!(task1 == task1_copy, "Task should be equal to its copy");
+        assert!(task1 != task2, "Task should not be equal to another task");
     }
 }

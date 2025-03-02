@@ -1,3 +1,4 @@
+use crate::runtime::IsLocal;
 use crate::sync::OnceState;
 use std::future::Future;
 
@@ -41,7 +42,7 @@ pub enum CallOnceResult {
 ///     });
 /// }
 /// ```
-pub trait AsyncOnce {
+pub trait AsyncOnce: IsLocal {
     /// Calls the [`future`](Future) only once.
     ///
     /// # Example

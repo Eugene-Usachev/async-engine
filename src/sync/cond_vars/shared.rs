@@ -1,11 +1,12 @@
 use std::future::Future;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
+use std::ptr::NonNull;
 use std::task::{Context, Poll};
 
 use crate::panic_if_local_in_future;
 use crate::runtime::call::Call;
-use crate::runtime::local_executor;
+use crate::runtime::{local_executor, IsLocal};
 use crate::sync::{AsyncCondVar, AsyncMutex, AsyncMutexGuard, AsyncSubscribableMutex, Mutex};
 use crate::utils::{acquire_sync_task_list_from_pool, SyncTaskListFromPool};
 
@@ -26,9 +27,9 @@ where
     Guard: AsyncMutexGuard<'mutex, T>,
     Guard::Mutex: AsyncSubscribableMutex<T>,
 {
-    state: WaitState,
     cond_var: &'cond_var CondVar,
     mutex: &'mutex Guard::Mutex,
+    state: WaitState,
 }
 
 impl<'mutex, 'cond_var, T, Guard> WaitCondVar<'mutex, 'cond_var, T, Guard>
@@ -64,8 +65,9 @@ where
             WaitState::Sleep => {
                 this.state = WaitState::Wake;
                 unsafe {
-                    local_executor()
-                        .invoke_call(Call::PushCurrentTaskTo(&*this.cond_var.wait_queue));
+                    local_executor().invoke_call(Call::push_current_task_to(
+                        NonNull::new_unchecked((&raw const *this.cond_var.wait_queue).cast_mut()),
+                    ));
                 };
                 Poll::Pending
             }
@@ -147,6 +149,10 @@ impl CondVar {
             wait_queue: acquire_sync_task_list_from_pool(),
         }
     }
+}
+
+impl IsLocal for CondVar {
+    const IS_LOCAL: bool = false;
 }
 
 impl AsyncCondVar for CondVar {

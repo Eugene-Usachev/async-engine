@@ -4,12 +4,11 @@ use smallvec::SmallVec;
 use std::io;
 use std::path::Path;
 
-#[derive(Debug)]
 /// A builder used to create directories in various manners.
 ///
 /// # Example
 ///
-/// ```rust
+/// ```no_run
 /// use std::path::Path;
 /// use orengine::fs::DirBuilder;
 ///
@@ -24,6 +23,7 @@ use std::path::Path;
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Debug)]
 pub struct DirBuilder {
     mode: u32,
     recursive: bool,

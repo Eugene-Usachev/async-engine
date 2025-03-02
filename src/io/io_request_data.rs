@@ -9,8 +9,8 @@ pub(crate) const UNINIT_RESULT: Result<usize> = Ok((1 << 32) - 1);
 /// After the task is done, the result will be set and the task will be executed.
 #[repr(C)]
 pub(crate) struct IoRequestData {
-    ret: Result<usize>,
     task: Task,
+    ret: Result<usize>,
     #[cfg(debug_assertions)]
     was_executed: bool,
 }

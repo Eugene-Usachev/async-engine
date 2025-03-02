@@ -11,8 +11,8 @@ use std::task::{Context, Poll};
 /// Create a directory at the given path.
 #[repr(C)]
 pub struct CreateDir {
-    mode: u32,
     os_path: OsPath,
+    mode: u32,
     io_request_data: Option<IoRequestData>,
 }
 

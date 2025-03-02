@@ -1,11 +1,14 @@
 use std::cell::UnsafeCell;
 use std::hint::spin_loop;
 use std::mem;
+use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::panic::{RefUnwindSafe, UnwindSafe};
+use std::ptr::NonNull;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
+use crate::runtime::IsLocal;
 use crate::sync::{AsyncMutex, AsyncMutexGuard};
 use crate::yield_now;
 use crossbeam::utils::CachePadded;
@@ -29,7 +32,7 @@ impl<'mutex, T: ?Sized> NaiveMutexGuard<'mutex, T> {
         Self { mutex }
     }
 
-    /// Returns a reference to the [`CachePadded<AtomicBool>`]
+    /// Returns a pointer to the [`CachePadded<AtomicBool>`]
     /// associated with the original [`NaiveMutex`] to
     /// [`call`](crate::Executor::invoke_call)
     /// [`ReleaseAtomicBool`](crate::runtime::call::Call::ReleaseAtomicBool).
@@ -40,16 +43,23 @@ impl<'mutex, T: ?Sized> NaiveMutexGuard<'mutex, T> {
     /// [calling](crate::Executor::invoke_call)
     /// [`ReleaseAtomicBool`](crate::runtime::call::Call::ReleaseAtomicBool).
     #[inline]
-    pub unsafe fn leak_to_atomic(self) -> &'static CachePadded<AtomicBool> {
+    pub unsafe fn leak_to_atomic(self) -> NonNull<CachePadded<AtomicBool>> {
         debug_assert!(self.mutex.is_locked.load(Acquire));
-        let static_mutex = unsafe {
-            mem::transmute::<&CachePadded<AtomicBool>, &'static CachePadded<AtomicBool>>(
-                &self.mutex.is_locked,
-            )
-        };
-        mem::forget(self);
 
-        static_mutex
+        unsafe {
+            NonNull::new_unchecked((&raw const ManuallyDrop::new(self).mutex.is_locked).cast_mut())
+        }
+    }
+
+    /// Returns a mutable reference to the value protected by the mutex.
+    ///
+    /// It is safe, because only one thread can access the value at the same time.
+    ///
+    /// It is used to get one more reference to the value.
+    pub(crate) fn get_mut<'old_life_time, 'new_life_time>(
+        &'old_life_time self,
+    ) -> &'new_life_time mut T {
+        unsafe { &mut *self.mutex.value.get() }
     }
 }
 
@@ -159,6 +169,10 @@ impl<T: ?Sized> NaiveMutex<T> {
             value: UnsafeCell::new(value),
         }
     }
+}
+
+impl<T: ?Sized> IsLocal for NaiveMutex<T> {
+    const IS_LOCAL: bool = false;
 }
 
 impl<T: ?Sized> AsyncMutex<T> for NaiveMutex<T> {

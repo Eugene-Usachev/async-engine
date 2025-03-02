@@ -1,3 +1,4 @@
+use crate::runtime::IsLocal;
 use std::future::Future;
 
 /// `AsyncWaitGroup` is a synchronization primitive that allows to [`wait`](Self::wait)
@@ -30,7 +31,7 @@ use std::future::Future;
 /// }).await;
 /// # }
 /// ```
-pub trait AsyncWaitGroup {
+pub trait AsyncWaitGroup: IsLocal {
     /// Adds `count` to the `LocalWaitGroup` counter.
     ///
     /// # Example

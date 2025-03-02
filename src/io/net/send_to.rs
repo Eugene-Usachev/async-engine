@@ -19,10 +19,10 @@ use std::time::{Duration, Instant};
 /// `send_to` io operation.
 #[repr(C)]
 pub struct SendTo<'fut> {
-    raw_socket: RawSocket,
-    message_header: MessageSendHeader,
     bufs: &'fut [IoSlice<'fut>],
     addr: &'fut SockAddr,
+    message_header: MessageSendHeader,
+    raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
 }
 
@@ -68,12 +68,12 @@ unsafe impl Send for SendTo<'_> {}
 /// `send_to` io operation with deadline.
 #[repr(C)]
 pub struct SendToWithDeadline<'fut> {
-    raw_socket: RawSocket,
-    message_header: MessageSendHeader,
     bufs: &'fut [IoSlice<'fut>],
     addr: &'fut SockAddr,
-    io_request_data: Option<IoRequestData>,
     deadline: Instant,
+    message_header: MessageSendHeader,
+    raw_socket: RawSocket,
+    io_request_data: Option<IoRequestData>,
     phantom_data: PhantomData<&'fut [u8]>,
 }
 

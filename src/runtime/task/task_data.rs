@@ -10,7 +10,7 @@ use std::future::Future;
 /// caused by the fact that `*mut dyn` can be safely cast to `i128`.
 ///
 /// In systems with 32-bit pointers or 16-bit pointers, an extra `bool` is used.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub(crate) struct TaskData {
     #[cfg(not(target_pointer_width = "64"))]
     future_ptr: *mut dyn Future<Output = ()>,

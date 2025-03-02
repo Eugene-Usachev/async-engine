@@ -18,8 +18,8 @@ use crate::net::Socket;
 /// `send` io operation.
 #[repr(C)]
 pub struct SendBytes<'buf> {
-    raw_socket: RawSocket,
     buf: &'buf [u8],
+    raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
 }
 
@@ -62,8 +62,8 @@ unsafe impl Send for SendBytes<'_> {}
 /// `send` io operation.
 #[repr(C)]
 pub struct SendFixed<'buf> {
-    raw_socket: RawSocket,
     ptr: *const u8,
+    raw_socket: RawSocket,
     len: u32,
     fixed_index: u16,
     io_request_data: Option<IoRequestData>,
@@ -113,10 +113,10 @@ unsafe impl Send for SendFixed<'_> {}
 /// `send` io operation with deadline.
 #[repr(C)]
 pub struct SendBytesWithDeadline<'buf> {
-    raw_socket: RawSocket,
     buf: &'buf [u8],
-    io_request_data: Option<IoRequestData>,
     deadline: Instant,
+    raw_socket: RawSocket,
+    io_request_data: Option<IoRequestData>,
 }
 
 impl<'buf> SendBytesWithDeadline<'buf> {
@@ -161,12 +161,12 @@ unsafe impl Send for SendBytesWithDeadline<'_> {}
 /// `send` io operation with deadline.
 #[repr(C)]
 pub struct SendFixedWithDeadline<'buf> {
-    raw_socket: RawSocket,
     ptr: *const u8,
+    deadline: Instant,
+    raw_socket: RawSocket,
     len: u32,
     fixed_index: u16,
     io_request_data: Option<IoRequestData>,
-    deadline: Instant,
     phantom_data: PhantomData<&'buf Buffer>,
 }
 

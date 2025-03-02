@@ -1,5 +1,4 @@
-use crate::get_task_from_context;
-use crate::runtime::local_executor;
+use crate::runtime::{local_executor, Task};
 use std::collections::btree_map::Entry::{Occupied, Vacant};
 use std::future::Future;
 use std::pin::Pin;
@@ -23,7 +22,7 @@ impl Future for Sleep {
             Poll::Ready(())
         } else {
             this.was_yielded = true;
-            let task = unsafe { get_task_from_context!(cx) };
+            let task = unsafe { Task::from_context(cx) };
 
             loop {
                 let sleeping_tasks_map = local_executor().sleeping_tasks();

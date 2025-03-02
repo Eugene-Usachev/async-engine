@@ -1,3 +1,4 @@
+use crate::runtime::IsLocal;
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::AsyncMutex;
 use std::future::Future;
@@ -17,7 +18,7 @@ use std::future::Future;
 ///
 /// Read the documentation of [`LocalCondVar`](crate::sync::LocalCondVar)
 /// and [`CondVar`](crate::sync::CondVar) for examples.
-pub trait AsyncCondVar {
+pub trait AsyncCondVar: IsLocal {
     type SubscribableMutex<T>: ?Sized + AsyncSubscribableMutex<T>
     where
         T: ?Sized;

@@ -1,3 +1,4 @@
+use crate::runtime::IsLocal;
 use crate::sync::channels::{RecvErr, SendErr, TryRecvErr, TrySendErr};
 use std::future::Future;
 use std::mem::MaybeUninit;
@@ -22,7 +23,7 @@ use std::ptr::drop_in_place;
 ///     assert_eq!(res, 1);
 /// }
 /// ```
-pub trait AsyncSender<T> {
+pub trait AsyncSender<T>: IsLocal {
     /// Sends a value into the [`channel`](AsyncChannel).
     ///
     /// Wait until the [`channel`](AsyncChannel) is available or
@@ -82,6 +83,7 @@ pub trait AsyncSender<T> {
     ///     assert!(matches!(sender.try_send(3).unwrap_err(), TrySendErr::Closed(_)));
     /// }
     /// ```
+    // TODO maybe try_send_ptr for select?
     fn try_send(&self, value: T) -> Result<(), TrySendErr<T>>;
 
     /// Closes the [`channel`](AsyncChannel) associated with this sender.
@@ -107,7 +109,7 @@ pub trait AsyncSender<T> {
 ///     assert_eq!(res, 1);
 /// }
 /// ```
-pub trait AsyncReceiver<T> {
+pub trait AsyncReceiver<T>: IsLocal {
     /// Asynchronously receives a value from the [`channel`](AsyncChannel) to the provided `slot`.
     ///
     /// If the [`channel`](AsyncChannel) is empty, the receiver waits until a value

@@ -3,6 +3,7 @@ use crate::runtime::call::Call;
 use std::future::Future;
 use std::mem;
 use std::pin::Pin;
+use std::ptr::NonNull;
 use std::task::Poll;
 
 /// A function that must be executed in the blocking pool.
@@ -36,7 +37,8 @@ impl Future for Asyncify<'_> {
                 mem::transmute::<*mut dyn Fn(), *mut dyn Fn()>(this.f)
             };
             unsafe {
-                local_executor().invoke_call(Call::PushFnToThreadPool(ptr));
+                local_executor()
+                    .invoke_call(Call::push_fn_to_thread_pool(NonNull::new_unchecked(ptr)));
             };
 
             return Poll::Pending;

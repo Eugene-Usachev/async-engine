@@ -14,8 +14,8 @@ use crate::io::{Buffer, FixedBuffer};
 /// `write` io operation.
 #[repr(C)]
 pub struct WriteBytes<'buf> {
-    raw_file: RawFile,
     buf: &'buf [u8],
+    raw_file: RawFile,
     io_request_data: Option<IoRequestData>,
 }
 
@@ -59,8 +59,8 @@ unsafe impl Send for WriteBytes<'_> {}
 #[repr(C)]
 pub struct WriteFixed<'buf> {
     raw_file: RawFile,
-    ptr: *const u8,
     len: u32,
+    ptr: *const u8,
     fixed_index: u16,
     io_request_data: Option<IoRequestData>,
     phantom_data: PhantomData<&'buf Buffer>,
@@ -109,9 +109,9 @@ unsafe impl Send for WriteFixed<'_> {}
 /// `pwrite` io operation.
 #[repr(C)]
 pub struct PositionedWriteBytes<'buf> {
-    raw_file: RawFile,
     buf: &'buf [u8],
     offset: usize,
+    raw_file: RawFile,
     io_request_data: Option<IoRequestData>,
 }
 
@@ -157,10 +157,10 @@ unsafe impl Send for PositionedWriteBytes<'_> {}
 #[repr(C)]
 pub struct PositionedWriteFixed<'buf> {
     raw_file: RawFile,
-    ptr: *const u8,
     len: u32,
-    fixed_index: u16,
+    ptr: *const u8,
     offset: usize,
+    fixed_index: u16,
     io_request_data: Option<IoRequestData>,
     phantom_data: PhantomData<&'buf Buffer>,
 }

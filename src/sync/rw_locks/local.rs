@@ -3,8 +3,7 @@
 //!
 //! It allows for asynchronous read or write locking and unlocking, and provides
 //! ownership-based locking through [`LocalReadLockGuard`] and [`LocalWriteLockGuard`].
-use crate::get_task_from_context;
-use crate::runtime::local_executor;
+use crate::runtime::{local_executor, IsLocal, Task};
 use crate::sync::{AsyncRWLock, AsyncReadLockGuard, AsyncWriteLockGuard, LockStatus};
 use crate::utils::{acquire_task_vec_from_pool, TaskVecFromPool};
 use std::cell::UnsafeCell;
@@ -131,8 +130,8 @@ impl<T: ?Sized> Drop for LocalWriteLockGuard<'_, T> {
 /// `ReadLockWait` is a future that will be resolved when the read lock is acquired.
 #[repr(C)]
 pub struct ReadLockWait<'rw_lock, T: ?Sized> {
-    was_called: bool,
     local_rw_lock: &'rw_lock LocalRWLock<T>,
+    was_called: bool,
     // impl !Send
     no_send_marker: std::marker::PhantomData<*const ()>,
 }
@@ -155,7 +154,7 @@ impl<'rw_lock, T: ?Sized> Future for ReadLockWait<'rw_lock, T> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
         if !this.was_called {
-            let task = unsafe { get_task_from_context!(cx) };
+            let task = unsafe { Task::from_context(cx) };
             this.local_rw_lock.get_inner().wait_queue_read.push(task);
             this.was_called = true;
             return Poll::Pending;
@@ -168,8 +167,8 @@ impl<'rw_lock, T: ?Sized> Future for ReadLockWait<'rw_lock, T> {
 /// `WriteLockWait` is a future that will be resolved when the write lock is acquired.
 #[repr(C)]
 pub struct WriteLockWait<'rw_lock, T: ?Sized> {
-    was_called: bool,
     local_rw_lock: &'rw_lock LocalRWLock<T>,
+    was_called: bool,
     // impl !Send
     no_send_marker: std::marker::PhantomData<*const ()>,
 }
@@ -192,7 +191,7 @@ impl<'rw_lock, T: ?Sized> Future for WriteLockWait<'rw_lock, T> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
         if !this.was_called {
-            let task = unsafe { get_task_from_context!(cx) };
+            let task = unsafe { Task::from_context(cx) };
             this.local_rw_lock.get_inner().wait_queue_write.push(task);
             this.was_called = true;
             return Poll::Pending;
@@ -311,6 +310,10 @@ impl<T: ?Sized> LocalRWLock<T> {
     fn get_inner(&self) -> &mut Inner<T> {
         unsafe { &mut *self.inner.get() }
     }
+}
+
+impl<T: ?Sized> IsLocal for LocalRWLock<T> {
+    const IS_LOCAL: bool = true;
 }
 
 impl<T: ?Sized> AsyncRWLock<T> for LocalRWLock<T> {

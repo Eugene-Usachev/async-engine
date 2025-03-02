@@ -1,6 +1,6 @@
 use crate::panic_if_local_in_future;
 use crate::runtime::call::Call;
-use crate::runtime::local_executor;
+use crate::runtime::{local_executor, IsLocal};
 use crate::sync::wait_groups::AsyncWaitGroup;
 use crate::utils::{
     acquire_sync_task_list_from_pool, acquire_task_vec_from_pool, SyncTaskListFromPool,
@@ -9,6 +9,7 @@ use crossbeam::utils::CachePadded;
 use std::future::Future;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
+use std::ptr::NonNull;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Release};
 use std::task::{Context, Poll};
@@ -52,11 +53,15 @@ impl Future for WaitSharedWaitGroup<'_> {
             //
             // So, I enqueue the task first, and only then do the check.
             unsafe {
-                local_executor().invoke_call(Call::PushCurrentTaskToAndRemoveItIfCounterIsZero(
-                    &*this.wait_group.waited_tasks,
-                    &*this.wait_group.counter,
-                    Acquire,
-                ));
+                local_executor().invoke_call(
+                    Call::push_current_task_to_and_remove_it_if_counter_is_zero(
+                        NonNull::new_unchecked(
+                            (&raw const *this.wait_group.waited_tasks).cast_mut(),
+                        ),
+                        NonNull::new_unchecked((&raw const *this.wait_group.counter).cast_mut()),
+                        Acquire,
+                    ),
+                );
             }
 
             Poll::Pending
@@ -115,6 +120,10 @@ impl WaitGroup {
             waited_tasks: acquire_sync_task_list_from_pool(),
         }
     }
+}
+
+impl IsLocal for WaitGroup {
+    const IS_LOCAL: bool = false;
 }
 
 impl AsyncWaitGroup for WaitGroup {

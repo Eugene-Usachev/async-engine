@@ -1,3 +1,4 @@
+use crate::runtime::IsLocal;
 use crate::sync::LockStatus;
 use std::future::Future;
 use std::ops::{Deref, DerefMut};
@@ -93,7 +94,7 @@ pub trait AsyncWriteLockGuard<'rw_lock, T: ?Sized + 'rw_lock>:
 ///     // read lock is released when `guard` goes out of scope
 /// }
 /// ```
-pub trait AsyncRWLock<T: ?Sized> {
+pub trait AsyncRWLock<T: ?Sized>: IsLocal {
     /// `Read access lock guard` of `AsyncRWLock`. Read more in [`AsyncReadLockGuard`].
     type ReadLockGuard<'rw_lock>: AsyncReadLockGuard<'rw_lock, T>
     where

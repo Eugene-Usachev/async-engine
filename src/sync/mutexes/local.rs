@@ -2,8 +2,7 @@
 //!
 //! It allows for asynchronous locking and unlocking, and provides
 //! ownership-based locking through [`LocalMutexGuard`].
-use crate::get_task_from_context;
-use crate::runtime::local_executor;
+use crate::runtime::{local_executor, IsLocal, Task};
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncMutex, AsyncMutexGuard};
 use crate::utils::{acquire_task_vec_from_pool, TaskVecFromPool};
@@ -82,8 +81,8 @@ impl<T: ?Sized> Drop for LocalMutexGuard<'_, T> {
 /// `LocalMutexWait` is a future that will be resolved when the lock is acquired.
 #[repr(C)]
 pub struct LocalMutexWait<'mutex, T: ?Sized> {
-    was_called: bool,
     local_mutex: &'mutex LocalMutex<T>,
+    was_called: bool,
     no_send_marker: std::marker::PhantomData<*const ()>,
 }
 
@@ -105,7 +104,7 @@ impl<'mutex, T: ?Sized> Future for LocalMutexWait<'mutex, T> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
         if !this.was_called {
-            let task = unsafe { get_task_from_context!(cx) };
+            let task = unsafe { Task::from_context(cx) };
             let wait_queue = unsafe { &mut *this.local_mutex.wait_queue.get() };
             wait_queue.push(task);
             this.was_called = true;
@@ -177,8 +176,8 @@ impl<'mutex, T: ?Sized> Future for LocalMutexWait<'mutex, T> {
 /// ```
 #[repr(C)]
 pub struct LocalMutex<T: ?Sized> {
-    is_locked: UnsafeCell<bool>,
     wait_queue: UnsafeCell<TaskVecFromPool>,
+    is_locked: UnsafeCell<bool>,
     // impl !Send
     no_send_marker: std::marker::PhantomData<*const ()>,
     value: UnsafeCell<T>,
@@ -194,6 +193,10 @@ impl<T> LocalMutex<T> {
             no_send_marker: std::marker::PhantomData,
         }
     }
+}
+
+impl<T: ?Sized> IsLocal for LocalMutex<T> {
+    const IS_LOCAL: bool = true;
 }
 
 impl<T: ?Sized> AsyncMutex<T> for LocalMutex<T> {
@@ -267,7 +270,7 @@ impl<T: ?Sized> AsyncMutex<T> for LocalMutex<T> {
 impl<T: ?Sized> AsyncSubscribableMutex<T> for LocalMutex<T> {
     #[inline]
     fn low_level_subscribe(&self, cx: &Context) {
-        let task = unsafe { get_task_from_context!(cx) };
+        let task = unsafe { Task::from_context(cx) };
         let wait_queue = unsafe { &mut *self.wait_queue.get() };
         wait_queue.push(task);
     }

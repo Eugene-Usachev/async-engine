@@ -2,6 +2,7 @@ use std::future::Future;
 use std::sync::atomic::AtomicIsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
+use crate::runtime::IsLocal;
 use crate::sync::{AsyncOnce, CallOnceResult, OnceState};
 use crossbeam::utils::CachePadded;
 
@@ -49,6 +50,10 @@ impl Once {
             state: CachePadded::new(AtomicIsize::new(OnceState::not_called())),
         }
     }
+}
+
+impl IsLocal for Once {
+    const IS_LOCAL: bool = false;
 }
 
 impl AsyncOnce for Once {

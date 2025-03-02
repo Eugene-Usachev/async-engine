@@ -20,9 +20,9 @@ use crate::{local_executor, BUG_MESSAGE};
 /// `recv_from` io operation.
 #[repr(C)]
 pub struct RecvFrom<'fut> {
-    raw_socket: RawSocket,
     sock_addr: &'fut mut SockAddr,
     msg_header: MessageRecvHeader,
+    raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
 }
 
@@ -70,10 +70,10 @@ unsafe impl Send for RecvFrom<'_> {}
 /// `recv_from` io operation with deadline.
 #[repr(C)]
 pub struct RecvFromWithDeadline<'fut> {
-    raw_socket: RawSocket,
     sock_addr: &'fut mut SockAddr,
     msg_header: MessageRecvHeader,
     deadline: Instant,
+    raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
 }
 

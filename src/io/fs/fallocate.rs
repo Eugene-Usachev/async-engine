@@ -12,9 +12,9 @@ use crate::io::worker::{local_worker, IoWorker};
 /// `fallocate` io operation which allows to allocate space in a file from a given offset.
 #[repr(C)]
 pub struct Fallocate {
-    raw_file: RawFile,
     offset: usize,
     len: usize,
+    raw_file: RawFile,
     flags: i32,
     io_request_data: Option<IoRequestData>,
 }

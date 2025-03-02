@@ -13,8 +13,8 @@ use std::task::{Context, Poll};
 /// Future for the `read` operation.
 #[repr(C)]
 pub struct ReadBytes<'buf> {
-    raw_file: RawFile,
     buf: &'buf mut [u8],
+    raw_file: RawFile,
     io_request_data: Option<IoRequestData>,
 }
 
@@ -57,8 +57,8 @@ unsafe impl Send for ReadBytes<'_> {}
 /// Future for the `read` operation with __fixed__ [`Buffer`].
 #[repr(C)]
 pub struct ReadFixed<'buf> {
-    raw_file: RawFile,
     ptr: *mut u8,
+    raw_file: RawFile,
     len: u32,
     fixed_index: u16,
     io_request_data: Option<IoRequestData>,
@@ -113,9 +113,9 @@ unsafe impl Send for ReadFixed<'_> {}
 /// to specify the offset from which the data should be read.
 #[repr(C)]
 pub struct PositionedReadBytes<'buf> {
-    raw_file: RawFile,
     buf: &'buf mut [u8],
     offset: usize,
+    raw_file: RawFile,
     io_request_data: Option<IoRequestData>,
 }
 
@@ -166,10 +166,10 @@ unsafe impl Send for PositionedReadBytes<'_> {}
 #[repr(C)]
 pub struct PositionedReadFixed<'buf> {
     raw_file: RawFile,
-    ptr: *mut u8,
     len: u32,
-    fixed_index: u16,
+    ptr: *mut u8,
     offset: usize,
+    fixed_index: u16,
     io_request_data: Option<IoRequestData>,
     phantom_data: PhantomData<&'buf Buffer>,
 }

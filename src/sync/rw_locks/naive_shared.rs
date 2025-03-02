@@ -8,10 +8,10 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicIsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
+use crate::runtime::IsLocal;
 use crate::sync::{AsyncRWLock, AsyncReadLockGuard, AsyncWriteLockGuard, LockStatus};
 use crate::yield_now;
 use crossbeam::utils::CachePadded;
-
 // region guards
 
 /// RAII structure used to release the shared read access of a lock when
@@ -180,6 +180,10 @@ impl<T: ?Sized> RWLock<T> {
             value: UnsafeCell::new(value),
         }
     }
+}
+
+impl<T: ?Sized> IsLocal for RWLock<T> {
+    const IS_LOCAL: bool = false;
 }
 
 impl<T: ?Sized> AsyncRWLock<T> for RWLock<T> {

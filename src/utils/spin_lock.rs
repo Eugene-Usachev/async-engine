@@ -10,6 +10,7 @@ use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::panic::{RefUnwindSafe, UnwindSafe};
+use std::ptr::NonNull;
 use std::sync::atomic;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
@@ -72,8 +73,14 @@ impl<'spin_lock, T: ?Sized> SpinLockGuard<'spin_lock, T> {
     /// or by [calling](crate::Executor::invoke_call)
     /// [`ReleaseAtomicBool`](crate::runtime::call::Call::ReleaseAtomicBool).
     #[inline]
-    pub unsafe fn leak_to_atomic(self) -> &'spin_lock CachePadded<AtomicBool> {
-        &ManuallyDrop::new(self).spin_lock.is_locked
+    pub unsafe fn leak_to_atomic(self) -> NonNull<CachePadded<AtomicBool>> {
+        debug_assert!(self.spin_lock.is_locked.load(Acquire));
+
+        unsafe {
+            NonNull::new_unchecked(
+                (&raw const ManuallyDrop::new(self).spin_lock.is_locked).cast_mut(),
+            )
+        }
     }
 }
 

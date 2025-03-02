@@ -20,8 +20,8 @@ use crate::utils::each_addr::each_addr;
 /// `connect` io operation.
 #[repr(C)]
 pub struct Connect<'fut> {
-    raw_fd: RawSocket,
     addr: &'fut SockAddr,
+    raw_fd: RawSocket,
     io_request_data: Option<IoRequestData>,
 }
 
@@ -65,10 +65,10 @@ unsafe impl Send for Connect<'_> {}
 /// `connect` io operation with deadline.
 #[repr(C)]
 pub struct ConnectWithDeadline<'fut> {
-    raw_fd: RawSocket,
     addr: &'fut SockAddr,
-    io_request_data: Option<IoRequestData>,
     deadline: Instant,
+    raw_fd: RawSocket,
+    io_request_data: Option<IoRequestData>,
 }
 
 impl<'fut> ConnectWithDeadline<'fut> {

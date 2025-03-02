@@ -50,9 +50,9 @@ macro_rules! generate_poll {
         /// `poll_raw_socket` io operation with deadline.
         #[repr(C)]
         pub struct $name_with_deadline {
+            deadline: Instant,
             raw_socket: RawSocket,
             io_request_data: Option<IoRequestData>,
-            deadline: Instant,
         }
 
         impl $name_with_deadline {

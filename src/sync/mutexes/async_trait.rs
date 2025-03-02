@@ -1,3 +1,4 @@
+use crate::runtime::IsLocal;
 use std::future::Future;
 use std::ops::{Deref, DerefMut};
 
@@ -60,7 +61,7 @@ pub trait AsyncMutexGuard<'mutex, T: ?Sized + 'mutex>: Deref<Target = T> + Deref
 ///     // lock is released when `guard` goes out of scope
 /// }
 /// ```
-pub trait AsyncMutex<T: ?Sized> {
+pub trait AsyncMutex<T: ?Sized>: IsLocal {
     /// The type of the `guard` that is returned from the [`lock`](Self::lock),
     /// [`try_lock`](Self::try_lock), and [`get_locked`](Self::get_locked) methods.
     ///

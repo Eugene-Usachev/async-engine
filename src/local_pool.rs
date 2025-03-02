@@ -177,11 +177,11 @@ macro_rules! new_local_pool {
         }
 
         thread_local! {
-            static $pool_thread_static_name: std::cell::UnsafeCell<$pool_struct_name> = std::cell::UnsafeCell::new(
+            static $pool_thread_static_name: std::cell::UnsafeCell<$pool_struct_name> = const { std::cell::UnsafeCell::new(
                 $pool_struct_name {
                     storage: Vec::new()
                 }
-            );
+            ) };
         }
 
         impl $pool_struct_name {

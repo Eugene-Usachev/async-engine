@@ -19,9 +19,9 @@ use crate::{local_executor, BUG_MESSAGE};
 /// `peek_from` io operation.
 #[repr(C)]
 pub struct PeekFrom<'fut> {
-    raw_socket: RawSocket,
     sock_addr: &'fut mut SockAddr,
     msg_header: MessageRecvHeader,
+    raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
 }
 
@@ -69,11 +69,11 @@ unsafe impl Send for PeekFrom<'_> {}
 /// `peek_from` io operation with deadline.
 #[repr(C)]
 pub struct PeekFromWithDeadline<'fut> {
-    raw_socket: RawSocket,
     sock_addr: &'fut mut SockAddr,
-    msg_header: MessageRecvHeader,
-    io_request_data: Option<IoRequestData>,
     deadline: Instant,
+    msg_header: MessageRecvHeader,
+    raw_socket: RawSocket,
+    io_request_data: Option<IoRequestData>,
 }
 
 impl<'fut> PeekFromWithDeadline<'fut> {

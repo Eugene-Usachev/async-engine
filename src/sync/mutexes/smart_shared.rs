@@ -8,18 +8,19 @@ use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
+use std::ptr::NonNull;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::task::{Context, Poll};
 
 use crossbeam::utils::{Backoff, CachePadded};
 
+use crate::panic_if_local_in_future;
 use crate::runtime::call::Call;
-use crate::runtime::local_executor;
+use crate::runtime::{local_executor, IsLocal, Task};
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncMutex, AsyncMutexGuard};
 use crate::utils::{acquire_sync_task_list_from_pool, SyncTaskListFromPool};
-use crate::{get_task_from_context, panic_if_local_in_future};
 
 /// An RAII implementation of a "scoped lock" of a mutex. When this structure is
 /// dropped (falls out of scope), the lock will be unlocked.
@@ -113,7 +114,9 @@ impl<'mutex, T: ?Sized> Future for MutexWait<'mutex, T> {
 
             this.was_called = true;
             unsafe {
-                local_executor().invoke_call(Call::PushCurrentTaskTo(&*this.mutex.wait_queue));
+                local_executor().invoke_call(Call::push_current_task_to(NonNull::new_unchecked(
+                    (&raw const *this.mutex.wait_queue).cast_mut(),
+                )));
             };
 
             Poll::Pending
@@ -173,8 +176,8 @@ impl<'mutex, T: ?Sized> Future for MutexWait<'mutex, T> {
 #[repr(C)]
 pub struct Mutex<T: ?Sized> {
     counter: CachePadded<AtomicUsize>,
-    wait_queue: SyncTaskListFromPool,
     expected_count: Cell<usize>,
+    wait_queue: SyncTaskListFromPool,
     value: UnsafeCell<T>,
 }
 
@@ -222,6 +225,10 @@ impl<T: ?Sized> Mutex<T> {
 
         None
     }
+}
+
+impl<T: ?Sized> IsLocal for Mutex<T> {
+    const IS_LOCAL: bool = false;
 }
 
 impl<T: ?Sized> AsyncMutex<T> for Mutex<T> {
@@ -310,7 +317,7 @@ impl<T: ?Sized> AsyncMutex<T> for Mutex<T> {
 impl<T: ?Sized> AsyncSubscribableMutex<T> for Mutex<T> {
     #[inline]
     fn low_level_subscribe(&self, cx: &Context) {
-        let task = unsafe { get_task_from_context!(cx) };
+        let task = unsafe { Task::from_context(cx) };
 
         self.expected_count.set(self.expected_count.get() - 1);
         unsafe {

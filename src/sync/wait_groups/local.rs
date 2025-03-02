@@ -1,5 +1,4 @@
-use crate::get_task_from_context;
-use crate::runtime::local_executor;
+use crate::runtime::{local_executor, IsLocal, Task};
 use crate::sync::wait_groups::AsyncWaitGroup;
 use crate::utils::{acquire_task_vec_from_pool, TaskVecFromPool};
 use std::cell::UnsafeCell;
@@ -31,7 +30,7 @@ impl Future for WaitLocalWaitGroup<'_> {
         let this = &mut *self;
         let inner = this.wait_group.get_inner();
         if inner.count != 0 {
-            let task = unsafe { get_task_from_context!(cx) };
+            let task = unsafe { Task::from_context(cx) };
             inner.waited_tasks.push(task);
 
             return Poll::Pending;
@@ -106,6 +105,10 @@ impl LocalWaitGroup {
     fn get_inner(&self) -> &mut Inner {
         unsafe { &mut *self.inner.get() }
     }
+}
+
+impl IsLocal for LocalWaitGroup {
+    const IS_LOCAL: bool = true;
 }
 
 impl AsyncWaitGroup for LocalWaitGroup {

@@ -17,8 +17,8 @@ use crate::net::Socket;
 /// `peek` io operation.
 #[repr(C)]
 pub struct PeekBytes<'buf> {
-    raw_socket: RawSocket,
     buf: &'buf mut [u8],
+    raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
 }
 
@@ -61,8 +61,8 @@ unsafe impl Send for PeekBytes<'_> {}
 /// `peek` io operation with __fixed__ [`Buffer`].
 #[repr(C)]
 pub struct PeekFixed<'buf> {
-    raw_socket: RawSocket,
     ptr: *mut u8,
+    raw_socket: RawSocket,
     len: u32,
     fixed_index: u16,
     io_request_data: Option<IoRequestData>,
@@ -112,10 +112,10 @@ unsafe impl Send for PeekFixed<'_> {}
 /// `peek` io operation with deadline.
 #[repr(C)]
 pub struct PeekBytesWithDeadline<'buf> {
-    raw_socket: RawSocket,
     buf: &'buf mut [u8],
-    io_request_data: Option<IoRequestData>,
     deadline: Instant,
+    raw_socket: RawSocket,
+    io_request_data: Option<IoRequestData>,
 }
 
 impl<'buf> PeekBytesWithDeadline<'buf> {
@@ -160,12 +160,12 @@ unsafe impl Send for PeekBytesWithDeadline<'_> {}
 /// `peek` io operation with __fixed__ [`Buffer`] with deadline.
 #[repr(C)]
 pub struct PeekFixedWithDeadline<'buf> {
-    raw_socket: RawSocket,
     ptr: *mut u8,
+    raw_socket: RawSocket,
     len: u32,
+    deadline: Instant,
     fixed_index: u16,
     io_request_data: Option<IoRequestData>,
-    deadline: Instant,
     phantom_data: std::marker::PhantomData<&'buf Buffer>,
 }
 

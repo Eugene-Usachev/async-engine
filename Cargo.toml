@@ -21,7 +21,7 @@ fallback_thread_pool = []
 disable_send_task_to = []
 
 [dependencies]
-orengine-macros = { version = "4.1.0", path = "./orengine-macros" }
+orengine-macros = { version = "5.0.1", path = "./orengine-macros" }
 core_affinity = "0.8.1"
 socket2 = { version = "0.5.8", features = ["all"] }
 smallvec = "2.0.0-alpha.10"

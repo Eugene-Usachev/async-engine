@@ -1,5 +1,4 @@
-use crate::get_task_from_context;
-use crate::runtime::local_executor;
+use crate::runtime::{local_executor, IsLocal, Task};
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncCondVar, AsyncMutex, AsyncMutexGuard, LocalMutex};
 use crate::utils::{acquire_task_vec_from_pool, TaskVecFromPool};
@@ -30,9 +29,9 @@ where
     Guard: AsyncMutexGuard<'mutex, T>,
     Guard::Mutex: AsyncSubscribableMutex<T>,
 {
-    state: WaitState,
     cond_var: &'cond_var LocalCondVar,
     mutex: &'mutex Guard::Mutex,
+    state: WaitState,
     // impl !Send
     no_send_marker: PhantomData<*const ()>,
     pd: PhantomData<T>,
@@ -71,7 +70,7 @@ where
         match this.state {
             WaitState::Sleep => {
                 this.state = WaitState::Wake;
-                let task = unsafe { get_task_from_context!(cx) };
+                let task = unsafe { Task::from_context(cx) };
                 let wait_queue = unsafe { &mut *this.cond_var.wait_queue.get() };
                 wait_queue.push(task);
                 Poll::Pending
@@ -186,6 +185,10 @@ impl AsyncCondVar for LocalCondVar {
             executor.exec_task(task);
         }
     }
+}
+
+impl IsLocal for LocalCondVar {
+    const IS_LOCAL: bool = true;
 }
 
 impl Default for LocalCondVar {

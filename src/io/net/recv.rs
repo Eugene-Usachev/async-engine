@@ -18,8 +18,8 @@ use crate::net::Socket;
 /// `recv` io operation.
 #[repr(C)]
 pub struct RecvBytes<'buf> {
-    raw_socket: RawSocket,
     buf: &'buf mut [u8],
+    raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
 }
 
@@ -62,8 +62,8 @@ unsafe impl Send for RecvBytes<'_> {}
 /// `recv` io operation with __fixed__ [`Buffer`](crate::io::Buffer).
 #[repr(C)]
 pub struct RecvFixed<'buf> {
-    raw_socket: RawSocket,
     ptr: *mut u8,
+    raw_socket: RawSocket,
     len: u32,
     fixed_index: u16,
     io_request_data: Option<IoRequestData>,
@@ -113,10 +113,10 @@ unsafe impl Send for RecvFixed<'_> {}
 /// `recv` io operation with deadline.
 #[repr(C)]
 pub struct RecvBytesWithDeadline<'buf> {
-    raw_socket: RawSocket,
     buf: &'buf mut [u8],
-    io_request_data: Option<IoRequestData>,
     deadline: Instant,
+    raw_socket: RawSocket,
+    io_request_data: Option<IoRequestData>,
 }
 
 impl<'buf> RecvBytesWithDeadline<'buf> {
@@ -161,12 +161,12 @@ unsafe impl Send for RecvBytesWithDeadline<'_> {}
 /// `recv` io operation with deadline and __fixed__ [`Buffer`](crate::io::Buffer).
 #[repr(C)]
 pub struct RecvFixedWithDeadline<'buf> {
-    raw_socket: RawSocket,
     ptr: *mut u8,
+    deadline: Instant,
+    raw_socket: RawSocket,
     len: u32,
     fixed_index: u16,
     io_request_data: Option<IoRequestData>,
-    deadline: Instant,
     phantom_data: PhantomData<&'buf [u8]>,
 }
 

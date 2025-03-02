@@ -11,7 +11,7 @@ use crate::runtime::interaction_between_executors::{Interactor, SendTaskResult};
 use crate::runtime::local_thread_pool::LocalThreadWorkerPool;
 use crate::runtime::task::{Task, TaskPool};
 use crate::runtime::waker::create_waker;
-use crate::runtime::{get_core_id_for_executor, ExecutorSharedTaskList, Locality};
+use crate::runtime::{get_core_id_for_executor, CallInner, ExecutorSharedTaskList, Locality};
 use crate::utils::{assert_hint, CoreId, ProgressiveTimeout};
 use fastrand::Rng;
 use std::cell::UnsafeCell;
@@ -172,7 +172,22 @@ pub(crate) static FREE_EXECUTOR_ID: AtomicUsize = AtomicUsize::new(0);
 /// other executors shared lists.
 const MAX_NUMBER_OF_TASKS_TAKEN: usize = 16;
 
+macro_rules! generate_run_and_block_on_function {
+    ($func:expr, $future:expr, $executor:expr) => {{
+        let mut res = None;
+        let static_future = EndLocalThreadAndWriteIntoPtr::new(&mut res, $future);
+        $func($executor, static_future);
+        $executor.run();
+        res.ok_or(
+            "The process has been stopped by stop_all_executors \
+                or stop_executor not in block_on future.",
+        )
+    }};
+}
+
 impl Executor {
+    // region init
+
     /// Initializes the executor in the current thread with provided config on the given core.
     ///
     /// # Example
@@ -307,6 +322,10 @@ impl Executor {
         Self::init_on_core(get_core_id_for_executor())
     }
 
+    // endregion
+
+    // region getters
+
     /// Returns the id of the executor.
     pub fn id(&self) -> usize {
         self.id
@@ -315,22 +334,6 @@ impl Executor {
     /// Returns a reference to the [`TaskPool`] of the executor.
     pub(crate) fn task_pool(&mut self) -> &mut TaskPool {
         &mut self.task_pool
-    }
-
-    /// Add a task to the beginning of the local lifo queue.
-    #[inline]
-    pub(crate) fn add_task_at_the_start_of_lifo_local_queue(&mut self, task: Task) {
-        debug_assert!(task.is_local());
-
-        self.local_tasks.push_front(task);
-    }
-
-    /// Add a task to the beginning of the shared lifo queue.
-    #[inline]
-    pub(crate) fn add_task_at_the_start_of_lifo_shared_queue(&mut self, task: Task) {
-        debug_assert!(!task.is_local());
-
-        self.shared_tasks.push_front(task);
     }
 
     /// Returns a reference to the subscribed state of the executor.
@@ -405,6 +408,10 @@ impl Executor {
         self.shared_tasks.len() + self.local_tasks.len()
     }
 
+    // endregion
+
+    // region call
+
     /// Invokes the current [`Call`].
     ///
     /// # Safety
@@ -423,17 +430,14 @@ impl Executor {
     /// to allow the compiler to decide whether to inline this function.
     #[inline(never)]
     fn handle_call(&mut self, mut task: Task) {
-        match mem::take(&mut self.current_call) {
-            Call::None => {}
-            Call::PushCurrentTaskAtTheStartOfLIFOSharedQueue => {
-                self.shared_tasks.push_front(task);
-            }
-            Call::PushCurrentTaskTo(task_list) => unsafe { (*task_list).push(task) },
-            Call::PushCurrentTaskToAndRemoveItIfCounterIsZero(task_list, counter, order) => {
+        match CallInner::from(mem::take(&mut self.current_call)) {
+            CallInner::None => {}
+            CallInner::PushCurrentTaskTo(task_list) => unsafe { task_list.as_ref().push(task) },
+            CallInner::PushCurrentTaskToAndRemoveItIfCounterIsZero(task_list, counter, order) => {
                 unsafe {
-                    let list = &*task_list;
+                    let list = task_list.as_ref();
                     list.push(task);
-                    let counter = &*counter;
+                    let counter = counter.as_ref();
 
                     if counter.load(order) == 0 {
                         if let Some(task) = list.pop() {
@@ -442,19 +446,19 @@ impl Executor {
                     }
                 }
             }
-            Call::ReleaseAtomicBool(atomic_ptr) => {
-                let atomic_ref = unsafe { &*atomic_ptr };
+            CallInner::ReleaseAtomicBool(atomic_ptr) => {
+                let atomic_ref = unsafe { atomic_ptr.as_ref() };
                 atomic_ref.store(false, Ordering::Release);
             }
-            Call::PushFnToThreadPool(f) => {
+            CallInner::PushFnToThreadPool(mut f) => {
                 debug_assert_ne!(
                     self.config.number_of_thread_workers, 0,
                     "try to use thread pool with 0 workers"
                 );
 
-                self.thread_pool.push(task, f);
+                self.thread_pool.push(task, unsafe { f.as_mut() });
             }
-            Call::ChangeCurrentTaskLocality(locality) => {
+            CallInner::ChangeCurrentTaskLocality(locality) => {
                 task.data.set_locality(locality);
                 assert_eq!(
                     task.is_local(),
@@ -471,8 +475,13 @@ impl Executor {
                     self.spawn_shared_task(task);
                 }
             }
+            CallInner::CallFn(func) => unsafe { (&mut *func)(task) },
         }
     }
+
+    // endregion
+
+    // region exec
 
     /// Executes a provided [`task`](Task) in the current [`executor`](Executor).
     ///
@@ -507,22 +516,27 @@ impl Executor {
 
         match poll_res {
             Poll::Ready(()) => {
-                debug_assert_eq!(
-                    self.current_call,
-                    Call::None,
-                    "Call is not None, but the task is ready."
-                );
+                #[cfg(debug_assertions)]
+                {
+                    match *self.current_call.inner() {
+                        CallInner::None => {}
+                        _ => {
+                            panic!("Call is not None, but the task is ready.")
+                        }
+                    }
+                }
+
                 unsafe { task.release(self) };
             }
 
             Poll::Pending => {
-                if !matches!(self.current_call, Call::None) {
+                if !matches!(*self.current_call.inner(), CallInner::None) {
                     self.handle_call(task);
                 }
             }
         }
 
-        // orengine::Waker::drop does nothing, but virtual call is not free.
+        // Orengine's Waker::drop does nothing, but virtual call is not free.
         mem::forget(waker);
     }
 
@@ -577,6 +591,39 @@ impl Executor {
         self.exec_task(task);
     }
 
+    // endregion
+
+    // region spawn
+
+    /// Enqueues a `local` [`task`](Task).
+    ///
+    /// # Attention
+    ///
+    /// This function enqueues it at the end of the queue of local tasks, but it is `LIFO`.
+    ///
+    /// # The difference between shared and local tasks
+    ///
+    /// Read it in [`Executor`].
+    #[inline]
+    pub fn spawn_local_task(&mut self, task: Task) {
+        debug_assert!(task.is_local(), "Try to spawn `shared` task as `local`!");
+
+        self.local_tasks.push_back(task);
+    }
+
+    /// Enqueues a `local` [`task`](Task).
+    ///
+    /// The queue is `LIFO`, so it is pushed at the start.
+    ///
+    /// # Usage
+    ///
+    /// Can be used to execute the [`task`](Task) in next round.
+    pub fn spawn_task_at_end_of_local_tasks_queue(&mut self, task: Task) {
+        debug_assert!(task.is_local());
+
+        self.local_tasks.push_front(task);
+    }
+
     /// Creates a `local` [`task`](Task) from a provided [`future`](Future) and enqueues it.
     ///
     /// # Attention
@@ -593,22 +640,6 @@ impl Executor {
     {
         let task = unsafe { Task::from_future(future, Locality::local()) };
         self.spawn_local_task(task);
-    }
-
-    /// Enqueues a `local` [`task`](Task).
-    ///
-    /// # Attention
-    ///
-    /// This function enqueues it at the end of the queue of local tasks, but it is `LIFO`.
-    ///
-    /// # The difference between shared and local tasks
-    ///
-    /// Read it in [`Executor`].
-    #[inline]
-    pub fn spawn_local_task(&mut self, task: Task) {
-        debug_assert!(task.is_local(), "Try to spawn `shared` task as `local`!");
-
-        self.local_tasks.push_back(task);
     }
 
     /// Creates a `shared` [`task`](Task) from a provided [`future`](Future) and enqueues it.
@@ -631,15 +662,19 @@ impl Executor {
 
     /// Enqueues a `shared` [`task`](Task).
     ///
+    /// # PUT_IN_THE_START_OF_QUEUE
+    ///
+    /// Takes a generic to determine whether to put it at the start or the end of the queue.
+    ///
     /// # Attention
     ///
     /// This function enqueues it at the end of the queue of shared tasks, but it is `LIFO`.
     ///
-    /// # The difference between shared and local tasks
+    /// # The difference between `shared` and `local` tasks
     ///
     /// Read it in [`Executor`].
     #[inline]
-    pub fn spawn_shared_task(&mut self, task: Task) {
+    fn spawn_shared_task_<const PUT_IN_THE_START_OF_QUEUE: bool>(&mut self, task: Task) {
         fn try_flush(executor: &mut Executor) {
             if let Some(mut shared_tasks_list) = unsafe {
                 executor
@@ -661,16 +696,54 @@ impl Executor {
         if self.config.is_work_sharing_enabled() {
             if self.shared_tasks.len() <= self.config.work_sharing_level {
                 // Fast path
-                self.shared_tasks.push_back(task);
+
+                if PUT_IN_THE_START_OF_QUEUE {
+                    self.shared_tasks.push_back(task);
+                } else {
+                    self.shared_tasks.push_front(task);
+                }
             } else {
                 // Slow path
                 try_flush(self);
 
-                self.shared_tasks.push_back(task);
+                if PUT_IN_THE_START_OF_QUEUE {
+                    self.shared_tasks.push_back(task);
+                } else {
+                    self.shared_tasks.push_front(task);
+                }
             }
-        } else {
+        } else if PUT_IN_THE_START_OF_QUEUE {
             self.shared_tasks.push_back(task);
+        } else {
+            self.shared_tasks.push_front(task);
         }
+    }
+
+    /// Enqueues a `shared` [`task`](Task).
+    ///
+    /// The queue is `LIFO`, so it is pushed at the start.
+    ///
+    /// # Usage
+    ///
+    /// Can be used to execute the [`task`](Task) in next round.
+    pub fn spawn_task_at_end_of_shared_tasks_queue(&mut self, task: Task) {
+        debug_assert!(!task.is_local());
+
+        self.spawn_shared_task_::<false>(task);
+    }
+
+    /// Enqueues a `shared` [`task`](Task).
+    ///
+    /// # Attention
+    ///
+    /// This function enqueues it at the end of the queue of `shared` tasks, but it is `LIFO`.
+    ///
+    /// # The difference between shared and local tasks
+    ///
+    /// Read it in [`Executor`].
+    #[inline]
+    pub fn spawn_shared_task(&mut self, task: Task) {
+        self.spawn_shared_task_::<true>(task);
     }
 
     /// Calls [`spawn_local_task`](Executor::spawn_local_task)
@@ -686,6 +759,10 @@ impl Executor {
             self.spawn_shared_task(task);
         }
     }
+
+    // endregion
+
+    // region send
 
     /// Sends a [`Task`] to the executor with the given id.
     ///
@@ -862,6 +939,10 @@ impl Executor {
         unsafe { self.send_task_to_executor(task, executor_id) }
     }
 
+    // endregion
+
+    // region runtime
+
     /// Tries to take a batch of tasks from the shared tasks queue if needed.
     #[inline]
     fn take_work_if_needed(&mut self) {
@@ -1031,24 +1112,11 @@ impl Executor {
 
         *get_local_executor_ref() = None;
     }
-}
 
-macro_rules! generate_run_and_block_on_function {
-    ($func:expr, $future:expr, $executor:expr) => {{
-        let mut res = None;
-        let static_future = EndLocalThreadAndWriteIntoPtr::new(&mut res, $future);
-        $func($executor, static_future);
-        $executor.run();
-        res.ok_or(
-            "The process has been stopped by stop_all_executors \
-                or stop_executor not in block_on future.",
-        )
-    }};
-}
+    // endregion
 
-// region run
+    // region run
 
-impl Executor {
     /// Runs the executor.
     ///
     /// # Example
@@ -1301,9 +1369,9 @@ impl Executor {
     ) -> Result<T, &'static str> {
         generate_run_and_block_on_function!(Self::spawn_shared, future, self)
     }
-}
 
-// endregion
+    //endregion
+}
 
 #[cfg(test)]
 mod tests {

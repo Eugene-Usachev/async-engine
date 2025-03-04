@@ -19,6 +19,7 @@ edition = "2021"
 default = []
 fallback_thread_pool = []
 disable_send_task_to = []
+unstable_features = []
 
 [dependencies]
 orengine-macros = { version = "5.0.1", path = "./orengine-macros" }

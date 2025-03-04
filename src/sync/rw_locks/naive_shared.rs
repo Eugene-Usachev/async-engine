@@ -428,73 +428,74 @@ fn test_compile_shared_rw_lock() {}
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::sync::shared_scope;
+    use crate::local_executor;
     use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::Arc;
 
     #[orengine::test::test_shared]
     fn test_naive_rw_lock() {
         const NUMBER_OF_READERS: isize = 5;
-        let rw_lock = RWLock::new(0);
 
-        shared_scope(|scope| async {
-            for i in 1..=NUMBER_OF_READERS {
-                scope.exec(async {
-                    let lock = rw_lock.read().await;
-                    assert_eq!(rw_lock.number_of_readers.load(SeqCst), i);
-                    yield_now().await;
-                    drop(lock);
-                });
-            }
+        let rw_lock = Arc::new(RWLock::new(0));
 
-            assert_eq!(rw_lock.number_of_readers.load(SeqCst), NUMBER_OF_READERS);
+        for i in 1..=NUMBER_OF_READERS {
+            let rw_lock_clone = rw_lock.clone();
 
-            let mut write_lock = rw_lock.write().await;
-            assert!(rw_lock.try_write().is_none());
-            *write_lock += 1;
-            assert_eq!(*write_lock, 1);
-            assert_eq!(rw_lock.number_of_readers.load(SeqCst), -1);
-        })
-        .await;
+            local_executor().exec_shared_future(async move {
+                let lock = rw_lock_clone.read().await;
+                assert_eq!(rw_lock_clone.number_of_readers.load(SeqCst), i);
+                yield_now().await;
+                drop(lock);
+            });
+        }
+
+        assert_eq!(rw_lock.number_of_readers.load(SeqCst), NUMBER_OF_READERS);
+
+        let mut write_lock = rw_lock.write().await;
+        assert!(rw_lock.try_write().is_none());
+        *write_lock += 1;
+        assert_eq!(*write_lock, 1);
+        assert_eq!(rw_lock.number_of_readers.load(SeqCst), -1);
     }
 
     #[orengine::test::test_shared]
     fn test_try_naive_rw_lock() {
         const NUMBER_OF_READERS: isize = 5;
-        let rw_lock = RWLock::new(0);
 
-        shared_scope(|scope| async {
-            for i in 1..=NUMBER_OF_READERS {
-                scope.exec(async {
-                    let lock = rw_lock.try_read().expect("Failed to get read lock!");
-                    assert_eq!(rw_lock.number_of_readers.load(SeqCst), i);
-                    yield_now().await;
-                    drop(lock);
-                });
-            }
+        let rw_lock = Arc::new(RWLock::new(0));
 
-            assert_eq!(rw_lock.number_of_readers.load(SeqCst), NUMBER_OF_READERS);
-            assert!(
-                rw_lock.try_write().is_none(),
-                "Successful attempt to acquire write lock when rw_lock locked for read"
-            );
+        for i in 1..=NUMBER_OF_READERS {
+            let rw_lock_clone = rw_lock.clone();
 
-            yield_now().await;
+            local_executor().exec_shared_future(async move {
+                let lock = rw_lock_clone.try_read().expect("Failed to get read lock!");
+                assert_eq!(rw_lock_clone.number_of_readers.load(SeqCst), i);
+                yield_now().await;
+                drop(lock);
+            });
+        }
 
-            assert_eq!(rw_lock.number_of_readers.load(SeqCst), 0);
-            let mut write_lock = rw_lock.try_write().expect("Failed to get write lock!");
-            *write_lock += 1;
-            assert_eq!(*write_lock, 1);
+        assert_eq!(rw_lock.number_of_readers.load(SeqCst), NUMBER_OF_READERS);
+        assert!(
+            rw_lock.try_write().is_none(),
+            "Successful attempt to acquire write lock when rw_lock locked for read"
+        );
 
-            assert_eq!(rw_lock.number_of_readers.load(SeqCst), -1);
-            assert!(
-                rw_lock.try_read().is_none(),
-                "Successful attempt to acquire read lock when rw_lock locked for write"
-            );
-            assert!(
-                rw_lock.try_write().is_none(),
-                "Successful attempt to acquire write lock when rw_lock locked for write"
-            );
-        })
-        .await;
+        yield_now().await;
+
+        assert_eq!(rw_lock.number_of_readers.load(SeqCst), 0);
+        let mut write_lock = rw_lock.try_write().expect("Failed to get write lock!");
+        *write_lock += 1;
+        assert_eq!(*write_lock, 1);
+
+        assert_eq!(rw_lock.number_of_readers.load(SeqCst), -1);
+        assert!(
+            rw_lock.try_read().is_none(),
+            "Successful attempt to acquire read lock when rw_lock locked for write"
+        );
+        assert!(
+            rw_lock.try_write().is_none(),
+            "Successful attempt to acquire write lock when rw_lock locked for write"
+        );
     }
 }

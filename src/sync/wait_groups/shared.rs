@@ -83,28 +83,31 @@ impl Future for WaitSharedWaitGroup<'_> {
 /// # Example
 ///
 /// ```rust
+/// use std::sync::Arc;
 /// use std::time::Duration;
 /// use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
-/// use orengine::sleep;
-/// use orengine::sync::{shared_scope, AsyncWaitGroup, WaitGroup};
+/// use orengine::{local_executor, sleep};
+/// use orengine::sync::{AsyncWaitGroup, WaitGroup};
 ///
 /// # async fn foo() {
-/// let wait_group = WaitGroup::new();
-/// let number_executed_tasks = AtomicUsize::new(0);
+/// let wait_group = Arc::new(WaitGroup::new());
+/// let number_executed_tasks = Arc::new(AtomicUsize::new(0));
 ///
-/// shared_scope(|scope| async {
-///     for i in 0..10 {
-///         wait_group.inc();
-///         scope.spawn(async {
-///             sleep(Duration::from_millis(i)).await;
-///             number_executed_tasks.fetch_add(1, SeqCst);
-///             wait_group.done();
-///         });
-///     }
+/// for i in 0..10 {
+///     let wait_group = wait_group.clone();
+///     let number_executed_tasks = number_executed_tasks.clone();
 ///
-///     wait_group.wait().await; // wait until all tasks are completed
-///     assert_eq!(number_executed_tasks.load(SeqCst), 10);
-/// }).await;
+///     wait_group.inc();
+///
+///     local_executor().spawn_shared(async move {
+///         sleep(Duration::from_millis(i)).await;
+///         number_executed_tasks.fetch_add(1, SeqCst);
+///         wait_group.done();
+///     });
+/// }
+///
+/// wait_group.wait().await; // wait until all tasks are completed
+/// assert_eq!(number_executed_tasks.load(SeqCst), 10);
 /// # }
 /// ```
 pub struct WaitGroup {
@@ -176,7 +179,7 @@ impl UnwindSafe for WaitGroup {}
 impl RefUnwindSafe for WaitGroup {}
 
 /// ```rust
-/// use orengine::sync::{WaitGroup, shared_scope, AsyncWaitGroup};
+/// use orengine::sync::{WaitGroup, AsyncWaitGroup};
 /// use orengine::yield_now;
 ///
 /// fn check_send<T: Send>(value: T) -> T { value }

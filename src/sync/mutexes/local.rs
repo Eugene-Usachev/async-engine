@@ -301,7 +301,6 @@ mod tests {
     use super::*;
     use crate as orengine;
     use crate::sleep::sleep;
-    use crate::sync::local_scope;
     use std::rc::Rc;
     use std::time::{Duration, Instant};
 
@@ -311,25 +310,23 @@ mod tests {
 
         let start = Instant::now();
         let mutex = Rc::new(LocalMutex::new(false));
+        let mutex_clone = mutex.clone();
 
-        local_scope(|scope| async {
-            scope.exec(async {
-                let mut value = mutex.lock().await;
-                println!("1");
-                sleep(SLEEP_DURATION).await;
-                println!("3");
-                *value = true;
-            });
+        local_executor().exec_local_future(async move {
+            let mut value = mutex_clone.lock().await;
+            println!("1");
+            sleep(SLEEP_DURATION).await;
+            println!("3");
+            *value = true;
+        });
 
-            println!("2");
-            let value = mutex.lock().await;
-            println!("4");
+        println!("2");
+        let value = mutex.lock().await;
+        println!("4");
 
-            let elapsed = start.elapsed();
-            assert!(elapsed >= SLEEP_DURATION);
-            assert!(*value);
-        })
-        .await;
+        let elapsed = start.elapsed();
+        assert!(elapsed >= SLEEP_DURATION);
+        assert!(*value);
     }
 
     #[orengine::test::test_local]
@@ -339,6 +336,7 @@ mod tests {
         let start = Instant::now();
         let mutex = Rc::new(LocalMutex::new(false));
         let mutex_clone = mutex.clone();
+
         local_executor().exec_local_future(async move {
             let mut value = mutex_clone.lock().await;
             println!("1");

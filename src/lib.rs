@@ -48,11 +48,14 @@ pub mod sleep;
 pub mod sync;
 pub mod sync_task_queue;
 pub mod test;
+#[cfg(feature = "unstable_features")]
+pub mod unstable;
 pub mod utils;
 pub mod yield_now;
 
 pub(crate) use bug_message::BUG_MESSAGE;
 pub use local::Local;
+pub use orengine_macros::select;
 pub use run::*;
 pub use runtime::{local_executor, stop_all_executors, stop_executor, Executor};
 pub use sleep::sleep;

@@ -19,10 +19,6 @@ pub use rw_locks::{
     lock_status::*,
     naive_shared::{RWLock, ReadLockGuard, WriteLockGuard},
 };
-pub use scopes::{
-    local::{local_scope, LocalScope},
-    shared::{shared_scope, Scope},
-};
 pub use wait_groups::{async_trait::*, local::LocalWaitGroup, shared::WaitGroup};
 
 pub mod channels;
@@ -30,5 +26,4 @@ pub mod cond_vars;
 pub mod mutexes;
 pub mod onces;
 pub mod rw_locks;
-pub mod scopes;
 pub mod wait_groups;

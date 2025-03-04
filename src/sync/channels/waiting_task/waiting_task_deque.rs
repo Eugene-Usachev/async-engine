@@ -115,6 +115,7 @@ macro_rules! generate_pop_shared_task_in_selector {
     }};
 }
 
+// TODO use in (2)
 macro_rules! generate_try_pop_and_call {
     () => {
         /// Tries to pop [`waiting task`](WaitingTask) from the deque and executes it.
@@ -197,7 +198,23 @@ generate_struct!(WaitingTaskLocalDequeGuard);
 impl<T> WaitingTaskLocalDequeGuard<T> {
     generate_new!();
 
-    generate_push_back!();
+    // TODO (1) generate_push_back!();
+
+    pub(crate) fn push_back_sender(&mut self, task: WaitingTask<T>) {
+        debug_assert!(self.number_of_senders_or_receivers < 1);
+
+        self.number_of_senders_or_receivers -= 1;
+
+        self.deque.push_back(task);
+    }
+
+    pub(crate) fn push_back_receiver(&mut self, task: WaitingTask<T>) {
+        debug_assert!(self.number_of_senders_or_receivers > -1);
+
+        self.number_of_senders_or_receivers += 1;
+
+        self.deque.push_back(task);
+    }
 
     /// Pops a [`waiting task`](WaitingTask) from the deque, next calls provided function,
     /// and after it execute the task.
@@ -420,7 +437,50 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
         }
     }
 
-    generate_try_pop_and_call!();
+    // TODO (2) generate_try_pop_and_call!();
+    /// Tries to pop [`waiting task`](WaitingTask) from the deque and executes it.
+    ///
+    /// Returns `true` if [`waiting task`](WaitingTask) was popped and executed,
+    /// otherwise returns `false`.
+    pub(crate) fn try_pop_front_receiver_and_call<SetterFn>(
+        &mut self,
+        mut setter_fn: SetterFn,
+    ) -> bool
+    where
+        SetterFn: FnMut(NonNull<RecvCallState>, NonNull<T>),
+    {
+        while self.number_of_senders_or_receivers > 0 {
+            self.number_of_senders_or_receivers -= 1;
+
+            if unsafe { self.try_pop_and_call(&mut setter_fn) } {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Tries to pop [`waiting task`](WaitingTask) from the deque and executes it.
+    ///
+    /// Returns `true` if [`waiting task`](WaitingTask) was popped and executed,
+    /// otherwise returns `false`.
+    pub(crate) fn try_pop_front_sender_and_call<SetterFn>(
+        &mut self,
+        mut setter_fn: SetterFn,
+    ) -> bool
+    where
+        SetterFn: FnMut(NonNull<SendCallState>, NonNull<T>),
+    {
+        while self.number_of_senders_or_receivers < 0 {
+            self.number_of_senders_or_receivers += 1;
+
+            if unsafe { self.try_pop_and_call(&mut setter_fn) } {
+                return true;
+            }
+        }
+
+        false
+    }
 
     /// Tries to pop [`waiting task`](WaitingTask) from the deque and executes it only
     /// if [`TaskInSelectBranch`] was acquired.

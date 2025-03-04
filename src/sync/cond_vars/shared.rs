@@ -113,28 +113,31 @@ where
 /// # Example
 ///
 /// ```rust
-/// use orengine::sync::{CondVar, Mutex, shared_scope, AsyncMutex, AsyncCondVar};
-/// use orengine::sleep;
+/// use std::sync::Arc;
+/// use orengine::sync::{CondVar, Mutex, AsyncMutex, AsyncCondVar};
+/// use orengine::{local_executor, sleep};
 /// use std::time::Duration;
 ///
 /// # async fn test() {
-/// let cvar = CondVar::new();
-/// let is_ready = Mutex::new(false);
+/// let cvar = Arc::new(CondVar::new());
+/// let cvar_clone = cvar.clone();
+/// let is_ready = Arc::new(Mutex::new(false));
+/// let is_ready_clone = is_ready.clone();
 ///
-/// shared_scope(|scope| async {
-///     scope.spawn(async {
-///         sleep(Duration::from_secs(1)).await;
-///         let mut lock = is_ready.lock().await;
-///         *lock = true;
-///         drop(lock);
-///         cvar.notify_one();
-///     });
+/// local_executor().spawn_shared(async move {
+///     sleep(Duration::from_secs(1)).await;
 ///
-///     let mut lock = is_ready.lock().await;
-///     while !*lock {
-///         lock = cvar.wait(lock).await; // wait 1 second
-///     }
-/// }).await;
+///     let mut lock = is_ready_clone.lock().await;
+///     *lock = true;
+///
+///     drop(lock);
+///     cvar_clone.notify_one();
+/// });
+///
+/// let mut lock = is_ready.lock().await;
+/// while !*lock {
+///     lock = cvar.wait(lock).await; // wait 1 second
+/// }
 /// # }
 /// ```
 pub struct CondVar {

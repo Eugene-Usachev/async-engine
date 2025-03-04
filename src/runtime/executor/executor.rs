@@ -393,7 +393,7 @@ impl Executor {
 
     /// Returns a reference to the local tasks queue.
     #[inline]
-    pub fn local_queue(&mut self) -> &mut VecDeque<Task> {
+    pub(crate) fn local_queue(&mut self) -> &mut VecDeque<Task> {
         &mut self.local_tasks
     }
 

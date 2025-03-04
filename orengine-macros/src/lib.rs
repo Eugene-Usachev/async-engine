@@ -722,7 +722,15 @@ pub fn select(input: TokenStream) -> TokenStream {
                 };
 
                 unsafe {
-                    local_executor().invoke_call(orengine::runtime::Call::call_fn(&mut select_closure));
+                    local_executor()
+                        .invoke_call(
+                            orengine::runtime::Call::call_fn(
+                                std::mem::transmute::<
+                                    &mut dyn FnMut(orengine::runtime::Task),
+                                    *mut dyn FnMut(orengine::runtime::Task)
+                                >(&mut select_closure)
+                            ),
+                        );
                     orengine::runtime::Task::park_current_task().await;
                 };
 

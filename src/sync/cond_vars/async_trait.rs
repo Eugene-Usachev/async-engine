@@ -28,31 +28,32 @@ pub trait AsyncCondVar: IsLocal {
     /// # Example
     ///
     /// ```no_run
-    /// use orengine::sync::{LocalCondVar, LocalMutex, local_scope, AsyncMutex, AsyncCondVar};
-    /// use orengine::sleep;
+    /// use std::rc::Rc;
+    /// use orengine::sync::{LocalCondVar, LocalMutex, AsyncMutex, AsyncCondVar};
+    /// use orengine::{local_executor, sleep};
     /// use std::time::Duration;
     ///
     /// # async fn test() {
-    /// let cvar = LocalCondVar::new();
-    /// let is_ready = LocalMutex::new(false);
+    /// let cvar = Rc::new(LocalCondVar::new());
+    /// let cvar_clone = cvar.clone();
+    /// let is_ready = Rc::new(LocalMutex::new(false));
+    /// let is_ready_clone = is_ready.clone();
     ///
-    /// local_scope(|scope| async {
-    ///     scope.spawn(async {
-    ///         sleep(Duration::from_secs(1)).await;
-    ///
-    ///         let mut lock = is_ready.lock().await;
-    ///         *lock = true;
-    ///
-    ///         drop(lock);
-    ///
-    ///         cvar.notify_one();
-    ///     });
+    /// local_executor().spawn_local(async move {
+    ///     sleep(Duration::from_secs(1)).await;
     ///
     ///     let mut lock = is_ready.lock().await;
-    ///     while !*lock {
-    ///         lock = cvar.wait(lock).await; // wait 1 second
-    ///     }
-    /// }).await;
+    ///     *lock = true;
+    ///
+    ///     drop(lock);
+    ///
+    ///     cvar.notify_one();
+    /// });
+    ///
+    /// let mut lock = is_ready.lock().await;
+    /// while !*lock {
+    ///     lock = cvar.wait(lock).await; // wait 1 second
+    /// }
     /// # }
     /// ```
     fn wait<'mutex, T>(
@@ -81,31 +82,33 @@ pub trait AsyncCondVar: IsLocal {
     /// # Example
     ///
     /// ```no_run
-    /// use orengine::sync::{LocalCondVar, LocalMutex, local_scope, AsyncMutex, AsyncCondVar};
-    /// use orengine::sleep;
+    /// use std::rc::Rc;
+    /// use orengine::sync::{LocalCondVar, LocalMutex, AsyncMutex, AsyncCondVar};
+    /// use orengine::{local_executor, sleep};
     /// use std::time::Duration;
     ///
     /// # async fn test() {
-    /// let cvar = LocalCondVar::new();
-    /// let is_ready = LocalMutex::new(false);
     ///
-    /// local_scope(|scope| async {
-    ///     scope.spawn(async {
-    ///         sleep(Duration::from_secs(1)).await;
+    /// let cvar = Rc::new(LocalCondVar::new());
+    /// let cvar_clone = cvar.clone();
+    /// let is_ready = Rc::new(LocalMutex::new(false));
+    /// let is_ready_clone = is_ready.clone();
     ///
-    ///         let mut lock = is_ready.lock().await;
-    ///         *lock = true;
+    /// local_executor().spawn_local(async move {
+    ///     sleep(Duration::from_secs(1)).await;
     ///
-    ///         drop(lock);
+    ///     let mut lock = is_ready_clone.lock().await;
+    ///     *lock = true;
     ///
-    ///         cvar.notify_one();
-    ///     });
+    ///     drop(lock);
     ///
-    ///     let mut is_ready_lock = cvar.wait_while(
-    ///         is_ready.lock().await,
-    ///         |lock| !*lock
-    ///     ).await; // wait 1 second
-    /// }).await;
+    ///     cvar_clone.notify_one();
+    /// });
+    ///
+    /// let mut is_ready_lock = cvar.wait_while(
+    ///     is_ready.lock().await,
+    ///     |lock| !*lock
+    /// ).await; // wait 1 second
     /// # }
     /// ```
     async fn wait_while<'mutex, T>(
@@ -177,30 +180,31 @@ pub trait AsyncCondVar: IsLocal {
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::sleep;
-    use crate::sync::{local_scope, LocalCondVar, LocalMutex};
+    use crate::sync::{LocalCondVar, LocalMutex};
+    use crate::{local_executor, sleep};
+    use std::rc::Rc;
     use std::time::Duration;
 
     #[orengine::test::test_local]
     fn test_cond_var_wait_while() {
-        let cvar = LocalCondVar::new();
-        let is_ready = LocalMutex::new(false);
-        local_scope(|scope| async {
-            scope.spawn(async {
-                sleep(Duration::from_secs(1)).await;
+        let cvar = Rc::new(LocalCondVar::new());
+        let cvar_clone = cvar.clone();
+        let is_ready = Rc::new(LocalMutex::new(false));
+        let is_ready_clone = is_ready.clone();
 
-                let mut lock = is_ready.lock().await;
-                *lock = true;
+        local_executor().spawn_local(async move {
+            sleep(Duration::from_secs(1)).await;
 
-                drop(lock);
+            let mut lock = is_ready_clone.lock().await;
+            *lock = true;
 
-                cvar.notify_one();
-            });
+            drop(lock);
 
-            let is_ready_lock = cvar.wait_while(is_ready.lock().await, |lock| !*lock).await; // wait 1 second
+            cvar_clone.notify_one();
+        });
 
-            assert!(*is_ready_lock);
-        })
-        .await;
+        let is_ready_lock = cvar.wait_while(is_ready.lock().await, |lock| !*lock).await; // wait 1 second
+
+        assert!(*is_ready_lock);
     }
 }

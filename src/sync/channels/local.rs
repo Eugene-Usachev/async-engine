@@ -903,93 +903,88 @@ fn test_compile_local_channel() {}
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::sync::{local_scope, RecvErr, TryRecvErr};
+    use crate::sync::{RecvErr, TryRecvErr};
     use crate::utils::droppable_element::DroppableElement;
     use crate::utils::SpinLock;
     use crate::{yield_now, Local};
+    use std::rc::Rc;
     use std::sync::Arc;
 
     #[orengine::test::test_local]
     fn test_local_zero_capacity() {
-        let ch = LocalChannel::bounded(0);
-        let ch_ref = &ch;
+        let chan = Rc::new(LocalChannel::bounded(0));
+        let chan_clone = chan.clone();
 
-        local_scope(|scope| async {
-            scope.spawn(async move {
-                ch_ref.send(1).await.unwrap();
+        local_executor().spawn_local(async move {
+            chan_clone.send(1).await.unwrap();
 
-                yield_now().await;
+            yield_now().await;
 
-                ch_ref.send(2).await.unwrap();
-                ch_ref.close().await;
-            });
+            chan_clone.send(2).await.unwrap();
+            chan_clone.close().await;
+        });
 
-            let res = ch.recv().await.unwrap();
-            assert_eq!(res, 1);
-            let res = ch.recv().await.unwrap();
-            assert_eq!(res, 2);
+        let res = chan.recv().await.unwrap();
+        assert_eq!(res, 1);
+        let res = chan.recv().await.unwrap();
+        assert_eq!(res, 2);
 
-            match ch.send(2).await.expect_err("should be closed") {
-                SendErr::Closed(value) => assert_eq!(value, 2),
-            };
-        })
-        .await;
+        match chan.send(2).await.expect_err("should be closed") {
+            SendErr::Closed(value) => assert_eq!(value, 2),
+        };
     }
 
     #[orengine::test::test_local]
     fn test_local_unbounded() {
-        let ch = LocalChannel::unbounded();
-        let ch_ref = &ch;
+        let chan = Rc::new(LocalChannel::unbounded());
+        let chan_clone = chan.clone();
 
-        local_scope(|scope| async {
-            scope.spawn(async move {
-                ch_ref.send(1).await.unwrap();
+        local_executor().spawn_local(async move {
+            chan_clone.send(1).await.unwrap();
 
-                yield_now().await;
+            yield_now().await;
 
-                for i in 2..100 {
-                    ch_ref.send(i).await.unwrap();
-                }
-
-                yield_now().await; // Drops streak (maximum 63 executions)
-
-                ch_ref.close().await;
-            });
-
-            for i in 1..100 {
-                let res = ch.recv().await.unwrap();
-                assert_eq!(res, i);
+            for i in 2..100 {
+                chan_clone.send(i).await.unwrap();
             }
 
-            assert!(
-                matches!(
-                    ch.recv().await.expect_err("should be closed"),
-                    RecvErr::Closed
-                ),
-                "should be closed"
-            );
-        })
-        .await;
+            yield_now().await; // Drops streak (maximum 63 executions)
+
+            chan_clone.close().await;
+        });
+
+        for i in 1..100 {
+            let res = chan.recv().await.unwrap();
+            assert_eq!(res, i);
+        }
+
+        assert!(
+            matches!(
+                chan.recv().await.expect_err("should be closed"),
+                RecvErr::Closed
+            ),
+            "should be closed"
+        );
     }
 
     #[orengine::test::test_local]
     fn test_local_channel_try() {
-        let ch = LocalChannel::bounded(1);
+        let chan = LocalChannel::bounded(1);
 
         assert!(
             matches!(
-                ch.try_recv().expect_err("should be closed"),
+                chan.try_recv().expect_err("should be closed"),
                 TryRecvErr::Empty
             ),
             "should be empty"
         );
-        assert!(ch.try_send(1).is_ok(), "should be empty");
+        assert!(chan.try_send(1).is_ok(), "should be empty");
         assert!(
-            matches!(ch.try_recv().expect("should be not empty"), 1),
+            matches!(chan.try_recv().expect("should be not empty"), 1),
             "should be not empty"
         );
-        assert!(ch.try_send(2).is_ok(), "should be empty");
-        match ch.try_send(3).expect_err("should be full") {
+        assert!(chan.try_send(2).is_ok(), "should be empty");
+        match chan.try_send(3).expect_err("should be full") {
             TrySendErr::Full(value) => {
                 assert_eq!(value, 3);
             }
@@ -1001,16 +996,16 @@ mod tests {
             }
         }
 
-        ch.close().await;
+        chan.close().await;
 
         assert!(
             matches!(
-                ch.try_recv().expect_err("should be closed"),
+                chan.try_recv().expect_err("should be closed"),
                 TryRecvErr::Closed
             ),
             "should be closed"
         );
-        match ch.try_send(4).expect_err("should be closed") {
+        match chan.try_send(4).expect_err("should be closed") {
             TrySendErr::Full(_) => {
                 panic!("should be not full")
             }
@@ -1032,125 +1027,110 @@ mod tests {
 
     #[orengine::test::test_local]
     fn test_local_channel_case1() {
-        let ch = LocalChannel::bounded(N);
-        let ch_ref = &ch;
+        let chan = Rc::new(LocalChannel::bounded(N));
+        let chan_clone = chan.clone();
 
-        local_scope(|scope| async {
-            scope.spawn(async move {
-                for i in 0..N {
-                    ch_ref.send(i).await.unwrap();
-                }
-
-                yield_now().await;
-
-                ch_ref.close().await;
-            });
-
+        local_executor().spawn_local(async move {
             for i in 0..N {
-                let res = ch.recv().await.unwrap();
-                assert_eq!(res, i);
-            }
-
-            assert!(
-                matches!(
-                    ch.recv().await.expect_err("should be closed"),
-                    RecvErr::Closed
-                ),
-                "should be closed"
-            );
-        })
-        .await;
-    }
-
-    #[orengine::test::test_local]
-    fn test_local_channel_case2() {
-        let ch = LocalChannel::bounded(N);
-        let ch_ref = &ch;
-
-        local_scope(|scope| async {
-            scope.spawn(async move {
-                for i in 0..=N {
-                    let res = ch_ref.recv().await.unwrap();
-                    assert_eq!(res, i);
-                }
-
-                ch_ref.close().await;
-            });
-
-            for i in 0..N {
-                ch.send(i).await.unwrap();
+                chan_clone.send(i).await.unwrap();
             }
 
             yield_now().await;
 
-            ch.send(N).await.unwrap();
-        })
-        .await;
+            chan_clone.close().await;
+        });
+
+        for i in 0..N {
+            let res = chan.recv().await.unwrap();
+            assert_eq!(res, i);
+        }
+
+        assert!(
+            matches!(
+                chan.recv().await.expect_err("should be closed"),
+                RecvErr::Closed
+            ),
+            "should be closed"
+        );
+    }
+
+    #[orengine::test::test_local]
+    fn test_local_channel_case2() {
+        let chan = Rc::new(LocalChannel::bounded(N));
+        let chan_clone = chan.clone();
+
+        local_executor().spawn_local(async move {
+            for i in 0..=N {
+                let res = chan_clone.recv().await.unwrap();
+                assert_eq!(res, i);
+            }
+
+            chan_clone.close().await;
+        });
+
+        for i in 0..N {
+            chan.send(i).await.unwrap();
+        }
+
+        yield_now().await;
+
+        chan.send(N).await.unwrap();
     }
 
     #[orengine::test::test_local]
     fn test_local_channel_case3() {
-        let ch = LocalChannel::bounded(N);
-        let ch_ref = &ch;
+        let chan = Rc::new(LocalChannel::bounded(N));
+        let chan_clone = chan.clone();
 
-        local_scope(|scope| async {
-            scope.spawn(async move {
-                for i in 0..N {
-                    let res = ch_ref.recv().await.unwrap();
-                    assert_eq!(res, i);
-                }
-
-                yield_now().await;
-
-                let res = ch_ref.recv().await.unwrap();
-                assert_eq!(res, N);
-            });
-
-            for i in 0..=N {
-                ch.send(i).await.unwrap();
+        local_executor().spawn_local(async move {
+            for i in 0..N {
+                let res = chan_clone.recv().await.unwrap();
+                assert_eq!(res, i);
             }
-        })
-        .await;
+
+            yield_now().await;
+
+            let res = chan_clone.recv().await.unwrap();
+            assert_eq!(res, N);
+        });
+
+        for i in 0..=N {
+            chan.send(i).await.unwrap();
+        }
     }
 
     #[orengine::test::test_local]
     fn test_local_channel_case4() {
-        let ch = LocalChannel::bounded(N);
-        let ch_ref = &ch;
+        let chan = Rc::new(LocalChannel::bounded(N));
+        let chan_clone = chan.clone();
 
-        local_scope(|scope| async {
-            scope.spawn(async move {
-                for i in 0..=N {
-                    let res = ch_ref.recv().await.unwrap();
-                    assert_eq!(res, i);
-                }
-            });
-
+        local_executor().spawn_local(async move {
             for i in 0..=N {
-                ch.send(i).await.unwrap();
+                let res = chan_clone.recv().await.unwrap();
+                assert_eq!(res, i);
             }
-        })
-        .await;
+        });
+
+        for i in 0..=N {
+            chan.send(i).await.unwrap();
+        }
     }
 
     #[orengine::test::test_local]
     fn test_local_channel_split() {
-        let ch = LocalChannel::bounded(N);
-        let (tx, rx) = ch.split();
+        let chan = LocalChannel::bounded(N);
+        let (tx, rx) = chan.split();
 
-        local_scope(|scope| async {
-            scope.spawn(async {
-                for i in 0..=N * 2 {
-                    let res = rx.recv().await.unwrap();
-                    assert_eq!(res, i);
-                }
-            });
-
-            for i in 0..=N * 3 {
-                tx.send(i).await.unwrap();
+        local_executor().spawn_local(async {
+            for i in 0..=N * 2 {
+                let res = rx.recv().await.unwrap();
+                assert_eq!(res, i);
             }
-        })
-        .await;
+        });
+
+        for i in 0..=N * 3 {
+            tx.send(i).await.unwrap();
+        }
     }
 
     #[orengine::test::test_local]
@@ -1227,58 +1207,55 @@ mod tests {
         for _ in 0..10 {
             let res = Local::new(0);
 
-            local_scope(|scope| async {
-                for i in 0..PAR {
-                    scope.spawn(async {
-                        if i % 2 == 0 {
-                            for j in 0..COUNT {
-                                loop {
-                                    match channel.try_send(j) {
-                                        Ok(()) => break,
-                                        Err(e) => match e {
-                                            TrySendErr::Full(_) | TrySendErr::Locked(_) => {
-                                                yield_now().await;
-                                            }
-                                            TrySendErr::Closed(_) => panic!("send failed"),
-                                        },
-                                    }
-                                }
-                            }
-                        } else {
-                            for j in 0..COUNT {
-                                channel.send(j).await.unwrap();
-                            }
-                        }
-                    });
-
-                    scope.spawn(async {
-                        if i % 2 == 0 {
-                            for _ in 0..COUNT {
-                                loop {
-                                    match channel.try_recv() {
-                                        Ok(v) => {
-                                            *res.borrow_mut() += v;
-                                            break;
+            for i in 0..PAR {
+                local_executor().spawn_local(async {
+                    if i % 2 == 0 {
+                        for j in 0..COUNT {
+                            loop {
+                                match channel.try_send(j) {
+                                    Ok(()) => break,
+                                    Err(e) => match e {
+                                        TrySendErr::Full(_) | TrySendErr::Locked(_) => {
+                                            yield_now().await;
                                         }
-                                        Err(e) => match e {
-                                            TryRecvErr::Empty | TryRecvErr::Locked => {
-                                                yield_now().await;
-                                            }
-                                            TryRecvErr::Closed => panic!("recv failed"),
-                                        },
-                                    }
+                                        TrySendErr::Closed(_) => panic!("send failed"),
+                                    },
                                 }
                             }
-                        } else {
-                            for _ in 0..COUNT {
-                                let r = channel.recv().await.unwrap();
-                                *res.borrow_mut() += r;
+                        }
+                    } else {
+                        for j in 0..COUNT {
+                            channel.send(j).await.unwrap();
+                        }
+                    }
+                });
+
+                local_executor().spawn_local(async {
+                    if i % 2 == 0 {
+                        for _ in 0..COUNT {
+                            loop {
+                                match channel.try_recv() {
+                                    Ok(v) => {
+                                        *res.borrow_mut() += v;
+                                        break;
+                                    }
+                                    Err(e) => match e {
+                                        TryRecvErr::Empty | TryRecvErr::Locked => {
+                                            yield_now().await;
+                                        }
+                                        TryRecvErr::Closed => panic!("recv failed"),
+                                    },
+                                }
                             }
                         }
-                    });
-                }
-            })
-            .await;
+                    } else {
+                        for _ in 0..COUNT {
+                            let r = channel.recv().await.unwrap();
+                            *res.borrow_mut() += r;
+                        }
+                    }
+                });
+            }
 
             assert_eq!(*res.borrow(), PAR * COUNT * (COUNT - 1) / 2);
         }

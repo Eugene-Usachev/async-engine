@@ -4,11 +4,13 @@ mod tools;
 
 use orengine::runtime::{local_executor, stop_all_executors};
 use orengine::sync::{
-    local_scope, AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, LocalChannel,
+    AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, AsyncWaitGroup,
+    LocalWaitGroup,
 };
 use orengine::Executor;
 use smol::future;
 use std::hint::black_box;
+use std::rc::Rc;
 use std::thread;
 use tools::bench;
 
@@ -76,19 +78,19 @@ fn bench_create_task_and_yield() {
     bench("orengine small create_task_and_yield", |mut b| {
         init_orengine_cpu_bound();
         local_executor().spawn_local(async move {
-            b.iter_async(|| async {
-                let ret_ch = LocalChannel::bounded(0);
-                local_scope(|scope| async {
-                    scope.spawn(async {
-                        orengine::yield_now().await;
-                        let _ = ret_ch.send(0).await;
-                    });
+            let wg = Rc::new(LocalWaitGroup::new());
 
-                    let _ = black_box(ret_ch.recv().await);
-                })
-                .await;
+            b.iter_async(|| async {
+                let wg_clone = wg.clone();
+                local_executor().spawn_local(async {
+                    orengine::yield_now().await;
+                    wg_clone.done();
+                });
+
+                wg.wait().await;
             })
             .await;
+
             stop_all_executors();
         });
         local_executor().run();
@@ -158,18 +160,18 @@ fn bench_create_task_and_yield() {
     bench("orengine large create_task_and_yield", |mut b| {
         init_orengine_cpu_bound();
         local_executor().spawn_local(async move {
-            b.iter_async(|| async {
-                let ret_ch = LocalChannel::bounded(0);
-                local_scope(|scope| async {
-                    scope.spawn(async {
-                        let a = black_box([0u8; LARGE_SIZE]);
-                        orengine::yield_now().await;
-                        let _ = ret_ch.send(black_box(a.len())).await;
-                    });
+            let wg = Rc::new(LocalWaitGroup::new());
 
-                    let _ = black_box(ret_ch.recv().await);
-                })
-                .await;
+            b.iter_async(|| async {
+                let wg_clone = wg.clone();
+                local_executor().spawn_local(async {
+                    let a = black_box([0u8; LARGE_SIZE]);
+                    orengine::yield_now().await;
+                    black_box(a.len());
+                    wg_clone.done();
+                });
+
+                wg.wait().await;
             })
             .await;
             stop_all_executors();
@@ -274,16 +276,13 @@ fn bench_yield_task() {
         local_executor()
             .run_and_block_on_local(async move {
                 b.iter_async(|| async {
-                    local_scope(|scope| async {
-                        for _ in 0..NUMBER_TASKS {
-                            scope.exec(async move {
-                                for _ in 0..YIELDS_PER_TASK {
-                                    orengine::yield_now().await;
-                                }
-                            });
-                        }
-                    })
-                    .await;
+                    for _ in 0..NUMBER_TASKS {
+                        local_executor().exec_local_future(async move {
+                            for _ in 0..YIELDS_PER_TASK {
+                                orengine::yield_now().await;
+                            }
+                        });
+                    }
                 })
                 .await;
             })

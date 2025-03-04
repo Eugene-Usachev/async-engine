@@ -2,7 +2,7 @@
 /// it panics with `debug_assertions`.
 #[inline(always)]
 #[allow(unused_variables, reason = "It contains #[cfg(debug_assertions)]")]
-pub(crate) fn assert_hint(cond: bool, debug_msg: &str) {
+pub fn assert_hint(cond: bool, debug_msg: &str) {
     #[cfg(debug_assertions)]
     {
         assert!(cond, "{}", debug_msg);
@@ -18,7 +18,7 @@ pub(crate) fn assert_hint(cond: bool, debug_msg: &str) {
 /// it panics with `debug_assertions`.
 #[inline(always)]
 #[allow(unused_variables, reason = "It contains #[cfg(debug_assertions)]")]
-pub(crate) fn unreachable_hint() -> ! {
+pub fn unreachable_hint() -> ! {
     #[cfg(debug_assertions)]
     unreachable!();
 

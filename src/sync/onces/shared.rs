@@ -126,7 +126,7 @@ unsafe impl Sync for Once {}
 unsafe impl Send for Once {}
 
 /// ```rust
-/// use orengine::sync::{Once, AsyncOnce, shared_scope};
+/// use orengine::sync::{Once, AsyncOnce};
 /// use orengine::yield_now;
 ///
 /// fn check_send<T: Send>(value: T) -> T { value }

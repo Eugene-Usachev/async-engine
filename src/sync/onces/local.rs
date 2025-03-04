@@ -108,7 +108,7 @@ impl Default for LocalOnce {
 }
 
 /// ```compile_fail
-/// use orengine::sync::{LocalOnce, AsyncOnce, shared_scope};
+/// use orengine::sync::{LocalOnce, AsyncOnce};
 /// use orengine::yield_now;
 ///
 /// fn check_send<T: Send>(value: T) -> T { value }

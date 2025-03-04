@@ -30,19 +30,23 @@ impl<'scope> LocalScope<'scope> {
     ///
     /// The created task will be executed immediately.
     ///
+    /// # Stability
+    ///
+    /// Read [`local_scope`].
+    ///
     /// # Example
     ///
     /// ```rust
     /// use std::ops::Deref;
     /// use std::time::Duration;
-    /// use orengine::{sleep, Local};
-    /// use orengine::sync::{local_scope, AsyncWaitGroup, LocalWaitGroup};
+    /// use orengine::{sleep, unstable, Local};
+    /// use orengine::sync::{AsyncWaitGroup, LocalWaitGroup};
     ///
     /// # async fn foo() {
     /// let wg = LocalWaitGroup::new();
     /// let a = Local::new(0);
     ///
-    /// local_scope(|scope| async {
+    /// unstable::local_scope(|scope| async {
     ///     for i in 0..10 {
     ///         wg.inc();
     ///         scope.exec(async {
@@ -81,18 +85,22 @@ impl<'scope> LocalScope<'scope> {
     ///
     /// The spawned task will be executed later.
     ///
+    /// # Stability
+    ///
+    /// Read [`local_scope`].
+    ///
     /// # Example
     ///
     /// ```rust
     /// use std::ops::Deref;
-    /// use orengine::Local;
-    /// use orengine::sync::{local_scope, AsyncWaitGroup, LocalWaitGroup};
+    /// use orengine::{unstable, Local};
+    /// use orengine::sync::{AsyncWaitGroup, LocalWaitGroup};
     ///
     /// # async fn foo() {
     /// let wg = LocalWaitGroup::new();
     /// let a = Local::new(0);
     ///
-    /// local_scope(|scope| async {
+    /// unstable::local_scope(|scope| async {
     ///     for i in 0..10 {
     ///         wg.inc();
     ///         scope.spawn(async {
@@ -124,6 +132,10 @@ impl<'scope> LocalScope<'scope> {
 
 /// `LocalScopedHandle` is a wrapper of `Future<Output = ()>`
 /// to decrement the wait group when the future is done.
+///
+/// # Stability
+///
+/// Read [`local_scope`].
 #[repr(C)]
 pub(crate) struct LocalScopedHandle<'scope, Fut: Future<Output = ()>> {
     scope: &'scope LocalScope<'scope>,
@@ -165,30 +177,38 @@ impl<Fut: Future<Output = ()>> Future for LocalScopedHandle<'_, Fut> {
 ///
 /// Read [`Executor`](crate::Executor) for more details.
 ///
+/// # Stability
+///
+/// Rust compiler creates difference references in a main closure and __spawned__ and __executed__
+/// closures from variables via `move` keyword. You can use it if you explicitly create references
+/// for your variables.
+///
 /// # Example
 ///
 /// ```rust
 /// use std::ops::Deref;
 /// use std::time::Duration;
-/// use orengine::{sleep, Local};
-/// use orengine::sync::{local_scope, AsyncWaitGroup, LocalWaitGroup};
+/// use orengine::{sleep, unstable, Local};
+/// use orengine::sync::{AsyncWaitGroup, LocalWaitGroup};
 ///
 /// # async fn foo() {
 /// let wg = LocalWaitGroup::new();
 /// let a = Local::new(0);
 ///
-/// local_scope(|scope| async {
+/// unstable::local_scope(|scope| async {
+///     let wg_ref = &wg; // explicitly create a reference
+///
 ///     for i in 0..10 {
-///         wg.inc();
+///         wg_ref.inc();
 ///         scope.exec(async {
 ///             assert_eq!(*a.borrow(), i);
 ///             *a.borrow_mut() += 1;
 ///             sleep(Duration::from_millis(i)).await;
-///             wg.done();
+///             wg_ref.done();
 ///         });
 ///     }
 ///
-///     wg.wait().await;
+///     wg_ref.wait().await;
 ///     assert_eq!(*a.borrow(), 10);
 /// }).await;
 ///

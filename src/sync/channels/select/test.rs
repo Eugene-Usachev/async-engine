@@ -1,8 +1,8 @@
 // TODO
 use crate as orengine;
-use crate::sync::{local_scope, AsyncChannel, AsyncReceiver, AsyncSender, LocalChannel};
+use crate::sync::{AsyncChannel, AsyncReceiver, AsyncSender, LocalChannel};
 use crate::{local_executor, sleep};
-use orengine_macros::select;
+use orengine::select;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -54,23 +54,21 @@ fn test_local_select_with_default() {
     {
         const RES: u32 = 23;
 
-        let chan = LocalChannel::<u32>::bounded(1);
+        let chan = Rc::new(LocalChannel::<u32>::bounded(1));
+        let chan_clone = chan.clone();
 
-        local_scope(|scope| async {
-            scope.spawn(async {
-                let ch2 = LocalChannel::<u32>::bounded(1);
-                let ch3 = LocalChannel::<u32>::bounded(1);
-                select! {
-                    recv(&ch2) -> _var => ()
-                    recv(&ch3) -> _var => ()
-                    send(&chan, RES) -> res => {
-                        res.expect("channel is closed");
-                    }
-                    default => ()
+        local_executor().spawn_local(async {
+            let ch2 = LocalChannel::<u32>::bounded(1);
+            let ch3 = LocalChannel::<u32>::bounded(1);
+            select! {
+                recv(&ch2) -> _var => ()
+                recv(&ch3) -> _var => ()
+                send(&chan_clone, RES) -> res => {
+                    res.expect("channel is closed");
                 }
-            });
-        })
-        .await;
+                default => ()
+            }
+        });
 
         assert_eq!(chan.recv().await.expect("failed to receive"), RES);
 
@@ -155,23 +153,21 @@ fn test_local_select_without_default_non_blocking() {
     {
         const RES: u32 = 23;
 
-        let chan = LocalChannel::<u32>::bounded(1);
+        let chan = Rc::new(LocalChannel::<u32>::bounded(1));
+        let chan_clone = chan.clone();
 
-        local_scope(|scope| async {
-            scope.spawn(async {
-                let ch2 = LocalChannel::<u32>::bounded(1);
-                let ch3 = LocalChannel::<u32>::bounded(1);
-                select! {
-                    recv(&ch2) -> _var => ()
-                    recv(&ch3) -> _var => ()
-                    send(&chan, RES) -> res => {
-                        res.expect("channel is closed");
-                    }
-                    default => ()
+        local_executor().spawn_local(async {
+            let ch2 = LocalChannel::<u32>::bounded(1);
+            let ch3 = LocalChannel::<u32>::bounded(1);
+            select! {
+                recv(&ch2) -> _var => ()
+                recv(&ch3) -> _var => ()
+                send(&chan_clone, RES) -> res => {
+                    res.expect("channel is closed");
                 }
-            });
-        })
-        .await;
+                default => ()
+            }
+        });
 
         assert_eq!(chan.recv().await.expect("failed to receive"), RES);
 

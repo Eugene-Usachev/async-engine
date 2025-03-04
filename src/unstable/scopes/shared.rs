@@ -7,6 +7,10 @@ use std::task::Poll;
 
 /// A scope to spawn scoped shared tasks in.
 ///
+/// # Stability
+///
+/// Read [`shared_scope`].
+///
 /// # The difference between `Scope` and [`LocalScope`](crate::sync::LocalScope)
 ///
 /// The `Scope` works with `shared tasks` and its tasks can be shared between threads.
@@ -28,19 +32,23 @@ impl<'scope> Scope<'scope> {
     ///
     /// The created task will be executed immediately.
     ///
+    /// # Stability
+    ///
+    /// Read [`shared_scope`].
+    ///
     /// # Example
     ///
     /// ```rust
     /// use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
     /// use std::time::Duration;
-    /// use orengine::sleep;
-    /// use orengine::sync::{shared_scope, AsyncWaitGroup, WaitGroup};
+    /// use orengine::{sleep, unstable};
+    /// use orengine::sync::{AsyncWaitGroup, WaitGroup};
     ///
     /// # async fn foo() {
     /// let wg = WaitGroup::new();
     /// let a = AtomicUsize::new(0);
     ///
-    /// shared_scope(|scope| async {
+    /// unstable::shared_scope(|scope| async {
     ///     for i in 0..10 {
     ///         wg.inc();
     ///         scope.exec(async {
@@ -78,17 +86,23 @@ impl<'scope> Scope<'scope> {
     ///
     /// The created task will be executed later.
     ///
+    /// # Stability
+    ///
+    /// Read [`shared_scope`].
+    ///
     /// # Example
     ///
     /// ```rust
     /// use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
-    /// use orengine::sync::{shared_scope, AsyncWaitGroup, WaitGroup};
+    /// use orengine::sync::{AsyncWaitGroup, WaitGroup};
+    /// #
+    /// use orengine::unstable;
     ///
-    /// # async fn foo() {
+    /// async fn foo() {
     /// let wg = WaitGroup::new();
     /// let a = AtomicUsize::new(0);
     ///
-    /// shared_scope(|scope| async {
+    /// unstable::shared_scope(|scope| async {
     ///     for i in 0..10 {
     ///         wg.inc();
     ///         scope.spawn(async {
@@ -122,6 +136,10 @@ unsafe impl Sync for Scope<'_> {}
 
 /// `ScopedHandle` is a wrapper of `Future<Output = ()>`
 /// to decrement the wait group when the future is done.
+///
+/// # Stability
+///
+/// Read [`shared_scope`].
 #[repr(C)]
 pub(crate) struct ScopedHandle<'scope, Fut: Future<Output = ()> + Send> {
     scope: &'scope Scope<'scope>,
@@ -164,19 +182,25 @@ unsafe impl<F: Future<Output = ()> + Send> Sync for ScopedHandle<'_, F> {}
 ///
 /// Read [`Executor`](crate::Executor) for more details.
 ///
+/// # Stability
+///
+/// Rust compiler creates difference references in a main closure and __spawned__ and __executed__
+/// closures from variables via `move` keyword. You can use it if you explicitly create references
+/// for your variables.
+///
 /// # Example
 ///
 /// ```rust
 /// use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 /// use std::time::Duration;
-/// use orengine::sleep;
-/// use orengine::sync::{shared_scope, AsyncWaitGroup, WaitGroup};
+/// use orengine::{sleep, unstable};
+/// use orengine::sync::{AsyncWaitGroup, WaitGroup};
 ///
 /// # async fn foo() {
 /// let wg = WaitGroup::new();
 /// let a = AtomicUsize::new(0);
 ///
-/// shared_scope(|scope| async {
+/// unstable::shared_scope(|scope| async {
 ///     for i in 0..10 {
 ///         wg.inc();
 ///         scope.exec(async {
@@ -218,13 +242,12 @@ where
 }
 
 /// ```rust
-/// use orengine::sync::shared_scope;
-/// use orengine::yield_now;
+/// use orengine::{unstable, yield_now};
 ///
 /// fn check_send<T: Send>(value: T) -> T { value }
 ///
 /// async fn test() {
-///     check_send(shared_scope(|_| async {})).await;
+///     check_send(unstable::shared_scope(|_| async {})).await;
 /// }
 /// ```
 #[allow(dead_code, reason = "It is used only in compile tests")]

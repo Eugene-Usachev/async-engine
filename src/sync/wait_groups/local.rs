@@ -58,27 +58,30 @@ struct Inner {
 /// # Example
 ///
 /// ```rust
+/// use std::rc::Rc;
 /// use std::time::Duration;
-/// use orengine::{sleep, Local};
-/// use orengine::sync::{local_scope, AsyncWaitGroup, LocalWaitGroup};
+/// use orengine::{local_executor, sleep, Local};
+/// use orengine::sync::{AsyncWaitGroup, LocalWaitGroup};
 ///
 /// # async fn foo() {
-/// let wait_group = LocalWaitGroup::new();
-/// let number_executed_tasks = Local::new(0);
+/// let wait_group = Rc::new(LocalWaitGroup::new());
+/// let number_executed_tasks = Rc::new(Local::new(0));
 ///
-/// local_scope(|scope| async {
-///     for i in 0..10 {
-///         wait_group.inc();
-///         scope.spawn(async {
-///             sleep(Duration::from_millis(i)).await;
-///             *number_executed_tasks.borrow_mut() += 1;
-///             wait_group.done();
-///         });
-///     }
+/// for i in 0..10 {
+///     let wait_group = wait_group.clone();
+///     let number_executed_tasks = number_executed_tasks.clone();
 ///
-///     wait_group.wait().await; // wait until all tasks are completed
-///     assert_eq!(*number_executed_tasks.borrow(), 10);
-/// }).await;
+///     wait_group.inc();
+///
+///     local_executor().spawn_local(async move {
+///         sleep(Duration::from_millis(i)).await;
+///         *number_executed_tasks.borrow_mut() += 1;
+///         wait_group.done();
+///     });
+/// }
+///
+/// wait_group.wait().await; // wait until all tasks are completed
+/// assert_eq!(*number_executed_tasks.borrow(), 10);
 /// # }
 /// ```
 pub struct LocalWaitGroup {
@@ -158,7 +161,7 @@ impl Default for LocalWaitGroup {
 unsafe impl Sync for LocalWaitGroup {}
 
 /// ```compile_fail
-/// use orengine::sync::{LocalWaitGroup, AsyncWaitGroup, shared_scope};
+/// use orengine::sync::{LocalWaitGroup, AsyncWaitGroup};
 /// use orengine::yield_now;
 ///
 /// fn check_send<T: Send>(value: T) -> T { value }

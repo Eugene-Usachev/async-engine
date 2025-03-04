@@ -33,25 +33,25 @@ pub trait AsyncSender<T>: IsLocal {
     ///
     /// ```rust
     /// use std::time::Duration;
-    /// use orengine::sleep;
-    /// use orengine::sync::{shared_scope, AsyncChannel, AsyncReceiver, AsyncSender};
+    /// use orengine::{local_executor, sleep};
+    /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
     ///
     ///  async fn foo() {
     ///     let channel = orengine::sync::Channel::bounded(1);
     ///     let (sender, receiver) = channel.split();
     ///     let start = std::time::Instant::now();
     ///
-    ///     shared_scope(|scope| async {
-    ///         scope.spawn(async move {
-    ///             sleep(Duration::from_millis(100)).await;
-    ///             receiver.recv().await.unwrap();
-    ///         });
+    ///     local_executor().spawn_local(async move {
+    ///         sleep(Duration::from_millis(100)).await;
     ///
-    ///         sender.send(1).await.unwrap();
-    ///         assert!(start.elapsed() < Duration::from_millis(100));
-    ///         sender.send(2).await.unwrap(); // blocks, because the channel is full
-    ///         assert!(start.elapsed() >= Duration::from_millis(100));
-    ///     }).await;
+    ///         receiver.recv().await.unwrap();
+    ///     });
+    ///
+    ///     sender.send(1).await.unwrap();
+    ///     assert!(start.elapsed() < Duration::from_millis(100));
+    ///
+    ///     sender.send(2).await.unwrap(); // blocks, because the channel is full
+    ///     assert!(start.elapsed() >= Duration::from_millis(100));
     /// }
     /// ```
     fn send(&self, value: T) -> impl Future<Output = Result<(), SendErr<T>>>;
@@ -556,7 +556,8 @@ pub trait AsyncChannel<T>: AsyncSender<T> + AsyncReceiver<T> {
     /// # Example
     ///
     /// ```rust
-    /// use orengine::sync::{local_scope, AsyncChannel, AsyncReceiver, AsyncSender};
+    /// use orengine::local_executor;
+    /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
     ///
     /// struct Actor1<Req: AsyncReceiver<usize>, Res: AsyncSender<usize>> {
     ///     req_ch: Req,
@@ -579,11 +580,9 @@ pub trait AsyncChannel<T>: AsyncSender<T> + AsyncReceiver<T> {
     ///     let actor1 = Actor1 { req_ch: actor1_req, res_ch: actor2_res };
     ///     let actor2 = Actor2 { req_ch: actor2_req, res_ch: actor1_res };
     ///
-    ///     local_scope(|scope| async {
-    ///         scope.spawn(run_actor1(actor1));
+    ///     local_executor().spawn_local(run_actor1(actor1));
     ///
-    ///         run_actor2(actor2).await;
-    ///     }).await;
+    ///     run_actor2(actor2).await;
     /// }
     /// ```
     fn split(&self) -> (Self::Sender<'_>, Self::Receiver<'_>);

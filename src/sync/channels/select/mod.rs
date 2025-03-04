@@ -8,7 +8,6 @@ mod test;
 
 use crate::sync::AsyncChannel;
 pub use receiver::*;
-pub(crate) use result::*;
+pub use result::*;
 pub use select_macro::*;
 pub use sender::*;
-pub use test::*;

@@ -3,7 +3,7 @@ pub mod errors;
 pub mod local;
 pub mod select;
 pub mod shared;
-pub mod states;
+mod state;
 pub mod waiting_task;
 
 pub use async_trait::*;
@@ -11,3 +11,4 @@ pub use errors::*;
 pub use local::*;
 pub use select::{SelectReceiver, SelectSender};
 pub use shared::*;
+pub use state::CallState;

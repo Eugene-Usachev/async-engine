@@ -5,6 +5,10 @@
 #![warn(clippy::pedantic)]
 #![warn(clippy::nursery)]
 #![warn(clippy::cargo)]
+#![allow(
+    clippy::too_many_lines,
+    reason = "Sometimes it improves readability (instead of multiple functions)."
+)]
 #![allow(async_fn_in_trait, reason = "It improves readability.")]
 #![allow(
     clippy::missing_const_for_fn,

@@ -2,7 +2,7 @@ use crate::panic_if_local_in_future;
 use crate::runtime::call::Call;
 use crate::runtime::{local_executor, IsLocal, Task};
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
-use crate::sync::channels::states::{PtrToCallState, RecvCallState, SendCallState};
+use crate::sync::channels::state::CallState;
 use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
 use crate::sync::channels::waiting_task::waiting_task_deque::WaitingTaskSharedDequeGuard;
 use crate::sync::channels::waiting_task::{PopIfAcquiredResult, TaskInSelectBranch};
@@ -11,6 +11,7 @@ use crate::sync::mutexes::naive_shared::NaiveMutex;
 use crate::sync::{
     AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, RecvErr, SendErr, TryRecvErr, TrySendErr,
 };
+use crate::utils::Ptr;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::mem::ManuallyDrop;
@@ -54,7 +55,7 @@ macro_rules! acquire_lock {
         match $mutex.try_lock() {
             Some(lock) => lock,
             None => {
-                unsafe { local_executor().spawn_task_at_end_of_shared_tasks_queue($task) };
+                local_executor().spawn_task_at_end_of_shared_tasks_queue($task);
 
                 return Poll::Pending;
             }
@@ -75,7 +76,7 @@ macro_rules! acquire_lock {
 pub struct WaitSend<'future, T> {
     inner: &'future NaiveMutex<Inner<T>>,
     value: ManuallyDrop<T>,
-    call_state: SendCallState,
+    call_state: CallState,
     #[cfg(debug_assertions)]
     was_awaited: bool,
 }
@@ -86,7 +87,7 @@ impl<'future, T> WaitSend<'future, T> {
     fn new(value: T, inner: &'future NaiveMutex<Inner<T>>) -> Self {
         Self {
             inner,
-            call_state: SendCallState::FirstCall,
+            call_state: CallState::FirstCall,
             value: ManuallyDrop::new(value),
             #[cfg(debug_assertions)]
             was_awaited: false,
@@ -107,7 +108,7 @@ impl<T> Future for WaitSend<'_, T> {
         panic_if_local_in_future!(cx, "Channel");
 
         match this.call_state {
-            SendCallState::FirstCall => {
+            CallState::FirstCall => {
                 let mut inner_lock = acquire_lock!(this.inner, unsafe { Task::from_context(cx) });
                 if inner_lock.is_closed {
                     return Poll::Ready(Err(SendErr::Closed(unsafe {
@@ -122,7 +123,7 @@ impl<T> Future for WaitSend<'_, T> {
                             this.inner.unlock(); // Release the lock here to improve performance
 
                             copy_nonoverlapping(&*this.value, slot.as_ptr(), 1);
-                            call_state.write(RecvCallState::WokenToReturnReady);
+                            call_state.write(CallState::WokenToReturnReady);
                         });
                 if was_written {
                     mem::forget(inner_lock); // Was released above
@@ -134,7 +135,7 @@ impl<T> Future for WaitSend<'_, T> {
                 if len >= inner_lock.capacity {
                     inner_lock.deque.push_back_sender(WaitingTask::common(
                         unsafe { Task::from_context(cx) },
-                        PtrToCallState::from(&mut this.call_state),
+                        NonNull::from(&mut this.call_state),
                         NonNull::from(&mut *this.value),
                     ));
 
@@ -149,8 +150,8 @@ impl<T> Future for WaitSend<'_, T> {
 
                 Poll::Ready(Ok(()))
             }
-            SendCallState::WokenToReturnReady => Poll::Ready(Ok(())),
-            SendCallState::WokenByClose => Poll::Ready(Err(SendErr::Closed(unsafe {
+            CallState::WokenToReturnReady => Poll::Ready(Ok(())),
+            CallState::WokenByClose => Poll::Ready(Err(SendErr::Closed(unsafe {
                 ManuallyDrop::take(&mut this.value)
             }))),
         }
@@ -180,7 +181,7 @@ impl<T> Drop for WaitSend<'_, T> {
 pub struct WaitRecv<'future, T> {
     inner: &'future NaiveMutex<Inner<T>>,
     slot: *mut T,
-    call_state: RecvCallState,
+    call_state: CallState,
 }
 
 impl<'future, T> WaitRecv<'future, T> {
@@ -189,7 +190,7 @@ impl<'future, T> WaitRecv<'future, T> {
     fn new(inner: &'future NaiveMutex<Inner<T>>, slot: *mut T) -> Self {
         Self {
             inner,
-            call_state: RecvCallState::FirstCall,
+            call_state: CallState::FirstCall,
             slot,
         }
     }
@@ -204,8 +205,8 @@ impl<T> Future for WaitRecv<'_, T> {
         panic_if_local_in_future!(cx, "Channel");
 
         match this.call_state {
-            RecvCallState::FirstCall => {
-                let mut inner_lock = acquire_lock!(this.inner, Task::from_context(cx));
+            CallState::FirstCall => {
+                let mut inner_lock = acquire_lock!(this.inner, unsafe { Task::from_context(cx) });
                 if inner_lock.is_closed {
                     return Poll::Ready(Err(RecvErr::Closed));
                 }
@@ -216,7 +217,7 @@ impl<T> Future for WaitRecv<'_, T> {
                             this.inner.unlock(); // Release the lock here to improve performance
 
                             copy_nonoverlapping(value.as_ptr(), this.slot, 1);
-                            call_state.write(SendCallState::WokenToReturnReady);
+                            call_state.write(CallState::WokenToReturnReady);
                         },
                     );
                     if was_written {
@@ -227,7 +228,7 @@ impl<T> Future for WaitRecv<'_, T> {
 
                     inner_lock.deque.push_back_receiver(WaitingTask::common(
                         unsafe { Task::from_context(cx) },
-                        PtrToCallState::from(&mut this.call_state),
+                        NonNull::from(&mut this.call_state),
                         NonNull::from(unsafe { &mut *this.slot }),
                     ));
 
@@ -249,7 +250,7 @@ impl<T> Future for WaitRecv<'_, T> {
 
                             this.inner.unlock(); // Release the lock here to improve performance
 
-                            call_state.write(SendCallState::WokenToReturnReady);
+                            call_state.write(CallState::WokenToReturnReady);
                         });
                 if was_written {
                     mem::forget(inner_lock); // Was released above
@@ -258,9 +259,9 @@ impl<T> Future for WaitRecv<'_, T> {
                 Poll::Ready(Ok(()))
             }
 
-            RecvCallState::WokenToReturnReady => Poll::Ready(Ok(())),
+            CallState::WokenToReturnReady => Poll::Ready(Ok(())),
 
-            RecvCallState::WokenByClose => Poll::Ready(Err(RecvErr::Closed)),
+            CallState::WokenByClose => Poll::Ready(Err(RecvErr::Closed)),
         }
     }
 }
@@ -271,6 +272,15 @@ impl<T: RefUnwindSafe> RefUnwindSafe for WaitRecv<'_, T> {}
 
 // endregion
 
+fn close_with_lock<T>(inner: &mut Inner<T>) {
+    inner.is_closed = true;
+
+    inner.deque.clear_with(
+        |call_state, _| unsafe { call_state.write(CallState::WokenByClose) },
+        |call_state, _| unsafe { call_state.write(CallState::WokenByClose) },
+    );
+}
+
 /// Closes the [`channel`](Channel) and wakes all senders and receivers.
 #[inline]
 #[allow(
@@ -280,12 +290,7 @@ impl<T: RefUnwindSafe> RefUnwindSafe for WaitRecv<'_, T> {}
 async fn close<T>(inner: &NaiveMutex<Inner<T>>) {
     let mut inner_lock = inner.lock().await;
 
-    inner_lock.is_closed = true;
-
-    inner_lock.deque.clear_with(
-        |call_state, _| unsafe { call_state.write(RecvCallState::WokenByClose) },
-        |call_state, _| unsafe { call_state.write(SendCallState::WokenByClose) },
-    );
+    close_with_lock(&mut inner_lock);
 }
 
 macro_rules! generate_try_send {
@@ -302,7 +307,7 @@ macro_rules! generate_try_send {
                             self.inner.unlock(); // Release the lock here to improve performance
 
                             ptr::copy_nonoverlapping(&value, slot.as_ptr(), 1);
-                            call_state.write(RecvCallState::WokenToReturnReady);
+                            call_state.write(CallState::WokenToReturnReady);
                         },
                     );
                     if was_written {
@@ -331,7 +336,7 @@ macro_rules! generate_send_or_subscribe {
         fn send_or_subscribe(
             &self,
             data: NonNull<Self::Data>,
-            mut state: PtrToCallState,
+            state: NonNull<CallState>,
             mut task_in_select_branch: TaskInSelectBranch,
             _: bool, // always false
         ) -> SelectNonBlockingBranchResult {
@@ -346,7 +351,7 @@ macro_rules! generate_send_or_subscribe {
 
             if inner_lock.is_closed {
                 return if let Some(task) = task_in_select_branch.acquire_once() {
-                    unsafe { state.as_send_and_set_closed() };
+                    unsafe { state.as_ref().is_closed() };
 
                     local_executor().spawn_shared_task(task);
 
@@ -366,7 +371,7 @@ macro_rules! generate_send_or_subscribe {
 
                         copy_nonoverlapping(data, slot.as_ptr(), 1);
 
-                        call_state.write(RecvCallState::WokenToReturnReady);
+                        call_state.write(CallState::WokenToReturnReady);
                     },
                     &mut task_in_select_branch,
                 );
@@ -389,7 +394,7 @@ macro_rules! generate_send_or_subscribe {
             if len >= inner_lock.capacity {
                 inner_lock.deque.push_back_sender(WaitingTask::in_selector(
                     task_in_select_branch,
-                    PtrToCallState::from(state),
+                    state,
                     data,
                 ));
 
@@ -414,7 +419,7 @@ macro_rules! generate_send_or_subscribe {
 
 macro_rules! generate_try_recv_in {
     () => {
-        unsafe fn try_recv_in_ptr(&self, slot: *mut T) -> Result<(), TryRecvErr> {
+        unsafe fn try_recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), TryRecvErr> {
             match self.inner.try_lock() {
                 Some(mut inner_lock) => {
                     if inner_lock.is_closed {
@@ -426,8 +431,8 @@ macro_rules! generate_try_recv_in {
                             |call_state, value| unsafe {
                                 self.inner.unlock(); // Release the lock here to improve performance
 
-                                copy_nonoverlapping(value.as_ptr(), slot, 1);
-                                call_state.write(SendCallState::WokenToReturnReady);
+                                copy_nonoverlapping(value.as_ptr(), slot.as_ptr(), 1);
+                                call_state.write(CallState::WokenToReturnReady);
                             },
                         );
                         if was_written {
@@ -451,7 +456,7 @@ macro_rules! generate_try_recv_in {
 
                             self.inner.unlock(); // Release the lock here to improve performance
 
-                            call_state.write(SendCallState::WokenToReturnReady);
+                            call_state.write(CallState::WokenToReturnReady);
                         },
                     );
                     if was_written {
@@ -471,7 +476,7 @@ macro_rules! generate_recv_or_subscribe {
         fn recv_or_subscribe(
             &self,
             slot: NonNull<Self::Data>,
-            mut state: PtrToCallState,
+            state: NonNull<CallState>,
             mut task_in_select_branch: TaskInSelectBranch,
             _: bool, // always false
         ) -> SelectNonBlockingBranchResult {
@@ -488,7 +493,7 @@ macro_rules! generate_recv_or_subscribe {
             if inner_lock.is_closed {
                 return match task_in_select_branch.acquire_once() {
                     Some(task) => {
-                        unsafe { state.as_recv_and_set_closed() };
+                        unsafe { state.as_ref().is_closed() };
 
                         local_executor().spawn_shared_task(task);
 
@@ -505,7 +510,7 @@ macro_rules! generate_recv_or_subscribe {
 
                         copy_nonoverlapping(value.as_ptr(), slot.as_ptr(), 1);
 
-                        call_state.write(SendCallState::WokenToReturnReady);
+                        call_state.write(CallState::WokenToReturnReady);
                     },
                     &mut task_in_select_branch,
                 );
@@ -528,7 +533,7 @@ macro_rules! generate_recv_or_subscribe {
                     .deque
                     .push_back_receiver(WaitingTask::in_selector(
                         task_in_select_branch,
-                        PtrToCallState::from(state),
+                        state,
                         slot,
                     ));
 
@@ -547,7 +552,7 @@ macro_rules! generate_recv_or_subscribe {
 
                             self.inner.unlock(); // Release the lock here to improve performance
 
-                            call_state.write(SendCallState::WokenToReturnReady);
+                            call_state.write(CallState::WokenToReturnReady);
                         },
                     );
                     if !was_written {
@@ -683,8 +688,8 @@ impl<T> AsyncReceiver<T> for Receiver<'_, T> {
         clippy::future_not_send,
         reason = "It is not `Send` only when T is not `Send`, it is fine"
     )]
-    unsafe fn recv_in_ptr(&self, slot: *mut T) -> impl Future<Output = Result<(), RecvErr>> {
-        WaitRecv::new(self.inner, slot)
+    unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> impl Future<Output = Result<(), RecvErr>> {
+        WaitRecv::new(self.inner, slot.as_ptr())
     }
 
     generate_try_recv_in!();
@@ -868,8 +873,8 @@ impl<T> AsyncReceiver<T> for Channel<T> {
         clippy::future_not_send,
         reason = "It is not `Send` only when T is not `Send`, it is fine"
     )]
-    unsafe fn recv_in_ptr(&self, slot: *mut T) -> impl Future<Output = Result<(), RecvErr>> {
-        WaitRecv::new(&self.inner, slot)
+    unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> impl Future<Output = Result<(), RecvErr>> {
+        WaitRecv::new(&self.inner, slot.as_ptr())
     }
 
     generate_try_recv_in!();
@@ -899,6 +904,16 @@ unsafe impl<T: Send> Sync for Channel<T> {}
 unsafe impl<T: Send> Send for Channel<T> {}
 impl<T: UnwindSafe> UnwindSafe for Channel<T> {}
 impl<T: RefUnwindSafe> RefUnwindSafe for Channel<T> {}
+
+impl<T> Drop for Channel<T> {
+    fn drop(&mut self) {
+        let inner = &mut *self.inner.get_mut();
+
+        if !inner.is_closed {
+            close_with_lock(inner);
+        }
+    }
+}
 
 // endregion
 
@@ -986,7 +1001,7 @@ mod tests {
     };
     use crate::test::sched_future_to_another_thread;
     use crate::utils::droppable_element::DroppableElement;
-    use crate::utils::{get_core_ids, SpinLock};
+    use crate::utils::{get_core_ids, Ptr, SpinLock};
     use crate::{local_executor, sleep, yield_now};
 
     #[orengine::test::test_shared]
@@ -1188,7 +1203,7 @@ mod tests {
         let _ = channel
             .send(DroppableElement::new(3, dropped.clone()))
             .await;
-        unsafe { channel.recv_in_ptr(&mut prev_elem).await }.unwrap();
+        unsafe { channel.recv_in_ptr(Ptr::from(&mut prev_elem)).await }.unwrap();
         assert_eq!(prev_elem.value, 3);
         assert_eq!(dropped.lock().as_slice(), [2]);
 
@@ -1219,7 +1234,12 @@ mod tests {
         assert_eq!(dropped.lock().as_slice(), [2]);
 
         let _ = sender.send(DroppableElement::new(3, dropped.clone())).await;
-        unsafe { receiver.recv_in_ptr(&mut prev_elem).await.unwrap() };
+        unsafe {
+            receiver
+                .recv_in_ptr(Ptr::from(&mut prev_elem))
+                .await
+                .unwrap()
+        };
         assert_eq!(prev_elem.value, 3);
         assert_eq!(dropped.lock().as_slice(), [2]);
 

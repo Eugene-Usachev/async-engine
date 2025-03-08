@@ -8,11 +8,13 @@ pub struct Ptr<T> {
 }
 
 impl<T> Ptr<T> {
-    /// Create a new `Ptr` with the given value.
+    /// Allocates a value on the heap and returns a pointer to it.
     #[inline]
-    pub fn new(value: T) -> Self {
+    pub fn move_to_heap(value: T) -> Self {
         let ptr = unsafe { alloc(Layout::new::<T>()) }.cast::<T>();
+
         unsafe { ptr.write(value) };
+
         Self { ptr }
     }
 
@@ -262,7 +264,7 @@ mod tests {
     #[orengine::test::test_local]
     fn test_new() {
         let value = 10;
-        let ptr = Ptr::new(value);
+        let ptr = Ptr::move_to_heap(value);
         unsafe {
             assert_eq!(*ptr.as_ref(), value);
             ptr.deallocate();
@@ -278,7 +280,7 @@ mod tests {
     #[orengine::test::test_local]
     fn test_as_ptr() {
         let value = 20;
-        let ptr = Ptr::new(value);
+        let ptr = Ptr::move_to_heap(value);
         let raw_ptr = ptr.as_ptr();
         unsafe {
             assert_eq!(*raw_ptr, value);
@@ -289,7 +291,7 @@ mod tests {
     #[orengine::test::test_local]
     fn test_as_ref() {
         let value = 30;
-        let ptr = Ptr::new(value);
+        let ptr = Ptr::move_to_heap(value);
         unsafe {
             let value_ref = ptr.as_ref();
             assert_eq!(*value_ref, value);
@@ -300,7 +302,7 @@ mod tests {
     #[orengine::test::test_local]
     fn test_as_mut() {
         let value = 40;
-        let ptr = Ptr::new(value);
+        let ptr = Ptr::move_to_heap(value);
         unsafe {
             let value_mut = ptr.as_mut();
             *value_mut = 50;
@@ -330,7 +332,7 @@ mod tests {
     #[orengine::test::test_local]
     fn test_as_u64() {
         let value = 60;
-        let ptr = Ptr::new(value);
+        let ptr = Ptr::move_to_heap(value);
         let raw_u64 = ptr.as_u64();
         let converted_ptr: Ptr<i32> = Ptr::from(raw_u64);
         unsafe {
@@ -343,7 +345,7 @@ mod tests {
     #[should_panic(expected = "dropped")]
     fn test_drop_in_place() {
         let value = MustDropIfCounterMoreThanOne { counter: 5 };
-        let ptr = Ptr::new(value);
+        let ptr = Ptr::move_to_heap(value);
         unsafe {
             ptr.drop_in_place();
         }
@@ -353,7 +355,7 @@ mod tests {
     #[should_panic(expected = "dropped")]
     fn test_drop_and_deallocate() {
         let value = MustDropIfCounterMoreThanOne { counter: 5 };
-        let ptr = Ptr::new(value);
+        let ptr = Ptr::move_to_heap(value);
         unsafe {
             ptr.drop_and_deallocate();
         }
@@ -362,7 +364,7 @@ mod tests {
     #[orengine::test::test_local]
     fn test_read() {
         let value = 70;
-        let ptr = Ptr::new(value);
+        let ptr = Ptr::move_to_heap(value);
         unsafe {
             assert_eq!(ptr.read(), value);
             ptr.deallocate();
@@ -372,7 +374,7 @@ mod tests {
     #[orengine::test::test_local]
     fn test_write() {
         let value = 80;
-        let ptr = Ptr::new(value);
+        let ptr = Ptr::move_to_heap(value);
         unsafe {
             ptr.write(90);
             assert_eq!(*ptr.as_ref(), 90);
@@ -384,7 +386,7 @@ mod tests {
     #[should_panic(expected = "dropped")]
     fn test_write_with_drop() {
         let value = MustDropIfCounterMoreThanOne { counter: 2 };
-        let ptr = Ptr::new(value);
+        let ptr = Ptr::move_to_heap(value);
         unsafe {
             ptr.write_with_drop(MustDropIfCounterMoreThanOne { counter: 1 });
         }
@@ -393,7 +395,7 @@ mod tests {
     #[orengine::test::test_local]
     fn test_replace() {
         let value = 100;
-        let ptr = Ptr::new(value);
+        let ptr = Ptr::move_to_heap(value);
         unsafe {
             assert_eq!(ptr.replace(110), value);
             assert_eq!(*ptr.as_ref(), 110);
@@ -404,7 +406,7 @@ mod tests {
     #[orengine::test::test_local]
     fn test_debug() {
         let value = 130;
-        let ptr = Ptr::new(value);
+        let ptr = Ptr::move_to_heap(value);
         let debug_str = format!("{ptr:?}");
         assert_eq!(debug_str, "130");
 

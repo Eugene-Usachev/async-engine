@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 /// A trait that indicates whether a struct is `local` or `shared`.
 ///
 /// `Local` structs can work only with `local` tasks, are __not__ [`Send`]
@@ -63,4 +65,8 @@ pub const fn is_local<T: IsLocal>() -> bool {
 /// Returns whether the struct is `local` or `shared`. Read [`IsLocal`] trait for more details.
 pub const fn is_local_of<T: IsLocal>(_: &T) -> bool {
     T::IS_LOCAL
+}
+
+impl<G: IsLocal, T: Deref<Target = G>> IsLocal for T {
+    const IS_LOCAL: bool = G::IS_LOCAL;
 }

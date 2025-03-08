@@ -1,5 +1,5 @@
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
-use crate::sync::channels::states::PtrToCallState;
+use crate::sync::channels::state::CallState;
 use crate::sync::channels::waiting_task::TaskInSelectBranch;
 use crate::sync::AsyncSender;
 use std::ptr::NonNull;
@@ -30,19 +30,23 @@ pub trait SelectSender: AsyncSender<Self::Data> {
     fn send_or_subscribe(
         &self,
         data: NonNull<Self::Data>,
-        state: PtrToCallState,
+        state: NonNull<CallState>,
         task_in_select_branch: TaskInSelectBranch,
         is_all_local: bool,
     ) -> SelectNonBlockingBranchResult;
 }
 
-impl<G: SelectSender, T: std::ops::Deref<Target = G> + AsyncSender<G::Data>> SelectSender for T {
+impl<G, T> SelectSender for T
+where
+    G: SelectSender,
+    T: std::ops::Deref<Target = G> + AsyncSender<G::Data>,
+{
     type Data = G::Data;
 
     fn send_or_subscribe(
         &self,
         data: NonNull<Self::Data>,
-        state: PtrToCallState,
+        state: NonNull<CallState>,
         task_in_select_branch: TaskInSelectBranch,
         is_all_local: bool,
     ) -> SelectNonBlockingBranchResult {

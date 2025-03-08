@@ -314,7 +314,7 @@ impl<T> Local<T> {
     /// for more details.
     pub fn new(data: T) -> Self {
         Self {
-            inner: Ptr::new(Inner {
+            inner: Ptr::move_to_heap(Inner {
                 data,
                 counter: 1,
                 #[cfg(debug_assertions)]

@@ -1,5 +1,6 @@
 // TODO docs and think about pub
 
+use crate::local_executor;
 use crate::runtime::Task;
 use crate::utils::defer;
 use crate::utils::hints::unreachable_hint;
@@ -9,8 +10,6 @@ use std::ptr;
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::sync::atomic::{fence, AtomicUsize};
-
-struct TaskInSelectState(AtomicUsize);
 
 const NOT_ACQUIRED: usize = 0;
 const ACQUIRED: usize = 1;
@@ -194,6 +193,51 @@ impl TaskInSelectBranch {
         }
     }
 
+    pub(crate) unsafe fn try_acquire_two_local_tasks_in_select<State, T, SetterFn>(
+        &mut self,
+        other: &mut Self,
+        setter_fn: &mut SetterFn,
+        state: NonNull<State>,
+        data: NonNull<T>,
+    ) -> PopIfAcquiredResult
+    where
+        SetterFn: FnMut(NonNull<State>, NonNull<T>),
+    {
+        let this_inner = unsafe { self.inner_ptr.as_mut() };
+        let other_inner = unsafe { other.inner_ptr.as_mut() };
+
+        if *this_inner.state.get_mut() == ACQUIRED {
+            return PopIfAcquiredResult::NotAcquired;
+        }
+
+        *this_inner.state.get_mut() = ACQUIRED;
+
+        if *other_inner.state.get_mut() == ACQUIRED {
+            *this_inner.state.get_mut() = NOT_ACQUIRED;
+
+            return PopIfAcquiredResult::NoData;
+        }
+
+        // Two tasks are acquired
+        this_inner.set_resolved_branch_id(self.associated_branch_id);
+        other_inner.set_resolved_branch_id(other.associated_branch_id);
+
+        let this_task = ptr::read(&this_inner.task);
+        let other_task = ptr::read(&other_inner.task);
+
+        this_inner.drop_ptr();
+        other_inner.drop_ptr();
+
+        setter_fn(state, data); // set data to receiver/sender task
+
+        let ex = local_executor();
+
+        ex.exec_task(other_task);
+        ex.exec_task(this_task);
+
+        PopIfAcquiredResult::Ok
+    }
+
     /// Tries to acquire two tasks in that are used in `shared` context.
     ///
     /// Returns [`PopIfAcquiredResult::NotAcquired`] if `self` task have been already acquired.
@@ -210,8 +254,8 @@ impl TaskInSelectBranch {
     #[must_use]
     pub(crate) unsafe fn try_acquire_two_shared_tasks_in_select<State, T, SetterFn>(
         &self,
-        other: &TaskInSelectBranch,
-        mut setter_fn: SetterFn,
+        other: &Self,
+        setter_fn: &mut SetterFn,
         state: NonNull<State>,
         data: NonNull<T>,
     ) -> PopIfAcquiredResult
@@ -379,8 +423,8 @@ impl TaskInSelectBranch {
     ///   (in select it can be guaranteed only when `other` is `local`).
     pub(crate) unsafe fn try_acquire_local_and_shared_tasks_in_select<State, T, SetterFn>(
         &self,
-        other: &mut TaskInSelectBranch,
-        mut setter_fn: SetterFn,
+        other: &mut Self,
+        setter_fn: &mut SetterFn,
         state: NonNull<State>,
         data: NonNull<T>,
     ) -> PopIfAcquiredResult
@@ -419,49 +463,38 @@ impl TaskInSelectBranch {
                                          // but we are in select and can't acquire,
                                          // so select was called twice with one TaskInSelect
             }
+        } else if *other_inner.state.get_mut() == ACQUIRED {
+            // We can't acquire other task, because it is already acquired.
+
+            this_inner.state.store(NOT_ACQUIRED, Release);
+
+            this_inner.drop_ptr();
+            unsafe { other_inner.drop_ptr_local() };
+
+            PopIfAcquiredResult::NoData
         } else {
-            let other_prev_ =
-                other_inner
-                    .state
-                    .compare_exchange(NOT_ACQUIRED, ACQUIRED, AcqRel, Acquire);
+            *other_inner.state.get_mut() = ACQUIRED;
 
-            if let Err(other_prev) = other_prev_ {
-                match other_prev {
-                    // Can be only `ACQUIRED` because it is used in `local` context, and we are in select.
-                    ACQUIRED => {
-                        // We can't acquire other task, because it is already acquired.
+            this_inner.state.store(ACQUIRED, Release);
+            // other task is already acquired above
 
-                        this_inner.state.store(NOT_ACQUIRED, Release);
+            this_inner.set_resolved_branch_id(self.associated_branch_id);
+            other_inner.set_resolved_branch_id(other.associated_branch_id);
 
-                        this_inner.drop_ptr();
-                        unsafe { other_inner.drop_ptr_local() };
+            let this_task = ptr::read(&this_inner.task);
+            let other_task = ptr::read(&other_inner.task);
 
-                        PopIfAcquiredResult::NoData
-                    }
-                    _ => unreachable_hint(), // bug is occurred, because task that is used in `local` context can't be `acquiring now with`.
-                }
-            } else {
-                this_inner.state.store(ACQUIRED, Release);
-                // other task is already acquired above
+            this_inner.drop_ptr();
+            unsafe { other_inner.drop_ptr_local() };
 
-                this_inner.set_resolved_branch_id(self.associated_branch_id);
-                other_inner.set_resolved_branch_id(other.associated_branch_id);
+            setter_fn(state, data); // set data to receiver/sender task
 
-                let this_task = ptr::read(&this_inner.task);
-                let other_task = ptr::read(&other_inner.task);
+            let ex = local_executor();
 
-                this_inner.drop_ptr();
-                unsafe { other_inner.drop_ptr_local() };
+            ex.exec_task(other_task);
+            ex.spawn_shared_task(this_task);
 
-                setter_fn(state, data); // set data to receiver/sender task
-
-                let ex = crate::local_executor();
-
-                ex.exec_task(other_task);
-                ex.spawn_shared_task(this_task);
-
-                PopIfAcquiredResult::Ok
-            }
+            PopIfAcquiredResult::Ok
         }
     }
 

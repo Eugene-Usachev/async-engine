@@ -40,7 +40,9 @@ impl TaskPool {
                 #[cfg(debug_assertions)]
                 executor_id,
                 #[cfg(debug_assertions)]
-                is_executing: crate::utils::Ptr::new(std::sync::atomic::AtomicBool::new(false)),
+                is_executing: crate::utils::Ptr::move_to_heap(std::sync::atomic::AtomicBool::new(
+                    false,
+                )),
             }
         }
     }

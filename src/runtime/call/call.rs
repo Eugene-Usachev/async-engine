@@ -2,7 +2,6 @@ use crate::runtime::{Locality, Task};
 use crate::sync_task_queue::SyncTaskList;
 use crossbeam::utils::CachePadded;
 use std::fmt::Debug;
-use std::ops::Deref;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 

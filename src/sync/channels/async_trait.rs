@@ -1,7 +1,9 @@
 use crate::runtime::IsLocal;
 use crate::sync::channels::{RecvErr, SendErr, TryRecvErr, TrySendErr};
+use crate::utils::Ptr;
 use std::future::Future;
 use std::mem::MaybeUninit;
+use std::ops::Deref;
 use std::ptr::drop_in_place;
 
 /// The `AsyncSender` allows sending values into the [`channel`](AsyncChannel).
@@ -83,7 +85,6 @@ pub trait AsyncSender<T>: IsLocal {
     ///     assert!(matches!(sender.try_send(3).unwrap_err(), TrySendErr::Closed(_)));
     /// }
     /// ```
-    // TODO maybe try_send_ptr for select?
     fn try_send(&self, value: T) -> Result<(), TrySendErr<T>>;
 
     /// Closes the [`channel`](AsyncChannel) associated with this sender.
@@ -135,9 +136,11 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///
     /// ```rust
     /// use std::ptr::drop_in_place;
-    /// use orengine::sync::AsyncReceiver;
+    /// use orengine::sync::AsyncReceiver;    ///
+    /// #
+    /// use orengine::utils::Ptr;
     ///
-    /// # type Payload = i32;
+    /// type Payload = i32;
     ///
     /// // Must be dropped.
     /// struct Msg { value: Box<Payload> }
@@ -149,7 +152,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///
     ///     loop {
     ///         // SAFETY: previous value is dropped or absent
-    ///         match unsafe { receiver.recv_in_ptr(msg.as_mut_ptr()) }.await {
+    ///         match unsafe { receiver.recv_in_ptr(Ptr::from(msg.assume_init_mut())) }.await {
     ///             Ok(()) => {
     ///                 process_msg(unsafe { msg.assume_init_ref() });
     ///                 // SAFETY: value exists
@@ -160,7 +163,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///     }
     /// }
     /// ```
-    unsafe fn recv_in_ptr(&self, slot: *mut T) -> impl Future<Output = Result<(), RecvErr>>;
+    unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> impl Future<Output = Result<(), RecvErr>>;
 
     /// Tries to receive a value from the [`channel`](AsyncChannel) to the provided `slot`.
     ///
@@ -193,9 +196,11 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///
     /// ```rust
     /// use std::ptr::drop_in_place;
-    /// use orengine::sync::{AsyncReceiver, TryRecvErr};
+    /// use orengine::sync::{AsyncReceiver, TryRecvErr};    ///
+    /// #
+    /// use orengine::utils::Ptr;
     ///
-    /// # type Payload = i32;
+    /// type Payload = i32;
     ///
     /// // Must be dropped.
     /// struct Msg { value: Box<Payload> }
@@ -208,7 +213,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///
     ///     loop {
     ///         // SAFETY: previous value is dropped or absent
-    ///         match unsafe { receiver.try_recv_in_ptr(msg.as_mut_ptr()) } {
+    ///         match unsafe { receiver.try_recv_in_ptr(Ptr::from(msg.assume_init_mut())) } {
     ///             Ok(()) => {
     ///                 process_msg(unsafe { msg.assume_init_ref() });
     ///                 // SAFETY: value exists
@@ -223,7 +228,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///     }
     /// }
     /// ```
-    unsafe fn try_recv_in_ptr(&self, slot: *mut T) -> Result<(), TryRecvErr>;
+    unsafe fn try_recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), TryRecvErr>;
 
     /// Asynchronously receives a value from the [`channel`](AsyncChannel) to the provided `slot`.
     ///
@@ -276,7 +281,7 @@ pub trait AsyncReceiver<T>: IsLocal {
         unsafe {
             drop_in_place(slot);
 
-            self.recv_in_ptr(slot)
+            self.recv_in_ptr(Ptr::from(slot))
         }
     }
 
@@ -346,7 +351,7 @@ pub trait AsyncReceiver<T>: IsLocal {
         unsafe {
             drop_in_place(slot);
 
-            self.try_recv_in_ptr(slot)
+            self.try_recv_in_ptr(Ptr::from(slot))
         }
     }
 
@@ -393,14 +398,12 @@ pub trait AsyncReceiver<T>: IsLocal {
     /// }
     /// ```
     #[inline]
-    fn recv(&self) -> impl Future<Output = Result<T, RecvErr>> {
-        async {
-            let mut slot = MaybeUninit::uninit();
-            unsafe {
-                match self.recv_in_ptr(slot.as_mut_ptr()).await {
-                    Ok(()) => Ok(slot.assume_init()),
-                    Err(_) => Err(RecvErr::Closed),
-                }
+    async fn recv(&self) -> Result<T, RecvErr> {
+        let mut slot = MaybeUninit::uninit();
+        unsafe {
+            match self.recv_in_ptr(Ptr::from(slot.assume_init_mut())).await {
+                Ok(()) => Ok(slot.assume_init()),
+                Err(_) => Err(RecvErr::Closed),
             }
         }
     }
@@ -445,7 +448,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     fn try_recv(&self) -> Result<T, TryRecvErr> {
         let mut slot = MaybeUninit::uninit();
         unsafe {
-            match self.try_recv_in_ptr(slot.as_mut_ptr()) {
+            match self.try_recv_in_ptr(Ptr::from(slot.assume_init_mut())) {
                 Ok(()) => Ok(slot.assume_init()),
                 Err(e) => Err(e),
             }
@@ -589,4 +592,32 @@ pub trait AsyncChannel<T>: AsyncSender<T> + AsyncReceiver<T> {
 
     /// Closes the [`channel`](AsyncChannel).
     fn close(&self) -> impl Future<Output = ()>;
+}
+
+impl<T, G: AsyncSender<T>, H: Deref<Target = G> + IsLocal> AsyncSender<T> for H {
+    async fn send(&self, value: T) -> Result<(), SendErr<T>> {
+        (**self).send(value).await
+    }
+
+    fn try_send(&self, value: T) -> Result<(), TrySendErr<T>> {
+        (**self).try_send(value)
+    }
+
+    async fn sender_close(&self) {
+        (**self).sender_close().await;
+    }
+}
+
+impl<T, G: AsyncReceiver<T>, H: Deref<Target = G> + IsLocal> AsyncReceiver<T> for H {
+    async unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), RecvErr> {
+        (**self).recv_in_ptr(slot).await
+    }
+
+    unsafe fn try_recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), TryRecvErr> {
+        (**self).try_recv_in_ptr(slot)
+    }
+
+    async fn receiver_close(&self) {
+        (**self).receiver_close().await;
+    }
 }

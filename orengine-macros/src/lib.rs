@@ -392,7 +392,6 @@ pub fn select(input: TokenStream) -> TokenStream {
             {
                 use orengine::sync::channels::{SelectReceiver, SelectSender, TryRecvErr};
                 use orengine::sync::{RecvErr, SendErr, TrySendErr};
-
                 enum __SelectReady__<#(#select_generics),*> {
                     #(#select_ready_variants),*
                 }
@@ -478,7 +477,7 @@ pub fn select(input: TokenStream) -> TokenStream {
 
                     match_arms.push(quote! {
                         #idx => {
-                            let #var = if unsafe { !general_state.as_recv_and_is_closed() } {
+                            let #var = if !general_state.is_closed() {
                                 unsafe { Ok(std::mem::ManuallyDrop::take(&mut recv_slot.#variant)) }
                             } else {
                                 Err(RecvErr::Closed)
@@ -489,7 +488,7 @@ pub fn select(input: TokenStream) -> TokenStream {
                     });
 
                     select_calls.push(quote! {
-                        let mut #name_of_task_in_select_branch = if __is_all_local {
+                        let #name_of_task_in_select_branch = if __is_all_local {
                             unsafe { TaskInSelectBranch::new_local(task_in_select, #idx) }
                         } else {
                             TaskInSelectBranch::new(task_in_select, #idx)
@@ -581,7 +580,7 @@ pub fn select(input: TokenStream) -> TokenStream {
 
                     match_arms.push(quote! {
                         #idx => {
-                            let #var = if unsafe { !general_state.as_recv_and_is_closed() } {
+                            let #var = if !general_state.is_closed() {
                                 Ok(())
                             } else {
                                 Err(SendErr::Closed(#var_name))
@@ -676,7 +675,7 @@ pub fn select(input: TokenStream) -> TokenStream {
                 fn __select__<#(#generics),*>(
                     recv_slot: NonNull<__RecvSlot__<#(#union_generic_params),*>>,
                     resolved_branch_id: NonNull<usize>,
-                    general_state: orengine::sync::channels::states::PtrToCallState,
+                    general_state: NonNull<orengine::sync::channels::CallState>,
                     task: orengine::runtime::Task,
                     #(#fn_select_args_types),*
                 ) {
@@ -688,7 +687,7 @@ pub fn select(input: TokenStream) -> TokenStream {
                         "Tried to use `local` task in `select` where at least one channel is `shared`.",
                     );
 
-                    let task_in_select = unsafe { TaskInSelect::acquire_for_task_with_lock(task, resolved_branch_id) };
+                    let task_in_select = TaskInSelect::acquire_for_task_with_lock(task, resolved_branch_id);
                     let mut locked = [false; #branches_len];
                     let mut number_of_needed_to_retry_branches = 0;
 
@@ -712,13 +711,14 @@ pub fn select(input: TokenStream) -> TokenStream {
                 let mut recv_slot = __RecvSlot__ { uninit: () };
                 let mut resolved_branch_id = usize::MAX;
                 // Protected by lock in task in select.
-                let mut general_state = orengine::sync::channels::states::PtrToCallState::uninit();
+                let mut general_state = orengine::sync::channels::CallState::FirstCall;
+                let general_state_ptr = NonNull::from(&mut general_state);
 
                 let recv_slot_ptr = NonNull::from(&mut recv_slot);
                 let resolved_branch_id_ptr = NonNull::from(&mut resolved_branch_id);
 
-                let mut select_closure = move |task| {
-                    __select__(recv_slot_ptr, resolved_branch_id_ptr, general_state, task, #(#fn_select_args),*)
+                let mut select_closure = |task| {
+                    __select__(recv_slot_ptr, resolved_branch_id_ptr, general_state_ptr, task, #(#fn_select_args),*)
                 };
 
                 unsafe {
@@ -736,10 +736,12 @@ pub fn select(input: TokenStream) -> TokenStream {
 
                 // Task is unparked here. So, we can read the result
 
-                match resolved_branch_id {
+                let __res = match resolved_branch_id {
                     #(#match_arms),*
                     _ => orengine::utils::hints::unreachable_hint()
-                }
+                };
+
+                __res
             }
         }
     };

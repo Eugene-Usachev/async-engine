@@ -391,12 +391,6 @@ impl Executor {
         self.shared_tasks_list.as_ref()
     }
 
-    /// Returns a reference to the local tasks queue.
-    #[inline]
-    pub(crate) fn local_queue(&mut self) -> &mut VecDeque<Task> {
-        &mut self.local_tasks
-    }
-
     /// Returns a reference to the `sleeping_tasks`.
     #[inline]
     pub(crate) fn sleeping_tasks(&mut self) -> &mut BTreeMap<Instant, Task> {

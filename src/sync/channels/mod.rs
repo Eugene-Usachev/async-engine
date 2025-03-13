@@ -11,4 +11,4 @@ pub use errors::*;
 pub use local::*;
 pub use select::{SelectReceiver, SelectSender};
 pub use shared::*;
-pub use state::CallState;
+pub use state::{CallState, CallStatePtr};

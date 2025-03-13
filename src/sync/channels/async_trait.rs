@@ -610,11 +610,11 @@ impl<T, G: AsyncSender<T>, H: Deref<Target = G> + IsLocal> AsyncSender<T> for H 
 
 impl<T, G: AsyncReceiver<T>, H: Deref<Target = G> + IsLocal> AsyncReceiver<T> for H {
     async unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), RecvErr> {
-        (**self).recv_in_ptr(slot).await
+        unsafe { (**self).recv_in_ptr(slot).await }
     }
 
     unsafe fn try_recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), TryRecvErr> {
-        (**self).try_recv_in_ptr(slot)
+        unsafe { (**self).try_recv_in_ptr(slot) }
     }
 
     async fn receiver_close(&self) {

@@ -2,6 +2,7 @@
 
 use crate::local_executor;
 use crate::runtime::Task;
+use crate::sync::channels::state::CallStatePtr;
 use crate::utils::defer;
 use crate::utils::hints::unreachable_hint;
 use std::cell::UnsafeCell;
@@ -193,15 +194,15 @@ impl TaskInSelectBranch {
         }
     }
 
-    pub(crate) unsafe fn try_acquire_two_local_tasks_in_select<State, T, SetterFn>(
+    pub(crate) unsafe fn try_acquire_two_local_tasks_in_select<T, SetterFn>(
         &mut self,
         other: &mut Self,
         setter_fn: &mut SetterFn,
-        state: NonNull<State>,
+        state: CallStatePtr,
         data: NonNull<T>,
     ) -> PopIfAcquiredResult
     where
-        SetterFn: FnMut(NonNull<State>, NonNull<T>),
+        SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
         let this_inner = unsafe { self.inner_ptr.as_mut() };
         let other_inner = unsafe { other.inner_ptr.as_mut() };
@@ -222,8 +223,8 @@ impl TaskInSelectBranch {
         this_inner.set_resolved_branch_id(self.associated_branch_id);
         other_inner.set_resolved_branch_id(other.associated_branch_id);
 
-        let this_task = ptr::read(&this_inner.task);
-        let other_task = ptr::read(&other_inner.task);
+        let this_task = unsafe { ptr::read(&this_inner.task) };
+        let other_task = unsafe { ptr::read(&other_inner.task) };
 
         this_inner.drop_ptr();
         other_inner.drop_ptr();
@@ -252,15 +253,15 @@ impl TaskInSelectBranch {
     ///
     /// * If returns `false` then `other` task must be not lost (saved into queue again).
     #[must_use]
-    pub(crate) unsafe fn try_acquire_two_shared_tasks_in_select<State, T, SetterFn>(
+    pub(crate) unsafe fn try_acquire_two_shared_tasks_in_select<T, SetterFn>(
         &self,
         other: &Self,
         setter_fn: &mut SetterFn,
-        state: NonNull<State>,
+        state: CallStatePtr,
         data: NonNull<T>,
     ) -> PopIfAcquiredResult
     where
-        SetterFn: FnMut(NonNull<State>, NonNull<T>),
+        SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
         // TODO maybe better to acquire it in select (try_pop) because if there are two or more
         // WaitingTask::InSelector we can not release it on NoData
@@ -278,8 +279,8 @@ impl TaskInSelectBranch {
                 $this_inner.set_resolved_branch_id($this.associated_branch_id);
                 $other_inner.set_resolved_branch_id($other.associated_branch_id);
 
-                let this_task = ptr::read(&$this_inner.task);
-                let other_task = ptr::read(&$other_inner.task);
+                let this_task = unsafe { ptr::read(&$this_inner.task) };
+                let other_task = unsafe { ptr::read(&$other_inner.task) };
 
                 $this_inner.drop_ptr();
                 $other_inner.drop_ptr();
@@ -353,11 +354,11 @@ impl TaskInSelectBranch {
                             if acquiring_now_with != this_ptr_as_usize {
                                 spin_loop();
                                 continue; // Now other task is trying to acquire another task.
-                                          // We wait until another thread acquire it
-                                          // or stop acquiring with fail.
-                                          // It is not a performance issue, because it
-                                          // happens very rarely, and we wait at max time
-                                          // of `compare_exchange` + `store`.
+                                // We wait until another thread acquire it
+                                // or stop acquiring with fail.
+                                // It is not a performance issue, because it
+                                // happens very rarely, and we wait at max time
+                                // of `compare_exchange` + `store`.
                             }
 
                             // Now two threads are trying to acquire both tasks.
@@ -398,7 +399,9 @@ impl TaskInSelectBranch {
                     }
                 }
 
-                self.inner_ptr.as_ref().state.store(ACQUIRED, Release);
+                unsafe { self.inner_ptr.as_ref() }
+                    .state
+                    .store(ACQUIRED, Release);
                 // other task is already acquired above
 
                 exec_two_tasks!(this_inner, other_inner, self, other, setter_fn, state, data);
@@ -421,15 +424,15 @@ impl TaskInSelectBranch {
     ///
     /// * `self` must be used in `shared` context, `other` must be used in `local` context
     ///   (in select it can be guaranteed only when `other` is `local`).
-    pub(crate) unsafe fn try_acquire_local_and_shared_tasks_in_select<State, T, SetterFn>(
+    pub(crate) unsafe fn try_acquire_local_and_shared_tasks_in_select<T, SetterFn>(
         &self,
         other: &mut Self,
         setter_fn: &mut SetterFn,
-        state: NonNull<State>,
+        state: CallStatePtr,
         data: NonNull<T>,
     ) -> PopIfAcquiredResult
     where
-        SetterFn: FnMut(NonNull<State>, NonNull<T>),
+        SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
         // TODO maybe better to acquire it in select (try_pop) because if there are two or more
         // WaitingTask::InSelector we can not release it on NoData
@@ -481,8 +484,8 @@ impl TaskInSelectBranch {
             this_inner.set_resolved_branch_id(self.associated_branch_id);
             other_inner.set_resolved_branch_id(other.associated_branch_id);
 
-            let this_task = ptr::read(&this_inner.task);
-            let other_task = ptr::read(&other_inner.task);
+            let this_task = unsafe { ptr::read(&this_inner.task) };
+            let other_task = unsafe { ptr::read(&other_inner.task) };
 
             this_inner.drop_ptr();
             unsafe { other_inner.drop_ptr_local() };

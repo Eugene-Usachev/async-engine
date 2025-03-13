@@ -11,6 +11,7 @@ pub mod spin_lock;
 mod task_structures_pool;
 mod defer;
 mod progressive_timeout;
+mod sendable_ptr;
 pub(crate) mod vec_map;
 
 pub use core::*;
@@ -19,6 +20,7 @@ pub(crate) use hints::assert_hint;
 pub(crate) use progressive_timeout::*;
 pub use ptr::*;
 pub(crate) use sealed::Sealed;
+pub use sendable_ptr::*;
 pub use spin_lock::*;
 pub use task_structures_pool::{
     acquire_sync_task_list_from_pool, acquire_task_vec_from_pool, SyncTaskListFromPool,

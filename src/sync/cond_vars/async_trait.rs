@@ -42,16 +42,16 @@ pub trait AsyncCondVar: IsLocal {
     /// local_executor().spawn_local(async move {
     ///     sleep(Duration::from_secs(1)).await;
     ///
-    ///     let mut lock = is_ready.lock().await;
+    ///     let mut lock = is_ready_clone.lock().await;
     ///     *lock = true;
     ///
     ///     drop(lock);
     ///
-    ///     cvar.notify_one();
+    ///     cvar_clone.notify_one();
     /// });
     ///
     /// let mut lock = is_ready.lock().await;
-    /// while !*lock {
+    /// while !*lock {  
     ///     lock = cvar.wait(lock).await; // wait 1 second
     /// }
     /// # }
@@ -178,9 +178,8 @@ pub trait AsyncCondVar: IsLocal {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate as orengine;
-    use crate::sync::{LocalCondVar, LocalMutex};
+    use crate::sync::{AsyncCondVar, AsyncMutex, LocalCondVar, LocalMutex};
     use crate::{local_executor, sleep};
     use std::rc::Rc;
     use std::time::Duration;

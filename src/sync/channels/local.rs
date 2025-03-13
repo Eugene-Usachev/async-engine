@@ -1,7 +1,7 @@
 use crate::local_executor;
 use crate::runtime::{IsLocal, Task};
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
-use crate::sync::channels::state::CallState;
+use crate::sync::channels::state::{CallState, CallStatePtr};
 use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
 use crate::sync::channels::waiting_task::waiting_task_deque::WaitingTaskLocalDequeGuard;
 use crate::sync::channels::waiting_task::{PopIfAcquiredResult, TaskInSelectBranch};
@@ -98,7 +98,7 @@ impl<T> Future for WaitLocalSend<'_, T> {
                 if len >= this.inner.capacity {
                     this.inner.deque.push_back_sender(WaitingTask::common(
                         unsafe { Task::from_context(cx) },
-                        NonNull::from(&mut this.call_state),
+                        CallStatePtr::new(&mut this.call_state),
                         NonNull::from(&mut *this.value),
                     ));
 
@@ -182,7 +182,7 @@ impl<T> Future for WaitLocalRecv<'_, T> {
 
                     this.inner.deque.push_back_receiver(WaitingTask::common(
                         unsafe { Task::from_context(cx) },
-                        NonNull::from(&mut this.call_state),
+                        CallStatePtr::new(&mut this.call_state),
                         NonNull::from(unsafe { &mut *this.slot }),
                     ));
 
@@ -219,14 +219,7 @@ impl<T> Future for WaitLocalRecv<'_, T> {
 fn close<T>(inner: &mut Inner<T>) {
     inner.is_closed = true;
 
-    inner.deque.clear_with(
-        |state_ptr, _| {
-            unsafe { state_ptr.write(CallState::WokenByClose) };
-        },
-        |state_ptr, _| {
-            unsafe { state_ptr.write(CallState::WokenByClose) };
-        },
-    );
+    inner.deque.clear();
 }
 
 macro_rules! generate_try_send {
@@ -266,7 +259,7 @@ macro_rules! generate_send_or_subscribe {
         fn send_or_subscribe(
             &self,
             data: NonNull<Self::Data>,
-            state: NonNull<CallState>,
+            state: CallStatePtr,
             mut task_in_select_branch: TaskInSelectBranch,
             is_all_local: bool,
         ) -> SelectNonBlockingBranchResult {
@@ -275,7 +268,7 @@ macro_rules! generate_send_or_subscribe {
             if inner.is_closed {
                 macro_rules! success_case {
                     ($state:expr, $task:expr) => {{
-                        unsafe { $state.as_ref().is_closed() };
+                        $state.set_to_closed();
 
                         if $task.is_local() {
                             local_executor().exec_task($task);
@@ -412,7 +405,7 @@ macro_rules! generate_recv_or_subscribe {
         fn recv_or_subscribe(
             &self,
             slot: NonNull<Self::Data>,
-            state: NonNull<CallState>,
+            state: CallStatePtr,
             mut task_in_select_branch: TaskInSelectBranch,
             is_all_local: bool,
         ) -> SelectNonBlockingBranchResult {
@@ -420,7 +413,7 @@ macro_rules! generate_recv_or_subscribe {
             if inner.is_closed {
                 macro_rules! success_case {
                     ($state:expr, $task:expr) => {{
-                        unsafe { $state.as_ref().is_closed() };
+                        $state.set_to_closed();
 
                         if $task.is_local() {
                             local_executor().exec_task($task);
@@ -914,7 +907,7 @@ fn test_compile_local_channel() {}
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::sync::{RecvErr, TryRecvErr};
+    use crate::sync::{AsyncWaitGroup, LocalWaitGroup, RecvErr, TryRecvErr};
     use crate::utils::droppable_element::DroppableElement;
     use crate::utils::SpinLock;
     use crate::{yield_now, Local};
@@ -1227,7 +1220,9 @@ mod tests {
 
         for _ in 0..10 {
             let res = Local::new(0);
+            let wg = LocalWaitGroup::new();
 
+            wg.add(PAR * 2);
             for i in 0..PAR {
                 local_executor().spawn_local(async {
                     if i % 2 == 0 {
@@ -1249,6 +1244,8 @@ mod tests {
                             channel.send(j).await.unwrap();
                         }
                     }
+
+                    wg.done();
                 });
 
                 local_executor().spawn_local(async {
@@ -1275,8 +1272,12 @@ mod tests {
                             *res.borrow_mut() += r;
                         }
                     }
+
+                    wg.done();
                 });
             }
+
+            wg.wait().await;
 
             assert_eq!(*res.borrow(), PAR * COUNT * (COUNT - 1) / 2);
         }

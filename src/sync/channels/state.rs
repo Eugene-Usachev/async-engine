@@ -1,3 +1,6 @@
+use std::ops::Deref;
+use std::ptr::NonNull;
+
 /// `CallState` is a state for recv/send futures.
 /// This is used to improve performance.
 ///
@@ -15,6 +18,39 @@ pub enum CallState {
 impl CallState {
     /// Returns whether the state is [`CallState::WokenByClose`].
     pub fn is_closed(&self) -> bool {
-        matches!(*self, CallState::WokenByClose)
+        matches!(*self, Self::WokenByClose)
     }
 }
+
+// TODO docs
+#[derive(Copy, Clone)]
+pub struct CallStatePtr(NonNull<CallState>);
+
+impl CallStatePtr {
+    pub fn new(ptr: &mut CallState) -> Self {
+        Self(NonNull::from(ptr))
+    }
+
+    pub fn set_to_closed(&self) {
+        unsafe {
+            self.0.write(CallState::WokenByClose);
+        }
+    }
+
+    pub fn write(&self, value: CallState) {
+        unsafe {
+            self.0.write(value);
+        }
+    }
+}
+
+impl Deref for CallStatePtr {
+    type Target = CallState;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.0.as_ref() }
+    }
+}
+
+unsafe impl Sync for CallStatePtr {}
+unsafe impl Send for CallStatePtr {}

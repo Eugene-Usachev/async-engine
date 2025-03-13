@@ -657,6 +657,7 @@ pub fn select(input: TokenStream) -> TokenStream {
             {
                 use std::ptr::NonNull;
                 use orengine::local_executor;
+                use orengine::utils::SendableNonNull;
                 use orengine::sync::channels::waiting_task::{TaskInSelect, TaskInSelectBranch};
                 use orengine::sync::channels::select::SelectNonBlockingBranchResult;
                 use orengine::sync::channels::{RecvErr, SendErr, SelectReceiver, SelectSender};
@@ -671,11 +672,13 @@ pub fn select(input: TokenStream) -> TokenStream {
                     #(#union_variants),*
                 }
 
+                unsafe impl<#(#union_generics),*> Send for __RecvSlot__<#(#union_generic_params),*> {}
+
                 #[allow(clippy::too_many_arguments)]
                 fn __select__<#(#generics),*>(
-                    recv_slot: NonNull<__RecvSlot__<#(#union_generic_params),*>>,
-                    resolved_branch_id: NonNull<usize>,
-                    general_state: NonNull<orengine::sync::channels::CallState>,
+                    recv_slot: SendableNonNull<__RecvSlot__<#(#union_generic_params),*>>,
+                    resolved_branch_id: SendableNonNull<usize>,
+                    general_state: orengine::sync::channels::CallStatePtr,
                     task: orengine::runtime::Task,
                     #(#fn_select_args_types),*
                 ) {
@@ -687,7 +690,7 @@ pub fn select(input: TokenStream) -> TokenStream {
                         "Tried to use `local` task in `select` where at least one channel is `shared`.",
                     );
 
-                    let task_in_select = TaskInSelect::acquire_for_task_with_lock(task, resolved_branch_id);
+                    let task_in_select = TaskInSelect::acquire_for_task_with_lock(task, *resolved_branch_id);
                     let mut locked = [false; #branches_len];
                     let mut number_of_needed_to_retry_branches = 0;
 
@@ -712,13 +715,19 @@ pub fn select(input: TokenStream) -> TokenStream {
                 let mut resolved_branch_id = usize::MAX;
                 // Protected by lock in task in select.
                 let mut general_state = orengine::sync::channels::CallState::FirstCall;
-                let general_state_ptr = NonNull::from(&mut general_state);
+                let general_state_ptr = orengine::sync::channels::CallStatePtr::new(&mut general_state);
 
-                let recv_slot_ptr = NonNull::from(&mut recv_slot);
-                let resolved_branch_id_ptr = NonNull::from(&mut resolved_branch_id);
+                let recv_slot_ptr = SendableNonNull::from(&mut recv_slot);
+                let resolved_branch_id_ptr = SendableNonNull::from(&mut resolved_branch_id);
 
                 let mut select_closure = |task| {
-                    __select__(recv_slot_ptr, resolved_branch_id_ptr, general_state_ptr, task, #(#fn_select_args),*)
+                    __select__(
+                        recv_slot_ptr,
+                        resolved_branch_id_ptr,
+                        general_state_ptr,
+                        task,
+                        #(#fn_select_args),*
+                    );
                 };
 
                 unsafe {

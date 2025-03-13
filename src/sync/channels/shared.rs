@@ -2,7 +2,7 @@ use crate::panic_if_local_in_future;
 use crate::runtime::call::Call;
 use crate::runtime::{local_executor, IsLocal, Task};
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
-use crate::sync::channels::state::CallState;
+use crate::sync::channels::state::{CallState, CallStatePtr};
 use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
 use crate::sync::channels::waiting_task::waiting_task_deque::WaitingTaskSharedDequeGuard;
 use crate::sync::channels::waiting_task::{PopIfAcquiredResult, TaskInSelectBranch};
@@ -135,7 +135,7 @@ impl<T> Future for WaitSend<'_, T> {
                 if len >= inner_lock.capacity {
                     inner_lock.deque.push_back_sender(WaitingTask::common(
                         unsafe { Task::from_context(cx) },
-                        NonNull::from(&mut this.call_state),
+                        CallStatePtr::new(&mut this.call_state),
                         NonNull::from(&mut *this.value),
                     ));
 
@@ -228,7 +228,7 @@ impl<T> Future for WaitRecv<'_, T> {
 
                     inner_lock.deque.push_back_receiver(WaitingTask::common(
                         unsafe { Task::from_context(cx) },
-                        NonNull::from(&mut this.call_state),
+                        CallStatePtr::new(&mut this.call_state),
                         NonNull::from(unsafe { &mut *this.slot }),
                     ));
 
@@ -275,10 +275,7 @@ impl<T: RefUnwindSafe> RefUnwindSafe for WaitRecv<'_, T> {}
 fn close_with_lock<T>(inner: &mut Inner<T>) {
     inner.is_closed = true;
 
-    inner.deque.clear_with(
-        |call_state, _| unsafe { call_state.write(CallState::WokenByClose) },
-        |call_state, _| unsafe { call_state.write(CallState::WokenByClose) },
-    );
+    inner.deque.clear();
 }
 
 /// Closes the [`channel`](Channel) and wakes all senders and receivers.
@@ -336,7 +333,7 @@ macro_rules! generate_send_or_subscribe {
         fn send_or_subscribe(
             &self,
             data: NonNull<Self::Data>,
-            state: NonNull<CallState>,
+            state: CallStatePtr,
             mut task_in_select_branch: TaskInSelectBranch,
             _: bool, // always false
         ) -> SelectNonBlockingBranchResult {
@@ -351,7 +348,7 @@ macro_rules! generate_send_or_subscribe {
 
             if inner_lock.is_closed {
                 return if let Some(task) = task_in_select_branch.acquire_once() {
-                    unsafe { state.as_ref().is_closed() };
+                    state.set_to_closed();
 
                     local_executor().spawn_shared_task(task);
 
@@ -476,7 +473,7 @@ macro_rules! generate_recv_or_subscribe {
         fn recv_or_subscribe(
             &self,
             slot: NonNull<Self::Data>,
-            state: NonNull<CallState>,
+            state: CallStatePtr,
             mut task_in_select_branch: TaskInSelectBranch,
             _: bool, // always false
         ) -> SelectNonBlockingBranchResult {
@@ -493,7 +490,7 @@ macro_rules! generate_recv_or_subscribe {
             if inner_lock.is_closed {
                 return match task_in_select_branch.acquire_once() {
                     Some(task) => {
-                        unsafe { state.as_ref().is_closed() };
+                        state.set_to_closed();
 
                         local_executor().spawn_shared_task(task);
 

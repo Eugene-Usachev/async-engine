@@ -28,7 +28,7 @@ pub trait FromRawSocket: std::os::fd::FromRawFd + Sized {
     /// in particular, it must be open.
     #[inline]
     unsafe fn from_raw_socket(raw_socket: RawSocket) -> Self {
-        std::os::fd::FromRawFd::from_raw_fd(raw_socket)
+        unsafe { std::os::fd::FromRawFd::from_raw_fd(raw_socket) }
     }
 }
 
@@ -60,7 +60,7 @@ pub trait FromRawFile: std::os::fd::FromRawFd + Sized {
     /// in particular, it must be open.
     #[inline]
     unsafe fn from_raw_file(raw_file: RawFile) -> Self {
-        std::os::fd::FromRawFd::from_raw_fd(raw_file)
+        unsafe { std::os::fd::FromRawFd::from_raw_fd(raw_file) }
     }
 }
 

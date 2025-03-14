@@ -33,7 +33,6 @@ pub trait SelectReceiver: AsyncReceiver<Self::Data> {
         slot: NonNull<Self::Data>,
         state: CallStatePtr,
         task_in_select_branch: TaskInSelectBranch,
-        is_all_local: bool,
     ) -> SelectNonBlockingBranchResult;
 }
 
@@ -49,8 +48,7 @@ where
         slot: NonNull<Self::Data>,
         state: CallStatePtr,
         task_in_select_branch: TaskInSelectBranch,
-        is_all_local: bool,
     ) -> SelectNonBlockingBranchResult {
-        (**self).recv_or_subscribe(slot, state, task_in_select_branch, is_all_local)
+        (**self).recv_or_subscribe(slot, state, task_in_select_branch)
     }
 }

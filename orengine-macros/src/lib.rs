@@ -499,7 +499,6 @@ pub fn select(input: TokenStream) -> TokenStream {
                             recv_slot.cast(),
                             general_state,
                             #name_of_task_in_select_branch,
-                            __is_all_local
                         ) {
                             SelectNonBlockingBranchResult::Success => {
                                 // `recv_or_subscribe` have already woken the task up
@@ -527,7 +526,6 @@ pub fn select(input: TokenStream) -> TokenStream {
                                 recv_slot.cast(),
                                 general_state,
                                 #name_of_task_in_select_branch,
-                                __is_all_local
                             ) {
                                 SelectNonBlockingBranchResult::Success => {
                                     // `recv_or_subscribe` have already woken the task up
@@ -602,7 +600,6 @@ pub fn select(input: TokenStream) -> TokenStream {
                             unsafe { NonNull::new_unchecked(#var_name.cast_mut()) },
                             general_state,
                             #name_of_task_in_select_branch,
-                            __is_all_local
                         ) {
                             SelectNonBlockingBranchResult::Success => {
                                 // `send_or_subscribe` have already woken the task up
@@ -630,7 +627,6 @@ pub fn select(input: TokenStream) -> TokenStream {
                                 unsafe { NonNull::new_unchecked(#var_name.cast_mut()) },
                                 general_state,
                                 #name_of_task_in_select_branch,
-                                __is_all_local
                             ) {
                                 SelectNonBlockingBranchResult::Success => {
                                     // `send_or_subscribe` have already woken the task up

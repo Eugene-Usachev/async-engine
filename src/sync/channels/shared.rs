@@ -335,7 +335,6 @@ macro_rules! generate_send_or_subscribe {
             data: NonNull<Self::Data>,
             state: CallStatePtr,
             mut task_in_select_branch: TaskInSelectBranch,
-            _: bool, // always false
         ) -> SelectNonBlockingBranchResult {
             debug_assert!(
                 !task_in_select_branch.is_local(),
@@ -475,7 +474,6 @@ macro_rules! generate_recv_or_subscribe {
             slot: NonNull<Self::Data>,
             state: CallStatePtr,
             mut task_in_select_branch: TaskInSelectBranch,
-            _: bool, // always false
         ) -> SelectNonBlockingBranchResult {
             debug_assert!(
                 !task_in_select_branch.is_local(),
@@ -520,7 +518,7 @@ macro_rules! generate_recv_or_subscribe {
                     }
 
                     PopIfAcquiredResult::NotAcquired => {
-                        return SelectNonBlockingBranchResult::AlreadyAcquired
+                        return SelectNonBlockingBranchResult::AlreadyAcquired;
                     }
 
                     PopIfAcquiredResult::NoData => {}

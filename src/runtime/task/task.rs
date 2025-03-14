@@ -249,8 +249,8 @@ macro_rules! panic_if_local_in_future {
             let task = $crate::runtime::Task::from_context($cx);
             if task.is_local() {
                 panic!(
-                    "You cannot call a local task in {}, because it can be moved! \
-                    Use shared task instead or use local structures if it is possible.",
+                    "You cannot call a `local` task in {}, because it can be moved! \
+                    Use `shared` task instead or use `local` structures if it is possible.",
                     $name_of_future
                 );
             }
@@ -258,7 +258,38 @@ macro_rules! panic_if_local_in_future {
     };
 }
 
-/// Update current [`task`](Task) locality via [`calling`](crate::Executor::invoke_call)
+/// Gets the [`Task`] from the context and panics if it is `shared`.
+///
+/// # Panics
+///
+/// If the [`Task`] associated with the context is `shared`.
+///
+/// # Safety
+///
+/// Provided context contains a valid [`Task`] in `data` field (always true if you call it in
+/// Orengine runtime).
+#[macro_export]
+macro_rules! panic_if_shared_in_future {
+    ($cx:expr, $name_of_future:expr) => {
+        #[cfg(debug_assertions)]
+        #[allow(
+            clippy::macro_metavars_in_unsafe,
+            reason = "else we need to allow unused `unsafe` for `release`"
+        )]
+        unsafe {
+            let task = $crate::runtime::Task::from_context($cx);
+            if !task.is_local() {
+                panic!(
+                    "You cannot call a `shared` task in {}, because it can be moved! \
+                    Use `local` task instead or use `shared` structures if it is possible.",
+                    $name_of_future
+                );
+            }
+        }
+    };
+}
+
+/// Update current [`task`](Task) locality via [`calling`](Executor::invoke_call)
 /// [`ChangeCurrentTaskLocality`](Call::ChangeCurrentTaskLocality).
 ///
 /// It is unsafe because you have to think about making sure

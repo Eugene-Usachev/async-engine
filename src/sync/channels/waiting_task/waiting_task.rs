@@ -21,4 +21,11 @@ impl<T> WaitingTask<T> {
     ) -> Self {
         Self::InSelector(task, state, slot)
     }
+
+    pub(crate) fn is_local(&self) -> bool {
+        match self {
+            WaitingTask::Common(task, _, _) => task.is_local(),
+            WaitingTask::InSelector(task, _, _) => task.is_local(),
+        }
+    }
 }

@@ -1,4 +1,3 @@
-use crate::local_executor;
 use crate::runtime::{IsLocal, Task};
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
 use crate::sync::channels::state::{CallState, CallStatePtr};
@@ -11,6 +10,7 @@ use crate::sync::{
 };
 use crate::utils::hints::unreachable_hint;
 use crate::utils::Ptr;
+use crate::{local_executor, panic_if_shared_in_future};
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::future::Future;
@@ -72,6 +72,7 @@ impl<T> Future for WaitLocalSend<'_, T> {
         {
             this.was_awaited = true;
         }
+        panic_if_shared_in_future!(cx, "LocalChannel");
 
         match this.call_state {
             CallState::FirstCall => {
@@ -159,6 +160,8 @@ impl<T> Future for WaitLocalRecv<'_, T> {
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = unsafe { self.get_unchecked_mut() };
+
+        panic_if_shared_in_future!(cx, "LocalChannel");
 
         match this.call_state {
             CallState::FirstCall => {
@@ -261,7 +264,6 @@ macro_rules! generate_send_or_subscribe {
             data: NonNull<Self::Data>,
             state: CallStatePtr,
             mut task_in_select_branch: TaskInSelectBranch,
-            is_all_local: bool,
         ) -> SelectNonBlockingBranchResult {
             let inner = unsafe { &mut *self.inner.get() };
 
@@ -270,28 +272,17 @@ macro_rules! generate_send_or_subscribe {
                     ($state:expr, $task:expr) => {{
                         $state.set_to_closed();
 
-                        if $task.is_local() {
-                            local_executor().exec_task($task);
-                        } else {
-                            local_executor().spawn_shared_task($task);
-                        }
+                        local_executor().exec_task($task);
 
                         SelectNonBlockingBranchResult::Success
                     }};
                 }
 
-                return if is_all_local {
-                    match unsafe { task_in_select_branch.acquire_once_local() } {
-                        // It all is `local`, then other thread can't acquire the task. So, in select
-                        // we can definitely acquire it.
-                        Some(task) => success_case!(state, task),
-                        None => unreachable_hint(),
-                    }
-                } else {
-                    match task_in_select_branch.acquire_once() {
-                        Some(task) => success_case!(state, task),
-                        None => SelectNonBlockingBranchResult::AlreadyAcquired,
-                    }
+                return match unsafe { task_in_select_branch.acquire_once_local() } {
+                    // It all is `local`, then other thread can't acquire the task. So, in select
+                    // we can definitely acquire it.
+                    Some(task) => success_case!(state, task),
+                    None => unreachable_hint(),
                 };
             }
 
@@ -304,7 +295,6 @@ macro_rules! generate_send_or_subscribe {
                     };
                 },
                 &mut task_in_select_branch,
-                is_all_local,
             );
 
             match result {
@@ -330,32 +320,19 @@ macro_rules! generate_send_or_subscribe {
                 ($inner:expr, $data:expr, $task:expr) => {{
                     $inner.storage.push_back(unsafe { $data.read() });
 
-                    if $task.is_local() {
-                        local_executor().exec_task($task);
-                    } else {
-                        local_executor().spawn_shared_task($task);
-                    }
+                    local_executor().exec_task($task);
 
                     SelectNonBlockingBranchResult::Success
                 }};
             }
 
-            if is_all_local {
-                match unsafe { task_in_select_branch.acquire_once_local() } {
-                    // It all is `local`, then other thread can't acquire the task. So, in select
-                    // we can definitely acquire it.
-                    Some(task) => {
-                        success_case!(inner, data, task)
-                    }
-                    None => unreachable_hint(),
+            match unsafe { task_in_select_branch.acquire_once_local() } {
+                // It all is `local`, then other thread can't acquire the task. So, in select
+                // we can definitely acquire it.
+                Some(task) => {
+                    success_case!(inner, data, task)
                 }
-            } else {
-                match task_in_select_branch.acquire_once() {
-                    Some(task) => {
-                        success_case!(inner, data, task)
-                    }
-                    None => SelectNonBlockingBranchResult::AlreadyAcquired,
-                }
+                None => unreachable_hint(),
             }
         }
     };
@@ -407,7 +384,6 @@ macro_rules! generate_recv_or_subscribe {
             slot: NonNull<Self::Data>,
             state: CallStatePtr,
             mut task_in_select_branch: TaskInSelectBranch,
-            is_all_local: bool,
         ) -> SelectNonBlockingBranchResult {
             let inner = unsafe { &mut *self.inner.get() };
             if inner.is_closed {
@@ -415,28 +391,15 @@ macro_rules! generate_recv_or_subscribe {
                     ($state:expr, $task:expr) => {{
                         $state.set_to_closed();
 
-                        if $task.is_local() {
-                            local_executor().exec_task($task);
-                        } else {
-                            local_executor().spawn_shared_task($task);
-                        }
+                        local_executor().exec_task($task);
 
                         SelectNonBlockingBranchResult::Success
                     }};
                 }
 
-                return if is_all_local {
-                    match unsafe { task_in_select_branch.acquire_once_local() } {
-                        // It all is `local`, then other thread can't acquire the task. So, in select
-                        // we can definitely acquire it.
-                        Some(task) => success_case!(state, task),
-                        None => unreachable_hint(),
-                    }
-                } else {
-                    match task_in_select_branch.acquire_once() {
-                        Some(task) => success_case!(state, task),
-                        None => SelectNonBlockingBranchResult::AlreadyAcquired,
-                    }
+                return match task_in_select_branch.acquire_once() {
+                    Some(task) => success_case!(state, task),
+                    None => SelectNonBlockingBranchResult::AlreadyAcquired,
                 };
             }
 
@@ -450,13 +413,12 @@ macro_rules! generate_recv_or_subscribe {
                         };
                     },
                     &mut task_in_select_branch,
-                    is_all_local,
                 );
 
                 match result {
                     PopIfAcquiredResult::Ok => return SelectNonBlockingBranchResult::Success,
                     PopIfAcquiredResult::NotAcquired => {
-                        return SelectNonBlockingBranchResult::AlreadyAcquired
+                        return SelectNonBlockingBranchResult::AlreadyAcquired;
                     }
                     PopIfAcquiredResult::NoData => {}
                 }
@@ -474,11 +436,7 @@ macro_rules! generate_recv_or_subscribe {
                 ($inner:expr, $slot:expr, $task:expr) => {{
                     unsafe { $slot.write($inner.storage.pop_front().unwrap_unchecked()) };
 
-                    if $task.is_local() {
-                        local_executor().exec_task($task);
-                    } else {
-                        local_executor().spawn_shared_task($task);
-                    }
+                    local_executor().exec_task($task);
 
                     $inner
                         .deque
@@ -492,22 +450,11 @@ macro_rules! generate_recv_or_subscribe {
                 }};
             }
 
-            if is_all_local {
-                match unsafe { task_in_select_branch.acquire_once_local() } {
-                    // It all is `local`, then other thread can't acquire the task. So, in select
-                    // we can definitely acquire it.
-                    Some(task) => {
-                        success_case!(inner, slot, task)
-                    }
-                    None => unreachable_hint(),
+            match task_in_select_branch.acquire_once() {
+                Some(task) => {
+                    success_case!(inner, slot, task)
                 }
-            } else {
-                match task_in_select_branch.acquire_once() {
-                    Some(task) => {
-                        success_case!(inner, slot, task)
-                    }
-                    None => SelectNonBlockingBranchResult::AlreadyAcquired,
-                }
+                None => SelectNonBlockingBranchResult::AlreadyAcquired,
             }
         }
     };

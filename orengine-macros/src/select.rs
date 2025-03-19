@@ -44,14 +44,14 @@ impl Parse for SelectInput {
                 input.parse::<Token![->]>().map_err(|_| {
                     syn::Error::new(
                         channel.span(),
-                        "expected `->` after channel expression.\
+                        "expected `->` after channel expression. \
                          For example, `recv(channel) -> var",
                     )
                 })?;
                 let var: Ident = input.parse().map_err(|_| {
                     syn::Error::new(
                         channel.span(),
-                        "expected a variable name after `->`.\
+                        "expected a variable name after `->`. \
                          For example, `recv(channel) -> var",
                     )
                 })?;
@@ -59,14 +59,14 @@ impl Parse for SelectInput {
                 input.parse::<Token![=>]>().map_err(|_| {
                     syn::Error::new(
                         var.span(),
-                        "expected `=>` after the variable name.\
+                        "expected `=>` after the variable name. \
                          For example, `recv(channel) -> var => body",
                     )
                 })?;
                 let body: Expr = input.parse().map_err(|_| {
                     syn::Error::new(
                         var.span(),
-                        "expected an expression after `=>`.\
+                        "expected an expression after `=>`. \
                          For example, `recv(channel) -> var => { println!(\"received {}!\", var) }`"
                     )
                 })?;
@@ -77,24 +77,30 @@ impl Parse for SelectInput {
                 syn::parenthesized!(content in input);
 
                 let channel: Expr = content.parse().map_err(|_| {
-                    syn::Error::new(content.span(), "expected a valid channel expression inside `send(...)`")
+                    syn::Error::new(
+                        content.span(),
+                        "expected a valid channel expression inside `send(...)`",
+                    )
                 })?;
                 content.parse::<Token![,]>()?;
                 let value: Expr = content.parse().map_err(|_| {
-                    syn::Error::new(content.span(), "expected a valid value expression inside `send(channel, ...)`")
+                    syn::Error::new(
+                        content.span(),
+                        "expected a valid value expression inside `send(channel, ...)`",
+                    )
                 })?;
 
                 input.parse::<Token![->]>().map_err(|_| {
                     syn::Error::new(
                         value.span(),
-                        "expected `->` after value expression.\
+                        "expected `->` after value expression. \
                          For example, `send(channel, value) -> result",
                     )
                 })?;
                 let var: Ident = input.parse().map_err(|_| {
                     syn::Error::new(
                         value.span(),
-                        "expected a variable name after `->`.\
+                        "expected a variable name after `->`. \
                          For example, `send(channel, value) -> result`",
                     )
                 })?;
@@ -102,14 +108,14 @@ impl Parse for SelectInput {
                 input.parse::<Token![=>]>().map_err(|_| {
                     syn::Error::new(
                         var.span(),
-                        "expected `=>` after the variable name.\
+                        "expected `=>` after the variable name. \
                          For example, `send(channel, value) -> result => body",
                     )
                 })?;
                 let body: Expr = input.parse().map_err(|_| {
                     syn::Error::new(
                         var.span(),
-                        "expected expression after `=>`.\
+                        "expected expression after `=>`. \
                          For example, `send(channel, value) -> result => {\
                           if result.is_err() { println!(\"Send operation failed!\")}`",
                     )
@@ -125,14 +131,14 @@ impl Parse for SelectInput {
                 input.parse::<Token![=>]>().map_err(|_| {
                     syn::Error::new(
                         ident.span(),
-                        "expected `=>` after `default`.\
+                        "expected `=>` after `default`. \
                          For example, `default => body`",
                     )
                 })?;
                 let body: Expr = input.parse().map_err(|_| {
                     syn::Error::new(
                         ident.span(),
-                        "expected an expression after `=>`.\
+                        "expected an expression after `=>`. \
                          For example, `default => { println!(\"Nothing ready.\")` }",
                     )
                 })?;

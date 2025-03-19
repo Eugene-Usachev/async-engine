@@ -213,7 +213,7 @@ pub trait AsyncAccept<S: Stream>: Socket {
 
         Ok((
             stream,
-            S::Addr::from_sock_addr(sock_addr).expect(BUG_MESSAGE),
+            S::Addr::from_sock_addr(sock_addr).expect(BUG_MESSAGE), // TODO hint
         ))
     }
 

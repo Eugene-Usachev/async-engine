@@ -8,6 +8,7 @@ use std::task::{Context, Poll};
 /// a result of the future is written into the pointer.
 ///
 /// # Why it is needed?
+///
 /// Async block in async block allocates double memory.
 /// But if we use async block in `Future::poll`, it allocates only one memory.
 ///

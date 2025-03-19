@@ -440,6 +440,21 @@ pub fn select(input: TokenStream) -> TokenStream {
 
         for (idx, branch) in branches.iter().enumerate() {
             let name_of_task_in_select_branch = format_ident!("task_in_select_branch{idx}");
+            let create_task_in_select_branch = if idx != branches.len() - 1 {
+                quote! {
+                    let #name_of_task_in_select_branch = if __is_all_local {
+                        unsafe { TaskInSelectBranch::new_local(task_in_select, #idx) }
+                    } else {
+                        TaskInSelectBranch::new(task_in_select, #idx)
+                    };
+                }
+            } else {
+                quote! {
+                    let #name_of_task_in_select_branch = unsafe {
+                        TaskInSelectBranch::from_owned_task_in_select_ptr(task_in_select, #idx)
+                    };
+                }
+            };
 
             match branch {
                 select::Branch::Recv { channel, var, body } => {
@@ -488,11 +503,7 @@ pub fn select(input: TokenStream) -> TokenStream {
                     });
 
                     select_calls.push(quote! {
-                        let #name_of_task_in_select_branch = if __is_all_local {
-                            unsafe { TaskInSelectBranch::new_local(task_in_select, #idx) }
-                        } else {
-                            TaskInSelectBranch::new(task_in_select, #idx)
-                        };
+                        #create_task_in_select_branch
 
                         // TODO it can't be AlreadyAcquired when __is_all_local == true
                         match #receiver_name.recv_or_subscribe(
@@ -589,11 +600,7 @@ pub fn select(input: TokenStream) -> TokenStream {
                     });
 
                     select_calls.push(quote! {
-                        let mut #name_of_task_in_select_branch = if __is_all_local {
-                            unsafe { TaskInSelectBranch::new_local(task_in_select, #idx) }
-                        } else {
-                            TaskInSelectBranch::new(task_in_select, #idx)
-                        };
+                        #create_task_in_select_branch
 
                         // TODO it can't be AlreadyAcquired when __is_all_local == true
                         match #sender_name.send_or_subscribe(

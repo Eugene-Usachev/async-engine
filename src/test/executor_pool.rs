@@ -290,8 +290,11 @@ impl ExecutorPool {
 ///
 /// async fn awesome_function(atomic_to_sync_test: Arc<AtomicUsize>, wg: Arc<WaitGroup>) {
 ///     atomic_to_sync_test.fetch_add(1, SeqCst);
+///
 ///     yield_now().await;
+///
 ///     atomic_to_sync_test.fetch_add(1, SeqCst);
+///
 ///     wg.done();
 /// }
 ///

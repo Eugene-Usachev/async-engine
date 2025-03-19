@@ -9,13 +9,11 @@ mod sealed;
 pub mod spin_lock;
 #[macro_use]
 mod task_structures_pool;
-mod defer;
 mod progressive_timeout;
 mod sendable_ptr;
 pub(crate) mod vec_map;
 
 pub use core::*;
-pub(crate) use defer::*;
 pub(crate) use hints::assert_hint;
 pub(crate) use progressive_timeout::*;
 pub use ptr::*;

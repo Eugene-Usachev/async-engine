@@ -137,13 +137,12 @@ impl Task {
             fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
                 let this = &mut *self;
 
-                match this.was_called {
-                    true => Poll::Ready(()),
-                    false => {
-                        this.was_called = true;
+                if this.was_called {
+                    Poll::Ready(())
+                } else {
+                    this.was_called = true;
 
-                        Poll::Pending
-                    }
+                    Poll::Pending
                 }
             }
         }

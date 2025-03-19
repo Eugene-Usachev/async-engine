@@ -24,8 +24,30 @@ impl<T> WaitingTask<T> {
 
     pub(crate) fn is_local(&self) -> bool {
         match self {
-            WaitingTask::Common(task, _, _) => task.is_local(),
-            WaitingTask::InSelector(task, _, _) => task.is_local(),
+            Self::Common(task, _, _) => task.is_local(),
+            Self::InSelector(task, _, _) => task.is_local(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_usize_for_tests(value: usize) -> Self {
+        use crate::runtime::Locality;
+        use std::mem;
+
+        Self::Common(
+            unsafe { Task::from_future(async {}, Locality::local()) },
+            CallStatePtr::new(unsafe {
+                mem::transmute::<usize, &mut crate::sync::channels::CallState>(8)
+            }),
+            unsafe { mem::transmute::<usize, NonNull<T>>(value) },
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn extract_usize_for_tests(&self) -> usize {
+        match self {
+            WaitingTask::Common(_, _, slot) => slot.as_ptr() as usize,
+            WaitingTask::InSelector(_, _, _) => unreachable!(),
         }
     }
 }

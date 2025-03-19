@@ -618,45 +618,9 @@ impl Executor {
         self.local_tasks.push_front(task);
     }
 
-    /// Creates a `local` [`task`](Task) from a provided [`future`](Future) and enqueues it.
-    ///
-    /// # Attention
-    ///
-    /// This function enqueues it at the end of the queue of local tasks, but it is `LIFO`.
-    ///
-    /// # The difference between shared and local tasks
-    ///
-    /// Read it in [`Executor`].
-    #[inline]
-    pub fn spawn_local<F>(&mut self, future: F)
-    where
-        F: Future<Output = ()>,
-    {
-        let task = unsafe { Task::from_future(future, Locality::local()) };
-        self.spawn_local_task(task);
-    }
-
-    /// Creates a `shared` [`task`](Task) from a provided [`future`](Future) and enqueues it.
-    ///
-    /// # Attention
-    ///
-    /// This function enqueues it at the end of the queue of shared tasks, but it is `LIFO`.
-    ///
-    /// # The difference between shared and local tasks
-    ///
-    /// Read it in [`Executor`].
-    #[inline]
-    pub fn spawn_shared<F>(&mut self, future: F)
-    where
-        F: Future<Output = ()> + Send,
-    {
-        let task = unsafe { Task::from_future(future, Locality::shared()) };
-        self.spawn_shared_task(task);
-    }
-
     /// Enqueues a `shared` [`task`](Task).
     ///
-    /// # PUT_IN_THE_START_OF_QUEUE
+    /// # `PUT_IN_THE_START_OF_QUEUE`
     ///
     /// Takes a generic to determine whether to put it at the start or the end of the queue.
     ///
@@ -738,6 +702,42 @@ impl Executor {
     #[inline]
     pub fn spawn_shared_task(&mut self, task: Task) {
         self.spawn_shared_task_::<true>(task);
+    }
+
+    /// Creates a `local` [`task`](Task) from a provided [`future`](Future) and enqueues it.
+    ///
+    /// # Attention
+    ///
+    /// This function enqueues it at the end of the queue of local tasks, but it is `LIFO`.
+    ///
+    /// # The difference between shared and local tasks
+    ///
+    /// Read it in [`Executor`].
+    #[inline]
+    pub fn spawn_local<F>(&mut self, future: F)
+    where
+        F: Future<Output = ()>,
+    {
+        let task = unsafe { Task::from_future(future, Locality::local()) };
+        self.spawn_local_task(task);
+    }
+
+    /// Creates a `shared` [`task`](Task) from a provided [`future`](Future) and enqueues it.
+    ///
+    /// # Attention
+    ///
+    /// This function enqueues it at the end of the queue of shared tasks, but it is `LIFO`.
+    ///
+    /// # The difference between shared and local tasks
+    ///
+    /// Read it in [`Executor`].
+    #[inline]
+    pub fn spawn_shared<F>(&mut self, future: F)
+    where
+        F: Future<Output = ()> + Send,
+    {
+        let task = unsafe { Task::from_future(future, Locality::shared()) };
+        self.spawn_shared_task(task);
     }
 
     /// Calls [`spawn_local_task`](Executor::spawn_local_task)

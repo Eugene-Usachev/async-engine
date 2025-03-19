@@ -1,40 +1,36 @@
 // TODO docs
 use crate::local_executor;
 use crate::sync::channels::state::CallStatePtr;
+use crate::sync::channels::waiting_task::sender_receiver_deque::{
+    SenderReceiverQueue, SenderReceiverQueueOption,
+};
 use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
 use crate::sync::channels::waiting_task::{PopIfAcquiredResult, TaskInSelectBranch};
+use crate::utils::assert_hint;
 use std::cell::UnsafeCell;
-use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::ptr;
 use std::ptr::NonNull;
 
-type WaitingTaskDeque<T = ()> = VecDeque<WaitingTask<T>>;
-
 thread_local! {
     /// A pool of [`waiting task`](WaitingTask) deques.
-    static WAITING_TASK_DEQUE_POOL: UnsafeCell<Vec<WaitingTaskDeque>> = const { UnsafeCell::new(Vec::new()) };
+    static WAITING_TASK_DEQUE_POOL: UnsafeCell<Vec<SenderReceiverQueue>> = const { UnsafeCell::new(Vec::new()) };
 }
 
 /// Acquires a [`WaitingTaskDeque`] from the pool.
-fn acquire_waiting_task_deque_from_pool<T>() -> WaitingTaskDeque<T> {
+fn acquire_waiting_task_deque_from_pool<T>() -> SenderReceiverQueue<T> {
     WAITING_TASK_DEQUE_POOL.with(|pool| {
-        if let Some(deque) = unsafe { &mut *pool.get().cast::<Vec<WaitingTaskDeque<T>>>() }.pop() {
-            deque
-        } else {
-            VecDeque::with_capacity(2)
-        }
+        unsafe { &mut *pool.get().cast::<Vec<SenderReceiverQueue<T>>>() }
+            .pop()
+            .map_or_else(SenderReceiverQueue::new, |deque| deque)
     })
 }
 
 /// Puts the provided [`WaitingTaskDeque`] back into the pool.
-fn put_waiting_task_deque_to_pool<T>(deque: WaitingTaskDeque<T>) {
-    if deque.capacity() < 128 {
-        WAITING_TASK_DEQUE_POOL.with(|pool| {
-            unsafe { &mut *pool.get().cast::<Vec<WaitingTaskDeque<T>>>() }.push(deque)
-        });
-    }
+fn put_waiting_task_deque_to_pool<T>(deque: SenderReceiverQueue<T>) {
+    WAITING_TASK_DEQUE_POOL
+        .with(|pool| unsafe { &mut *pool.get().cast::<Vec<SenderReceiverQueue<T>>>() }.push(deque));
 }
 
 macro_rules! generate_struct {
@@ -45,10 +41,7 @@ macro_rules! generate_struct {
         /// or [`CallState`](CallState)
         /// and `T` is a type of channel data.
         pub(crate) struct $name<T> {
-            deque: ManuallyDrop<WaitingTaskDeque<T>>,
-            /// __0__ for none, __>0__ for receivers, __<0__ for senders
-            number_of_senders_or_receivers: isize,
-            _marker: std::marker::PhantomData<T>,
+            queue: ManuallyDrop<SenderReceiverQueue<T>>,
         }
     };
 }
@@ -57,9 +50,7 @@ macro_rules! generate_new {
     () => {
         pub(crate) fn new() -> Self {
             Self {
-                deque: ManuallyDrop::new(acquire_waiting_task_deque_from_pool()),
-                number_of_senders_or_receivers: 0,
-                _marker: std::marker::PhantomData,
+                queue: ManuallyDrop::new(acquire_waiting_task_deque_from_pool()),
             }
         }
     };
@@ -68,38 +59,17 @@ macro_rules! generate_new {
 macro_rules! generate_push_back {
     ($should_be_local:expr) => {
         pub(crate) fn push_back_sender(&mut self, task: WaitingTask<T>) {
-            debug_assert!(self.number_of_senders_or_receivers < 1);
             debug_assert_eq!(task.is_local(), $should_be_local);
 
-            self.number_of_senders_or_receivers -= 1;
-
-            self.deque.push_back(task);
+            self.queue.push_sender(task);
         }
 
         pub(crate) fn push_back_receiver(&mut self, task: WaitingTask<T>) {
-            debug_assert!(self.number_of_senders_or_receivers > -1);
             debug_assert_eq!(task.is_local(), $should_be_local);
 
-            self.number_of_senders_or_receivers += 1;
-
-            self.deque.push_back(task);
+            self.queue.push_receiver(task);
         }
     };
-}
-
-macro_rules! generate_pop_shared_task_in_selector {
-    ($setter_fn:expr, $call_state:expr, $slot:expr, $task_in_select_branch:expr) => {{
-        match $task_in_select_branch.acquire_once() {
-            None => false,
-            Some(task) => {
-                $setter_fn($call_state, $slot);
-
-                local_executor().spawn_shared_task(task);
-
-                true
-            }
-        }
-    }};
 }
 
 macro_rules! generate_try_pop_and_call {
@@ -115,15 +85,8 @@ macro_rules! generate_try_pop_and_call {
         where
             SetterFn: FnMut(CallStatePtr, NonNull<T>),
         {
-            debug_assert_eq!(
-                self.number_of_senders_or_receivers.unsigned_abs(),
-                self.deque.len()
-            );
-
-            while self.number_of_senders_or_receivers > 0 {
-                self.number_of_senders_or_receivers -= 1;
-
-                if unsafe { self.try_pop_and_call(&mut setter_fn) } {
+            while matches!(self.queue.option(), SenderReceiverQueueOption::Receiver) {
+                if unsafe { self.try_pop_and_call::<true, _>(&mut setter_fn) } {
                     return true;
                 }
             }
@@ -142,15 +105,8 @@ macro_rules! generate_try_pop_and_call {
         where
             SetterFn: FnMut(CallStatePtr, NonNull<T>),
         {
-            debug_assert_eq!(
-                self.number_of_senders_or_receivers.unsigned_abs(),
-                self.deque.len()
-            );
-
-            while self.number_of_senders_or_receivers < 0 {
-                self.number_of_senders_or_receivers += 1;
-
-                if unsafe { self.try_pop_and_call(&mut setter_fn) } {
+            while matches!(self.queue.option(), SenderReceiverQueueOption::Sender) {
+                if unsafe { self.try_pop_and_call::<false, _>(&mut setter_fn) } {
                     return true;
                 }
             }
@@ -163,16 +119,22 @@ macro_rules! generate_try_pop_and_call {
 macro_rules! generate_clear {
     () => {
         pub(crate) fn clear(&mut self) {
-            if self.number_of_senders_or_receivers == 0 {
-                // nothing to clear
-            } else if self.number_of_senders_or_receivers > 0 {
-                while self.try_pop_front_receiver_and_call(|state_ptr, _| {
-                    state_ptr.set_to_closed();
-                }) {}
-            } else {
-                while self.try_pop_front_sender_and_call(|state_ptr, _| {
-                    state_ptr.set_to_closed();
-                }) {}
+            let option = self.queue.option();
+
+            match option {
+                SenderReceiverQueueOption::Empty => {
+                    // nothing to clear
+                }
+                SenderReceiverQueueOption::Sender => {
+                    while self.try_pop_front_sender_and_call(|state_ptr, _| {
+                        state_ptr.set_to_closed();
+                    }) {}
+                }
+                SenderReceiverQueueOption::Receiver => {
+                    while self.try_pop_front_receiver_and_call(|state_ptr, _| {
+                        state_ptr.set_to_closed();
+                    }) {}
+                }
             }
         }
     };
@@ -181,31 +143,40 @@ macro_rules! generate_clear {
 macro_rules! generate_drop {
     () => {
         fn drop(&mut self) {
-            debug_assert!(self.deque.is_empty());
-            debug_assert_eq!(self.number_of_senders_or_receivers, 0);
+            debug_assert!(self.queue.is_empty());
 
-            put_waiting_task_deque_to_pool(unsafe { ptr::read(ptr::from_ref(&*self.deque)) });
+            if self.queue.capacity() < 128 {
+                put_waiting_task_deque_to_pool(unsafe { ptr::read(ptr::from_ref(&*self.queue)) });
+
+                return;
+            }
+
+            unsafe { ManuallyDrop::drop(&mut self.queue) };
         }
     };
 }
 
 macro_rules! generate_process_pop_if_acquired_result {
-    ($this:expr, $delta:expr, $res:expr, $other_task_in_select_branch:expr, $call_state:expr, $slot:expr) => {
+    ($this:expr, $is_receiver_pop:expr, $res:expr, $other_task_in_select_branch:expr, $call_state:expr, $slot:expr) => {
         match $res {
             PopIfAcquiredResult::Ok => {
-                $this.number_of_senders_or_receivers += $delta;
-
                 return PopIfAcquiredResult::Ok;
             }
-            PopIfAcquiredResult::NoData => {
-                $this.number_of_senders_or_receivers += $delta;
-            }
+            PopIfAcquiredResult::NoData => {}
             PopIfAcquiredResult::NotAcquired => {
-                $this.deque.push_front(WaitingTask::InSelector(
-                    $other_task_in_select_branch,
-                    $call_state,
-                    $slot,
-                ));
+                if $is_receiver_pop {
+                    $this.queue.push_receiver(WaitingTask::InSelector(
+                        $other_task_in_select_branch,
+                        $call_state,
+                        $slot,
+                    ));
+                } else {
+                    $this.queue.push_sender(WaitingTask::InSelector(
+                        $other_task_in_select_branch,
+                        $call_state,
+                        $slot,
+                    ));
+                }
 
                 return PopIfAcquiredResult::NotAcquired;
             }
@@ -225,28 +196,31 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
     ///
     /// Return `false` if next task can not be executed. Otherwise, returns `true`.
     ///
-    /// # Arguments
-    ///
-    /// * `setter_fn` is a function that must write/read data to/from receiver/sender.
-    ///
-    /// # Safety
-    ///
-    /// `self.number_of_senders_or_receivers` must be not zero and the deque must not be empty.
+    /// `setter_fn` is a function that must write/read data to/from receiver/sender.
     #[must_use]
-    unsafe fn try_pop_and_call<SetterFn>(&mut self, mut setter_fn: SetterFn) -> bool
+    unsafe fn try_pop_and_call<const IS_RECEIVER_POP: bool, SetterFn>(
+        &mut self,
+        mut setter_fn: SetterFn,
+    ) -> bool
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
-        let data = unsafe { self.deque.pop_front().unwrap_unchecked() };
+        assert_hint(
+            !self.queue.is_empty(),
+            "deque must not be empty in `try_pop_and_call`",
+        );
+
+        let data = if IS_RECEIVER_POP {
+            unsafe { self.queue.pop_receiver().unwrap_unchecked() }
+        } else {
+            unsafe { self.queue.pop_sender().unwrap_unchecked() }
+        };
+
         match data {
             WaitingTask::Common(task, call_state, slot) => {
                 setter_fn(call_state, slot);
 
-                if task.is_local() {
-                    local_executor().exec_task(task);
-                } else {
-                    local_executor().spawn_shared_task(task);
-                }
+                local_executor().exec_task(task);
 
                 true
             }
@@ -268,22 +242,13 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
     /// Pops a [`waiting task`](WaitingTask) from the deque if [`TaskInSelectBranch`] was acquired,
     /// next calls provided function, and after it execute the task.
     ///
-    /// Accepts `is_all_local` to decide whether to use [`TaskInSelectBranch::acquire_once`]
-    /// or [`TaskInSelectBranch::acquire_once_local`].
-    ///
     /// # Arguments
     ///
     /// * `setter_fn` is a function that must write/read data to/from receiver/sender.
     ///
     /// * `task_in_select_branch` is a mutable reference to [`TaskInSelectBranch`].
-    ///
-    /// # Safety
-    ///
-    /// * `self.number_of_senders_or_receivers` must be not zero and the deque must not be empty;
-    ///
-    /// * called in `select`.
     #[must_use]
-    unsafe fn try_pop_and_call_if_acquired<const DELTA: isize, SetterFn>(
+    fn try_pop_and_call_if_acquired<const IS_RECEIVER_POP: bool, SetterFn>(
         &mut self,
         mut setter_fn: SetterFn,
         task_in_select_branch: &mut TaskInSelectBranch,
@@ -291,17 +256,23 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
-        while self.number_of_senders_or_receivers != 0 {
+        while (IS_RECEIVER_POP
+            && matches!(self.queue.option(), SenderReceiverQueueOption::Receiver))
+            || (!IS_RECEIVER_POP
+                && matches!(self.queue.option(), SenderReceiverQueueOption::Sender))
+        {
             // TODO acquire once and acquire once in `shared` below
 
-            let data = unsafe { self.deque.pop_front().unwrap_unchecked() };
+            let data = if IS_RECEIVER_POP {
+                unsafe { self.queue.pop_receiver().unwrap_unchecked() }
+            } else {
+                unsafe { self.queue.pop_sender().unwrap_unchecked() }
+            };
 
             match data {
                 WaitingTask::Common(task, call_state, slot) => {
                     unsafe {
                         if let Some(acquired_task) = task_in_select_branch.acquire_once_local() {
-                            self.number_of_senders_or_receivers += DELTA;
-
                             setter_fn(call_state, slot);
 
                             local_executor().exec_task(task);
@@ -310,8 +281,13 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
                             return PopIfAcquiredResult::Ok;
                         }
 
-                        self.deque
-                            .push_front(WaitingTask::Common(task, call_state, slot));
+                        if IS_RECEIVER_POP {
+                            self.queue
+                                .push_receiver(WaitingTask::Common(task, call_state, slot));
+                        } else {
+                            self.queue
+                                .push_sender(WaitingTask::Common(task, call_state, slot));
+                        }
 
                         return PopIfAcquiredResult::NotAcquired;
                     };
@@ -320,7 +296,7 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
                 WaitingTask::InSelector(mut other_task_in_select_branch, call_state, slot) => {
                     generate_process_pop_if_acquired_result!(
                         self,
-                        DELTA,
+                        IS_RECEIVER_POP,
                         unsafe {
                             task_in_select_branch.try_acquire_two_local_tasks_in_select(
                                 &mut other_task_in_select_branch,
@@ -342,8 +318,6 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
 
     /// Tries to pop [`waiting task`](WaitingTask) from the deque and executes it only
     /// if [`TaskInSelectBranch`] was acquired.
-    ///
-    /// Accepts `is_all_local` to decide whether to use `local` or `shared` methods.
     pub(crate) fn try_pop_front_receiver_and_call_if_acquired<SetterFn>(
         &mut self,
         mut setter_fn: SetterFn,
@@ -352,14 +326,11 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
-        unsafe { self.try_pop_and_call_if_acquired::<-1, _>(&mut setter_fn, task_in_select_branch) }
+        self.try_pop_and_call_if_acquired::<true, _>(&mut setter_fn, task_in_select_branch)
     }
 
     /// Tries to pop [`waiting task`](WaitingTask) from the deque and executes it only
     /// if [`TaskInSelectBranch`] was acquired.
-    ///
-    /// Accepts `is_all_local` to decide whether to use [`TaskInSelectBranch::acquire_once`]
-    /// or [`TaskInSelectBranch::acquire_once_local`].
     pub(crate) fn try_pop_front_sender_and_call_if_acquired<SetterFn>(
         &mut self,
         mut setter_fn: SetterFn,
@@ -368,7 +339,7 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
-        unsafe { self.try_pop_and_call_if_acquired::<1, _>(&mut setter_fn, task_in_select_branch) }
+        self.try_pop_and_call_if_acquired::<false, _>(&mut setter_fn, task_in_select_branch)
     }
 
     generate_clear!();
@@ -390,19 +361,20 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
     ///
     /// Return `false` if next task can not be executed. Otherwise, returns `true`.
     ///
-    /// # Arguments
-    ///
     /// * `setter_fn` is a function that must write/read data to/from receiver/sender.
-    ///
-    /// # Safety
-    ///
-    /// `self.number_of_senders_or_receivers` must be not zero and the deque must not be empty.
     #[must_use]
-    unsafe fn try_pop_and_call<SetterFn>(&mut self, mut setter_fn: SetterFn) -> bool
+    unsafe fn try_pop_and_call<const IS_RECEIVER_POP: bool, SetterFn>(
+        &mut self,
+        mut setter_fn: SetterFn,
+    ) -> bool
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
-        let data = unsafe { self.deque.pop_front().unwrap_unchecked() };
+        let data = if IS_RECEIVER_POP {
+            unsafe { self.queue.pop_receiver().unwrap_unchecked() }
+        } else {
+            unsafe { self.queue.pop_sender().unwrap_unchecked() }
+        };
         match data {
             WaitingTask::Common(task, call_state, slot) => {
                 setter_fn(call_state, slot);
@@ -412,7 +384,13 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
                 true
             }
             WaitingTask::InSelector(task_in_select, call_state, slot) => {
-                generate_pop_shared_task_in_selector!(setter_fn, call_state, slot, task_in_select)
+                task_in_select.acquire_once().is_some_and(|task| {
+                    setter_fn(call_state, slot);
+
+                    local_executor().spawn_shared_task(task);
+
+                    true
+                })
             }
         }
     }
@@ -420,22 +398,13 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
     /// Pops a [`waiting task`](WaitingTask) from the deque if [`TaskInSelectBranch`] was acquired,
     /// next calls provided function, and after it execute the task.
     ///
-    /// Accepts `IS_ALL_LOCAL` to decide whether to use [`TaskInSelectBranch::acquire_once`]
-    /// or [`TaskInSelectBranch::acquire_once_local`].
-    ///
     /// # Arguments
     ///
     /// * `setter_fn` is a function that must write/read data to/from receiver/sender.
     ///
     /// * `task_in_select_branch` is a mutable reference to [`TaskInSelectBranch`].
-    ///
-    /// # Safety
-    ///
-    /// * `self.number_of_senders_or_receivers` must be not zero and the deque must not be empty;
-    ///
-    /// * called in `select`.
     #[must_use]
-    unsafe fn try_pop_and_call_if_acquired<const DELTA: isize, SetterFn>(
+    fn try_pop_and_call_if_acquired<const IS_RECEIVER_POP: bool, SetterFn>(
         &mut self,
         mut setter_fn: SetterFn,
         task_in_select_branch: &mut TaskInSelectBranch,
@@ -443,14 +412,20 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
-        while self.number_of_senders_or_receivers != 0 {
-            let data = unsafe { self.deque.pop_front().unwrap_unchecked() };
+        while (IS_RECEIVER_POP
+            && matches!(self.queue.option(), SenderReceiverQueueOption::Receiver))
+            || (!IS_RECEIVER_POP
+                && matches!(self.queue.option(), SenderReceiverQueueOption::Sender))
+        {
+            let data = if IS_RECEIVER_POP {
+                unsafe { self.queue.pop_receiver().unwrap_unchecked() }
+            } else {
+                unsafe { self.queue.pop_sender().unwrap_unchecked() }
+            };
 
             match data {
                 WaitingTask::Common(task, call_state, slot) => {
                     if let Some(acquired_task) = task_in_select_branch.acquire_once() {
-                        self.number_of_senders_or_receivers += DELTA;
-
                         setter_fn(call_state, slot);
 
                         local_executor().spawn_shared_task(task);
@@ -459,8 +434,13 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
                         return PopIfAcquiredResult::Ok;
                     }
 
-                    self.deque
-                        .push_front(WaitingTask::Common(task, call_state, slot));
+                    if IS_RECEIVER_POP {
+                        self.queue
+                            .push_receiver(WaitingTask::Common(task, call_state, slot));
+                    } else {
+                        self.queue
+                            .push_sender(WaitingTask::Common(task, call_state, slot));
+                    }
 
                     return PopIfAcquiredResult::NotAcquired;
                 }
@@ -468,7 +448,7 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
                 WaitingTask::InSelector(other_task_in_select_branch, call_state, slot) => {
                     generate_process_pop_if_acquired_result!(
                         self,
-                        DELTA,
+                        IS_RECEIVER_POP,
                         unsafe {
                             task_in_select_branch.try_acquire_two_shared_tasks_in_select(
                                 &other_task_in_select_branch,
@@ -492,8 +472,6 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
 
     /// Tries to pop [`waiting task`](WaitingTask) from the deque and executes it only
     /// if [`TaskInSelectBranch`] was acquired.
-    ///
-    /// Accepts `IS_ALL_LOCAL` to decide whether to use `local` or `shared` methods.
     pub(crate) fn try_pop_front_receiver_and_call_if_acquired<SetterFn>(
         &mut self,
         mut setter_fn: SetterFn,
@@ -502,14 +480,11 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
-        unsafe { self.try_pop_and_call_if_acquired::<-1, _>(&mut setter_fn, task_in_select_branch) }
+        self.try_pop_and_call_if_acquired::<true, _>(&mut setter_fn, task_in_select_branch)
     }
 
     /// Tries to pop [`waiting task`](WaitingTask) from the deque and executes it only
     /// if [`TaskInSelectBranch`] was acquired.
-    ///
-    /// Accepts `IS_ALL_LOCAL` to decide whether to use [`TaskInSelectBranch::acquire_once`]
-    /// or [`TaskInSelectBranch::acquire_once_local`].
     pub(crate) fn try_pop_front_sender_and_call_if_acquired<SetterFn>(
         &mut self,
         mut setter_fn: SetterFn,
@@ -518,7 +493,7 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
-        unsafe { self.try_pop_and_call_if_acquired::<1, _>(&mut setter_fn, task_in_select_branch) }
+        self.try_pop_and_call_if_acquired::<false, _>(&mut setter_fn, task_in_select_branch)
     }
 
     generate_clear!();

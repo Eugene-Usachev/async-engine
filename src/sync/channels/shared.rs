@@ -336,10 +336,13 @@ macro_rules! generate_send_or_subscribe {
             state: CallStatePtr,
             mut task_in_select_branch: TaskInSelectBranch,
         ) -> SelectNonBlockingBranchResult {
-            debug_assert!(
-                !task_in_select_branch.is_local(),
-                "Tried to use `local` task in `select` in a non-local channel."
-            );
+            #[cfg(debug_assertions)]
+            {
+                debug_assert!(
+                    !task_in_select_branch.is_local(),
+                    "Tried to use `local` task in `select` in a non-local channel."
+                );
+            }
 
             let Some(mut inner_lock) = self.inner.try_lock() else {
                 return SelectNonBlockingBranchResult::Locked;
@@ -475,10 +478,13 @@ macro_rules! generate_recv_or_subscribe {
             state: CallStatePtr,
             mut task_in_select_branch: TaskInSelectBranch,
         ) -> SelectNonBlockingBranchResult {
-            debug_assert!(
-                !task_in_select_branch.is_local(),
-                "Tried to use `local` task in `select` in a non-local channel."
-            );
+            #[cfg(debug_assertions)]
+            {
+                debug_assert!(
+                    !task_in_select_branch.is_local(),
+                    "Tried to use `local` task in `select` in a non-local channel."
+                );
+            }
 
             let mut inner_lock = match self.inner.try_lock() {
                 Some(inner_lock) => inner_lock,

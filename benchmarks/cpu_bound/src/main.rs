@@ -3,10 +3,7 @@
 mod tools;
 
 use orengine::runtime::{local_executor, stop_all_executors};
-use orengine::sync::{
-    AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, AsyncWaitGroup,
-    LocalWaitGroup,
-};
+use orengine::sync::{AsyncMutex, AsyncWaitGroup, LocalWaitGroup};
 use orengine::Executor;
 use smol::future;
 use std::hint::black_box;

@@ -132,11 +132,21 @@ impl IsLocal for WaitGroup {
 impl AsyncWaitGroup for WaitGroup {
     #[inline]
     fn add(&self, count: usize) {
+        debug_assert!(
+            self.counter.load(Acquire) < usize::MAX / 4,
+            "WaitGroup counter overflow"
+        );
+
         self.counter.fetch_add(count, Acquire);
     }
 
     #[inline]
     fn count(&self) -> usize {
+        debug_assert!(
+            self.counter.load(Acquire) < usize::MAX / 4,
+            "WaitGroup counter overflow"
+        );
+
         self.counter.load(Acquire)
     }
 
@@ -147,6 +157,7 @@ impl AsyncWaitGroup for WaitGroup {
             prev_count > 0,
             "WaitGroup::done called after counter reached 0"
         );
+        debug_assert!(prev_count < usize::MAX / 4, "WaitGroup counter overflow");
 
         if prev_count == 1 {
             let executor = local_executor();

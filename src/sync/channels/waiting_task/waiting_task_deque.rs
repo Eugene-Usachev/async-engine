@@ -379,7 +379,7 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
             WaitingTask::Common(task, call_state, slot) => {
                 setter_fn(call_state, slot);
 
-                local_executor().spawn_shared_task(task);
+                local_executor().exec_task(task); // TODO spawn
 
                 true
             }

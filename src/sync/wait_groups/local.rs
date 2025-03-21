@@ -65,7 +65,7 @@ struct Inner {
 ///
 /// # async fn foo() {
 /// let wait_group = Rc::new(LocalWaitGroup::new());
-/// let number_executed_tasks = Rc::new(Local::new(0));
+/// let number_executed_tasks = Local::new(0);
 ///
 /// for i in 0..10 {
 ///     let wait_group = wait_group.clone();

@@ -7,7 +7,7 @@ use std::ptr;
 ///
 /// # Usage
 ///
-/// Use it only for creating your own [`futures`](std::future::Future) to safe `shared` tasks
+/// Use it only for creating your own [`futures`](Future) to safe `shared` tasks
 /// in these futures.
 pub struct SyncTaskList {
     inner: SpinLock<Vec<Task>>,

@@ -181,15 +181,14 @@ impl TaskInSelectBranch {
 
                 if let Err(prev) = prev_ {
                     // Can be `ACQUIRED` or `ACQUIRING_NOW`.
-                    match prev {
-                        ACQUIRED => return None,
-                        _ => {
-                            // Another thread acquire first of two task and trying to acquire second one.
-                            // It may fail (and set `NOT_ACQUIRED`) or succeed (and set `ACQUIRED`).
-                            // We will for this update. It is not a performance issue, because it
-                            // happens very rarely, and we wait at max time of `load` + `store`.
-                            spin_loop();
-                        }
+                    if prev == ACQUIRED {
+                        return None;
+                    } else {
+                        // Another thread acquire first of two task and trying to acquire second one.
+                        // It may fail (and set `NOT_ACQUIRED`) or succeed (and set `ACQUIRED`).
+                        // We will for this update. It is not a performance issue, because it
+                        // happens very rarely, and we wait at max time of `load` + `store`.
+                        spin_loop();
                     }
                 } else {
                     inner.set_resolved_branch_id(self.associated_branch_id);

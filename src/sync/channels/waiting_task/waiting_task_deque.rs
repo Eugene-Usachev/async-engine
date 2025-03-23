@@ -43,6 +43,12 @@ macro_rules! generate_struct {
         pub(crate) struct $name<T> {
             queue: ManuallyDrop<SenderReceiverQueue<T>>,
         }
+
+        impl<T> $name<T> {
+            pub(crate) fn number_of_senders_or_receivers(&self) -> isize {
+                self.queue.number_of_senders_or_receivers()
+            }
+        }
     };
 }
 

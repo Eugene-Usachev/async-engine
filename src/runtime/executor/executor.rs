@@ -469,7 +469,7 @@ impl Executor {
                     self.spawn_shared_task(task);
                 }
             }
-            CallInner::CallFn(func) => unsafe { (&mut *func)(task) },
+            CallInner::CallFn(func) => unsafe { (*func)(task) },
         }
     }
 

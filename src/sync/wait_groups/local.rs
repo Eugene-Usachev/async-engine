@@ -118,6 +118,9 @@ impl AsyncWaitGroup for LocalWaitGroup {
     #[inline]
     fn add(&self, count: usize) {
         let inner = self.get_inner();
+
+        debug_assert!(inner.count < usize::MAX / 4, "WaitGroup counter overflow");
+
         inner.count += count;
 
         if inner.waited_tasks.capacity() < inner.count {
@@ -133,7 +136,11 @@ impl AsyncWaitGroup for LocalWaitGroup {
     #[inline]
     fn done(&self) -> usize {
         let inner = self.get_inner();
+
+        debug_assert!(inner.count < usize::MAX / 4, "WaitGroup counter overflow");
+
         inner.count -= 1;
+
         if inner.count == 0 {
             let executor = local_executor();
 

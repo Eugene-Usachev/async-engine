@@ -672,6 +672,22 @@ pub struct LocalChannel<T> {
     no_send_marker: std::marker::PhantomData<*const ()>,
 }
 
+impl<T> LocalChannel<T> {
+    /// Returns current len, number of receivers and number of senders.
+    #[inline]
+    pub fn fullness_state(&self) -> (usize, usize, usize) {
+        let inner = unsafe { &mut *self.inner.get() };
+        let number_of_senders_or_receivers = inner.deque.number_of_senders_or_receivers();
+        let len = number_of_senders_or_receivers.unsigned_abs();
+
+        if number_of_senders_or_receivers > 0 {
+            (len, len, 0)
+        } else {
+            (len, 0, len)
+        }
+    }
+}
+
 impl<T> AsyncChannel<T> for LocalChannel<T> {
     type Sender<'channel>
         = LocalSender<'channel, T>

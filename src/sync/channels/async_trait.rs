@@ -136,8 +136,8 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///
     /// ```rust
     /// use std::ptr::drop_in_place;
-    /// use orengine::sync::AsyncReceiver;    ///
-    /// #
+    /// use orengine::sync::AsyncReceiver;
+    ///
     /// use orengine::utils::Ptr;
     ///
     /// type Payload = i32;

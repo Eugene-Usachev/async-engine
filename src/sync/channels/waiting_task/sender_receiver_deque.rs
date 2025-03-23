@@ -56,6 +56,11 @@ impl<T> SenderReceiverQueue<T> {
     }
 
     #[inline]
+    pub(crate) fn number_of_senders_or_receivers(&self) -> isize {
+        self.number_of_senders_or_receivers
+    }
+
+    #[inline]
     pub(crate) fn capacity(&self) -> usize {
         self.capacity
     }

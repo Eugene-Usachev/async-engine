@@ -26,15 +26,26 @@ impl TaskPool {
         };
 
         let pool = executor.task_pool().storage.entry(size).or_default();
-        if let Some(task) = pool.pop() {
-            let future_ptr: *mut F = unsafe { &mut *task.future_ptr().cast::<F>() };
+        if let Some(mut task) = pool.pop() {
+            let future_ptr: *mut F = task.future_ptr().cast();
+
             unsafe {
                 future_ptr.write(future);
+
+                task.data = TaskData::new(future_ptr as *mut _, locality);
+            };
+
+            #[cfg(debug_assertions)]
+            unsafe {
+                *task.is_executing.as_mut().get_mut() = false;
+
+                task.executor_id = executor_id;
             }
 
             task
         } else {
-            let future_ptr: *mut F = unsafe { &mut *(Box::into_raw(Box::new(future))) as *mut _ };
+            #[allow(unused_unsafe, reason = "False positive")]
+            let future_ptr: *mut F = unsafe { &raw mut *(Box::into_raw(Box::new(future))) };
             Task {
                 data: TaskData::new(future_ptr as *mut _, locality),
                 #[cfg(debug_assertions)]

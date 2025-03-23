@@ -782,6 +782,24 @@ pub struct Channel<T> {
     inner: NaiveMutex<Inner<T>>,
 }
 
+impl<T> Channel<T> {
+    /// Returns current len, number of receivers and number of senders.
+    ///
+    /// It is async because it needs to acquire the lock.
+    #[inline]
+    pub async fn fullness_state(&self) -> (usize, usize, usize) {
+        let inner = self.inner.lock().await;
+        let number_of_senders_or_receivers = inner.deque.number_of_senders_or_receivers();
+        let len = number_of_senders_or_receivers.unsigned_abs();
+
+        if number_of_senders_or_receivers > 0 {
+            (len, len, 0)
+        } else {
+            (len, 0, len)
+        }
+    }
+}
+
 impl<T> AsyncChannel<T> for Channel<T> {
     type Sender<'channel>
         = Sender<'channel, T>

@@ -169,7 +169,7 @@ impl AsyncWaitGroup for WaitGroup {
             }
         }
 
-        prev_count
+        prev_count - 1
     }
 
     #[inline]

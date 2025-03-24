@@ -484,6 +484,15 @@ impl TaskInSelectPool {
     }
 }
 
+// TODO think about it
+impl Drop for TaskInSelectPool {
+    fn drop(&mut self) {
+        for inner in self.vec.drain(..) {
+            unsafe { Box::from_raw(inner.as_ptr()) };
+        }
+    }
+}
+
 thread_local! {
     /// Thread-local [`TaskInSelectPool`], therefore it is lockless.
     // Before refactor: it must be thread-local, or rewrite drop logic in `TaskInSelect`.

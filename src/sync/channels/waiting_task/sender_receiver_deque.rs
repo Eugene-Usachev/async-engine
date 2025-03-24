@@ -149,6 +149,8 @@ impl<T> SenderReceiverQueue<T> {
             }
         }
 
+        unsafe { Box::from_raw(old_ptr) };
+
         self.head = 0;
 
         // Here all data starts at `self.ptr`, so we can write new data after.

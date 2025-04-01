@@ -24,15 +24,26 @@ pub(crate) enum SenderReceiverQueueOption {
 }
 
 impl<T> SenderReceiverQueue<T> {
-    fn new_ptr(capacity: usize) -> NonNull<WaitingTask<T>> {
-        let ptr = unsafe {
-            alloc(Layout::from_size_align_unchecked(
+    #[inline(always)]
+    fn new_layout_for_ptr(capacity: usize) -> Layout {
+        unsafe {
+            Layout::from_size_align_unchecked(
                 size_of::<WaitingTask<T>>() * capacity,
                 align_of::<WaitingTask<T>>(),
-            ))
-        };
+            )
+        }
+    }
+
+    fn new_ptr(capacity: usize) -> NonNull<WaitingTask<T>> {
+        let ptr = unsafe { alloc(Self::new_layout_for_ptr(capacity)) };
 
         unsafe { NonNull::new_unchecked(ptr.cast()) }
+    }
+
+    fn deallocate_ptr(ptr: NonNull<WaitingTask<T>>, capacity: usize) {
+        unsafe {
+            dealloc(ptr.as_ptr().cast(), Self::new_layout_for_ptr(capacity));
+        }
     }
 
     pub(crate) fn new() -> Self {
@@ -149,8 +160,6 @@ impl<T> SenderReceiverQueue<T> {
             }
         }
 
-        unsafe { Box::from_raw(old_ptr) };
-
         self.head = 0;
 
         // Here all data starts at `self.ptr`, so we can write new data after.
@@ -160,6 +169,8 @@ impl<T> SenderReceiverQueue<T> {
         }
 
         self.number_of_senders_or_receivers += DELTA;
+
+        Self::deallocate_ptr(unsafe { NonNull::new_unchecked(old_ptr.cast()) }, len);
     }
 
     pub(crate) fn push_receiver(&mut self, task: WaitingTask<T>) {
@@ -205,15 +216,7 @@ impl<T> Drop for SenderReceiverQueue<T> {
     fn drop(&mut self) {
         debug_assert_eq!(self.number_of_senders_or_receivers, 0);
 
-        unsafe {
-            dealloc(
-                self.ptr.as_ptr().cast(),
-                Layout::from_size_align_unchecked(
-                    size_of::<WaitingTask<T>>() * self.capacity,
-                    align_of::<WaitingTask<T>>(),
-                ),
-            );
-        }
+        SenderReceiverQueue::deallocate_ptr(self.ptr, self.capacity);
     }
 }
 

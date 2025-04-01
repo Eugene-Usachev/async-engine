@@ -263,25 +263,21 @@ macro_rules! generate_send_or_subscribe {
             &self,
             data: NonNull<Self::Data>,
             state: CallStatePtr,
-            mut task_in_select_branch: TaskInSelectBranch,
+            task_in_select_branch: TaskInSelectBranch,
         ) -> SelectNonBlockingBranchResult {
             let inner = unsafe { &mut *self.inner.get() };
 
             if inner.is_closed {
-                macro_rules! success_case {
-                    ($state:expr, $task:expr) => {{
-                        $state.set_to_closed();
-
-                        local_executor().exec_task($task);
-
-                        SelectNonBlockingBranchResult::Success
-                    }};
-                }
-
-                return match unsafe { task_in_select_branch.acquire_once_local() } {
+                return match task_in_select_branch.acquire_once() {
                     // It all is `local`, then other thread can't acquire the task. So, in select
                     // we can definitely acquire it.
-                    Some(task) => success_case!(state, task),
+                    Some(task) => {
+                        state.set_to_closed();
+
+                        local_executor().exec_task(task);
+
+                        SelectNonBlockingBranchResult::Success
+                    }
                     None => unreachable_hint(),
                 };
             }
@@ -294,45 +290,39 @@ macro_rules! generate_send_or_subscribe {
                         call_state.write(CallState::WokenToReturnReady);
                     };
                 },
-                &mut task_in_select_branch,
+                task_in_select_branch,
             );
 
             match result {
-                PopIfAcquiredResult::Ok => return SelectNonBlockingBranchResult::Success,
-                PopIfAcquiredResult::NotAcquired => {
-                    return SelectNonBlockingBranchResult::AlreadyAcquired
+                PopIfAcquiredResult::NoData(task_in_select_branch) => {
+                    let len = inner.storage.len();
+                    if len >= inner.capacity {
+                        inner.deque.push_back_sender(WaitingTask::in_selector(
+                            task_in_select_branch,
+                            state,
+                            data,
+                        ));
+
+                        return SelectNonBlockingBranchResult::NotReady;
+                    }
+
+                    match unsafe { task_in_select_branch.acquire_once() } {
+                        // It all is `local`, then other thread can't acquire the task. So, in select
+                        // we can definitely acquire it.
+                        Some(task) => {
+                            inner.storage.push_back(unsafe { data.read() });
+
+                            local_executor().exec_task(task);
+
+                            SelectNonBlockingBranchResult::Success
+                        }
+                        None => unreachable_hint(),
+                    }
                 }
-                PopIfAcquiredResult::NoData => {}
-            }
 
-            let len = inner.storage.len();
-            if len >= inner.capacity {
-                inner.deque.push_back_sender(WaitingTask::in_selector(
-                    task_in_select_branch,
-                    state,
-                    data,
-                ));
+                PopIfAcquiredResult::Ok => SelectNonBlockingBranchResult::Success,
 
-                return SelectNonBlockingBranchResult::NotReady;
-            }
-
-            macro_rules! success_case {
-                ($inner:expr, $data:expr, $task:expr) => {{
-                    $inner.storage.push_back(unsafe { $data.read() });
-
-                    local_executor().exec_task($task);
-
-                    SelectNonBlockingBranchResult::Success
-                }};
-            }
-
-            match unsafe { task_in_select_branch.acquire_once_local() } {
-                // It all is `local`, then other thread can't acquire the task. So, in select
-                // we can definitely acquire it.
-                Some(task) => {
-                    success_case!(inner, data, task)
-                }
-                None => unreachable_hint(),
+                _ => unreachable_hint(),
             }
         }
     };
@@ -383,23 +373,19 @@ macro_rules! generate_recv_or_subscribe {
             &self,
             slot: NonNull<Self::Data>,
             state: CallStatePtr,
-            mut task_in_select_branch: TaskInSelectBranch,
+            task_in_select_branch: TaskInSelectBranch,
         ) -> SelectNonBlockingBranchResult {
             let inner = unsafe { &mut *self.inner.get() };
             if inner.is_closed {
-                macro_rules! success_case {
-                    ($state:expr, $task:expr) => {{
-                        $state.set_to_closed();
+                return match task_in_select_branch.acquire_once() {
+                    Some(task) => {
+                        state.set_to_closed();
 
-                        local_executor().exec_task($task);
+                        local_executor().exec_task(task);
 
                         SelectNonBlockingBranchResult::Success
-                    }};
-                }
-
-                return match task_in_select_branch.acquire_once() {
-                    Some(task) => success_case!(state, task),
-                    None => SelectNonBlockingBranchResult::AlreadyAcquired,
+                    }
+                    None => unreachable_hint(),
                 };
             }
 
@@ -412,49 +398,43 @@ macro_rules! generate_recv_or_subscribe {
                             call_state.write(CallState::WokenToReturnReady);
                         };
                     },
-                    &mut task_in_select_branch,
+                    task_in_select_branch,
                 );
 
-                match result {
-                    PopIfAcquiredResult::Ok => return SelectNonBlockingBranchResult::Success,
-                    PopIfAcquiredResult::NotAcquired => {
-                        return SelectNonBlockingBranchResult::AlreadyAcquired;
+                return match result {
+                    PopIfAcquiredResult::Ok => SelectNonBlockingBranchResult::Success,
+
+                    PopIfAcquiredResult::NoData(task_in_select_branch) => {
+                        inner.deque.push_back_receiver(WaitingTask::in_selector(
+                            task_in_select_branch,
+                            state,
+                            slot,
+                        ));
+
+                        SelectNonBlockingBranchResult::NotReady
                     }
-                    PopIfAcquiredResult::NoData => {}
-                }
 
-                inner.deque.push_back_receiver(WaitingTask::in_selector(
-                    task_in_select_branch,
-                    state,
-                    slot,
-                ));
-
-                return SelectNonBlockingBranchResult::NotReady;
-            }
-
-            macro_rules! success_case {
-                ($inner:expr, $slot:expr, $task:expr) => {{
-                    unsafe { $slot.write($inner.storage.pop_front().unwrap_unchecked()) };
-
-                    local_executor().exec_task($task);
-
-                    $inner
-                        .deque
-                        .try_pop_front_sender_and_call(|call_state, value| unsafe {
-                            call_state.write(CallState::WokenToReturnReady);
-
-                            $inner.storage.push_back(value.read());
-                        });
-
-                    SelectNonBlockingBranchResult::Success
-                }};
+                    _ => unreachable_hint(),
+                };
             }
 
             match task_in_select_branch.acquire_once() {
                 Some(task) => {
-                    success_case!(inner, slot, task)
+                    unsafe { slot.write(inner.storage.pop_front().unwrap_unchecked()) };
+
+                    local_executor().exec_task(task);
+
+                    inner
+                        .deque
+                        .try_pop_front_sender_and_call(|call_state, value| unsafe {
+                            call_state.write(CallState::WokenToReturnReady);
+
+                            inner.storage.push_back(value.read());
+                        });
+
+                    SelectNonBlockingBranchResult::Success
                 }
-                None => SelectNonBlockingBranchResult::AlreadyAcquired,
+                None => unreachable_hint(),
             }
         }
     };

@@ -35,10 +35,7 @@ pub struct TaskInSelect {
 }
 
 impl TaskInSelect {
-    pub fn acquire_for_task_with_lock(
-        task: Task,
-        resolved_branch_id: NonNull<usize>,
-    ) -> NonNull<Self> {
+    pub fn acquire_for_task(task: Task, resolved_branch_id: NonNull<usize>) -> NonNull<Self> {
         #[cfg(not(debug_assertions))]
         {
             return task_in_select_pool().acquire_for_task(task, resolved_branch_id);
@@ -77,8 +74,28 @@ impl TaskInSelect {
 
         task_in_select_pool().release(NonNull::from(self));
     }
+}
 
-    pub fn drop_ptr(&self) {
+unsafe impl Send for TaskInSelect {}
+unsafe impl Sync for TaskInSelect {}
+
+impl Drop for TaskInSelect {
+    fn drop(&mut self) {
+        if self.task.is_local() {
+            let prev = *self.ref_count.get_mut();
+
+            debug_assert!(self.task.is_local());
+
+            *self.ref_count.get_mut() -= 1;
+            if prev != 1 {
+                return;
+            }
+
+            self.release();
+
+            return;
+        }
+
         if self.ref_count.fetch_sub(1, Release) != 1 {
             return;
         }
@@ -87,41 +104,23 @@ impl TaskInSelect {
 
         self.release();
     }
-
-    pub unsafe fn drop_ptr_local(&mut self) {
-        let prev = *self.ref_count.get_mut();
-
-        debug_assert!(self.task.is_local());
-
-        *self.ref_count.get_mut() -= 1;
-        if prev != 1 {
-            return;
-        }
-
-        self.release();
-    }
 }
-
-unsafe impl Send for TaskInSelect {}
-unsafe impl Sync for TaskInSelect {}
 
 pub(crate) enum PopIfAcquiredResult {
     Ok,
-    NoData,
-    NotAcquired,
+    NoData(TaskInSelectBranch),
+    NotAcquired(TaskInSelectBranch),
+    AlreadyAcquired,
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct TaskInSelectBranch {
     inner_ptr: NonNull<TaskInSelect>,
     associated_branch_id: usize,
 }
 
 impl TaskInSelectBranch {
-    // `Local` tasks can use non-atomic operations. So, methods are separated to methods without
-    // `local` suffix (shared) and methods with `local` suffix (local).
-
     pub unsafe fn from_owned_task_in_select_ptr(
         task_in_select: NonNull<TaskInSelect>,
         associated_branch_id: usize,
@@ -132,75 +131,24 @@ impl TaskInSelectBranch {
         }
     }
 
-    pub fn new(task_in_select: NonNull<TaskInSelect>, associated_branch_id: usize) -> Self {
-        unsafe { task_in_select.as_ref() }
-            .ref_count
-            .fetch_add(1, Relaxed);
-
-        Self {
-            inner_ptr: task_in_select,
-            associated_branch_id,
-        }
-    }
-
-    pub unsafe fn new_local(
-        mut task_in_select: NonNull<TaskInSelect>,
-        associated_branch_id: usize,
-    ) -> Self {
-        *unsafe { task_in_select.as_mut() }.ref_count.get_mut() += 1;
-
-        Self {
-            inner_ptr: task_in_select,
-            associated_branch_id,
-        }
-    }
-
-    #[inline(always)]
-    fn with_drop_ptr<const IS_LOCAL: bool, T>(&self, f: impl FnOnce(&mut TaskInSelect) -> T) -> T {
-        let inner = unsafe { &mut *self.inner_ptr.as_ptr() };
-
-        let result = f(inner);
-
-        if IS_LOCAL {
-            debug_assert!(unsafe { self.inner_ptr.as_ref().task.is_local() });
-
-            unsafe { inner.drop_ptr_local() };
+    pub fn new(mut task_in_select: NonNull<TaskInSelect>, associated_branch_id: usize) -> Self {
+        if unsafe { task_in_select.as_ref().task.is_local() } {
+            *unsafe { task_in_select.as_mut() }.ref_count.get_mut() += 1;
         } else {
-            inner.drop_ptr();
+            unsafe { task_in_select.as_ref() }
+                .ref_count
+                .fetch_add(1, Relaxed);
         }
 
-        result
+        Self {
+            inner_ptr: task_in_select,
+            associated_branch_id,
+        }
     }
 
-    pub(crate) fn acquire_once(&self) -> Option<Task> {
-        self.with_drop_ptr::<false, _>(|inner| {
-            loop {
-                let prev_ = inner
-                    .state
-                    .compare_exchange(NOT_ACQUIRED, ACQUIRED, AcqRel, Acquire);
-
-                if let Err(prev) = prev_ {
-                    // Can be `ACQUIRED` or `ACQUIRING_NOW`.
-                    if prev == ACQUIRED {
-                        return None;
-                    } else {
-                        // Another thread acquire first of two task and trying to acquire second one.
-                        // It may fail (and set `NOT_ACQUIRED`) or succeed (and set `ACQUIRED`).
-                        // We will for this update. It is not a performance issue, because it
-                        // happens very rarely, and we wait at max time of `load` + `store`.
-                        spin_loop();
-                    }
-                } else {
-                    inner.set_resolved_branch_id(self.associated_branch_id);
-
-                    return Some(unsafe { ptr::read(&inner.task) });
-                }
-            }
-        })
-    }
-
-    pub(crate) unsafe fn acquire_once_local(&mut self) -> Option<Task> {
-        self.with_drop_ptr::<true, _>(|inner| {
+    pub(crate) fn acquire_once(mut self) -> Option<Task> {
+        if unsafe { self.inner_ptr.as_ref().task.is_local() } {
+            let inner = unsafe { self.inner_ptr.as_mut() };
             let was_acquired_ref = inner.state.get_mut();
 
             debug_assert!(*was_acquired_ref < 2);
@@ -217,12 +165,37 @@ impl TaskInSelectBranch {
 
                 Some(unsafe { ptr::read(&self.inner_ptr.as_ref().task) })
             }
-        })
+        } else {
+            let inner = unsafe { self.inner_ptr.as_ref() };
+
+            loop {
+                let prev_ = inner
+                    .state
+                    .compare_exchange(NOT_ACQUIRED, ACQUIRED, AcqRel, Acquire);
+
+                if let Err(prev) = prev_ {
+                    // Can be `ACQUIRED` or `ACQUIRING_NOW`.
+                    if prev == ACQUIRED {
+                        return None;
+                    }
+
+                    // Another thread acquire first of two task and trying to acquire second one.
+                    // It may fail (and set `NOT_ACQUIRED`) or succeed (and set `ACQUIRED`).
+                    // We will for this update. It is not a performance issue, because it
+                    // happens very rarely, and we wait at max time of `load` + `store`.
+                    spin_loop();
+                } else {
+                    inner.set_resolved_branch_id(self.associated_branch_id);
+
+                    return Some(unsafe { ptr::read(&inner.task) });
+                }
+            }
+        }
     }
 
-    pub(crate) unsafe fn try_acquire_two_local_tasks_in_select<T, SetterFn>(
-        &mut self,
-        other: &mut Self,
+    unsafe fn try_acquire_two_local_tasks_in_select<T, SetterFn>(
+        mut self,
+        mut other: Self,
         setter_fn: &mut SetterFn,
         state: CallStatePtr,
         data: NonNull<T>,
@@ -230,11 +203,13 @@ impl TaskInSelectBranch {
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
+        debug_assert!(unsafe { self.inner_ptr.as_ref().task.is_local() });
+
         let this_inner = unsafe { self.inner_ptr.as_mut() };
         let other_inner = unsafe { other.inner_ptr.as_mut() };
 
         if *this_inner.state.get_mut() == ACQUIRED {
-            return PopIfAcquiredResult::NotAcquired;
+            return PopIfAcquiredResult::NotAcquired(other);
         }
 
         *this_inner.state.get_mut() = ACQUIRED;
@@ -242,9 +217,7 @@ impl TaskInSelectBranch {
         if *other_inner.state.get_mut() == ACQUIRED {
             *this_inner.state.get_mut() = NOT_ACQUIRED;
 
-            unsafe { other_inner.drop_ptr_local() };
-
-            return PopIfAcquiredResult::NoData;
+            return PopIfAcquiredResult::NoData(self);
         }
 
         // Two tasks are acquired
@@ -254,14 +227,9 @@ impl TaskInSelectBranch {
         let this_task = unsafe { ptr::read(&this_inner.task) };
         let other_task = unsafe { ptr::read(&other_inner.task) };
 
-        unsafe { this_inner.drop_ptr_local() };
-        unsafe { other_inner.drop_ptr_local() };
-
         setter_fn(state, data); // set data to receiver/sender task
 
         let ex = local_executor();
-
-        // TODO first we should add DELTA, because of exec
 
         ex.exec_task(other_task);
         ex.exec_task(this_task);
@@ -284,8 +252,8 @@ impl TaskInSelectBranch {
     /// * If returns `false` then `other` task must be not lost (saved into queue again).
     #[must_use]
     pub(crate) unsafe fn try_acquire_two_shared_tasks_in_select<T, SetterFn>(
-        &self,
-        other: &Self,
+        self,
+        other: Self,
         setter_fn: &mut SetterFn,
         state: CallStatePtr,
         data: NonNull<T>,
@@ -312,9 +280,6 @@ impl TaskInSelectBranch {
                 let this_task = unsafe { ptr::read(&$this_inner.task) };
                 let other_task = unsafe { ptr::read(&$other_inner.task) };
 
-                $this_inner.drop_ptr();
-                $other_inner.drop_ptr();
-
                 $setter_fn($state, $data); // set data to receiver/sender task
 
                 let ex = $crate::local_executor();
@@ -323,6 +288,8 @@ impl TaskInSelectBranch {
                 ex.spawn_shared_task(this_task);
             };
         }
+
+        debug_assert!(!unsafe { self.inner_ptr.as_ref().task.is_local() });
 
         let this_inner = unsafe { self.inner_ptr.as_ref() };
         let other_inner = unsafe { other.inner_ptr.as_ref() };
@@ -342,11 +309,8 @@ impl TaskInSelectBranch {
         if let Err(prev) = prev_ {
             // Can be only `ACQUIRED`.
             match prev {
-                ACQUIRED => {
-                    this_inner.drop_ptr();
+                ACQUIRED => PopIfAcquiredResult::NotAcquired(other),
 
-                    PopIfAcquiredResult::NotAcquired
-                }
                 // bug is occurred,
                 // because it can be acquiring now only if it is in select,
                 // but we are in select and can't acquire,
@@ -368,9 +332,7 @@ impl TaskInSelectBranch {
 
                             this_inner.state.store(NOT_ACQUIRED, Release);
 
-                            other_inner.drop_ptr();
-
-                            break PopIfAcquiredResult::NoData;
+                            break PopIfAcquiredResult::NoData(self);
                         }
                         acquiring_now_with => {
                             let this_ptr_as_usize = self.inner_ptr.as_ptr() as usize;
@@ -441,8 +403,28 @@ impl TaskInSelectBranch {
         }
     }
 
-    pub(crate) fn is_local(&self) -> bool {
-        unsafe { self.inner_ptr.as_ref() }.task.is_local()
+    #[must_use]
+    pub(crate) unsafe fn try_acquire_two_tasks_in_select<T, SetterFn>(
+        self,
+        other: Self,
+        setter_fn: &mut SetterFn,
+        state: CallStatePtr,
+        data: NonNull<T>,
+    ) -> PopIfAcquiredResult
+    where
+        SetterFn: FnMut(CallStatePtr, NonNull<T>),
+    {
+        if unsafe { self.inner_ptr.as_ref().task.is_local() } {
+            unsafe { self.try_acquire_two_local_tasks_in_select(other, setter_fn, state, data) }
+        } else {
+            unsafe { self.try_acquire_two_shared_tasks_in_select(other, setter_fn, state, data) }
+        }
+    }
+}
+
+impl Drop for TaskInSelectBranch {
+    fn drop(&mut self) {
+        unsafe { self.inner_ptr.drop_in_place() }
     }
 }
 
@@ -480,7 +462,7 @@ impl TaskInSelectPool {
     }
 
     fn release(&mut self, inner: NonNull<TaskInSelect>) {
-        self.vec.push(inner);
+        self.vec.push(inner.cast());
     }
 }
 
@@ -488,7 +470,7 @@ impl TaskInSelectPool {
 impl Drop for TaskInSelectPool {
     fn drop(&mut self) {
         for inner in self.vec.drain(..) {
-            unsafe { Box::from_raw(inner.as_ptr()) };
+            unsafe { drop(Box::from_raw(inner.as_ptr())) };
         }
     }
 }

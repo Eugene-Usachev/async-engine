@@ -392,6 +392,7 @@ pub fn select(input: TokenStream) -> TokenStream {
             {
                 use orengine::sync::channels::{SelectReceiver, SelectSender, TryRecvErr};
                 use orengine::sync::{RecvErr, SendErr, TrySendErr};
+
                 enum __SelectReady__<#(#select_generics),*> {
                     #(#select_ready_variants),*
                 }
@@ -428,6 +429,7 @@ pub fn select(input: TokenStream) -> TokenStream {
 
         let mut send_vars = Vec::with_capacity(branches.len()); // move it to avoid temporary values
         let mut generics = Vec::with_capacity(branches.len());
+        let mut locked_elems = Vec::with_capacity(branches.len());
         let mut union_generic_params = Vec::with_capacity(branches.len());
         let mut match_arms = Vec::with_capacity(branches.len());
         let mut fn_select_args = Vec::with_capacity(branches.len());
@@ -439,14 +441,11 @@ pub fn select(input: TokenStream) -> TokenStream {
         let mut is_local_consts = Vec::with_capacity(branches.len());
 
         for (idx, branch) in branches.iter().enumerate() {
+            locked_elems.push(quote! { None });
             let name_of_task_in_select_branch = format_ident!("task_in_select_branch{idx}");
             let create_task_in_select_branch = if idx != branches.len() - 1 {
                 quote! {
-                    let #name_of_task_in_select_branch = if __is_all_local {
-                        unsafe { TaskInSelectBranch::new_local(task_in_select, #idx) }
-                    } else {
-                        TaskInSelectBranch::new(task_in_select, #idx)
-                    };
+                    let #name_of_task_in_select_branch = TaskInSelectBranch::new(task_in_select, #idx);
                 }
             } else {
                 quote! {
@@ -523,15 +522,15 @@ pub fn select(input: TokenStream) -> TokenStream {
                                 // Another thread already acquired the lock and wake the task up.
                                 return;
                             }
-                            SelectNonBlockingBranchResult::Locked => {
+                            SelectNonBlockingBranchResult::Locked(task_in_select_branch) => {
                                 number_of_needed_to_retry_branches += 1;
-                                locked[#idx] = true;
+                                locked[#idx] = Some(task_in_select_branch);
                             }
                         }
                     });
 
                     retry_select_calls.push(quote! {
-                        if locked[#idx] {
+                        if let Some(#name_of_task_in_select_branch) = locked[#idx].take() {
                              // TODO it can't be AlreadyAcquired when __is_all_local == true
                             match #receiver_name.recv_or_subscribe(
                                 recv_slot.cast(),
@@ -545,13 +544,14 @@ pub fn select(input: TokenStream) -> TokenStream {
                                 }
                                 SelectNonBlockingBranchResult::NotReady => {
                                     number_of_needed_to_retry_branches -= 1;
-                                    locked[#idx] = false;
                                 }
                                 SelectNonBlockingBranchResult::AlreadyAcquired => {
                                     // Another thread already acquired the lock and wake the task up.
                                     return;
                                 }
-                                SelectNonBlockingBranchResult::Locked => {}
+                                SelectNonBlockingBranchResult::Locked(task_in_select_branch) => {
+                                    locked[#idx] = Some(task_in_select_branch);
+                                }
                             }
                         }
                     });
@@ -620,15 +620,15 @@ pub fn select(input: TokenStream) -> TokenStream {
                                 // Another thread already acquired the lock and wake the task up.
                                 return;
                             }
-                            SelectNonBlockingBranchResult::Locked => {
+                            SelectNonBlockingBranchResult::Locked(task_in_select_branch) => {
                                 number_of_needed_to_retry_branches += 1;
-                                locked[#idx] = true;
+                                locked[#idx] = Some(task_in_select_branch);
                             }
                         }
                     });
 
                     retry_select_calls.push(quote! {
-                        if locked[#idx] {
+                        if let Some(#name_of_task_in_select_branch) = locked[#idx].take() {
                             // TODO it can't be AlreadyAcquired when __is_all_local == true
                             match #sender_name.send_or_subscribe(
                                 unsafe { NonNull::new_unchecked(#var_name.cast_mut()) },
@@ -642,13 +642,14 @@ pub fn select(input: TokenStream) -> TokenStream {
                                 }
                                 SelectNonBlockingBranchResult::NotReady => {
                                     number_of_needed_to_retry_branches -= 1;
-                                    locked[#idx] = false;
                                 }
                                 SelectNonBlockingBranchResult::AlreadyAcquired => {
                                     // Another thread already acquired the lock and wake the task up.
                                     return;
                                 }
-                                SelectNonBlockingBranchResult::Locked => {}
+                                SelectNonBlockingBranchResult::Locked(task_in_select_branch) => {
+                                    locked[#idx] = Some(task_in_select_branch);
+                                }
                             }
                         }
                     });
@@ -693,8 +694,8 @@ pub fn select(input: TokenStream) -> TokenStream {
                         "Tried to use `local` task in `select` where at least one channel is `shared`.",
                     );
 
-                    let task_in_select = TaskInSelect::acquire_for_task_with_lock(task, *resolved_branch_id);
-                    let mut locked = [false; #branches_len];
+                    let task_in_select = TaskInSelect::acquire_for_task(task, *resolved_branch_id);
+                    let mut locked = [#(#locked_elems),*];
                     let mut number_of_needed_to_retry_branches = 0;
 
                     unsafe {

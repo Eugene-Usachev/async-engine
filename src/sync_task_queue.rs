@@ -27,6 +27,14 @@ impl SyncTaskList {
         self.inner.lock().len()
     }
 
+    /// Returns the capacity of the list.
+    ///
+    /// Calls in drop, so it has a mutability.
+    #[inline]
+    pub(crate) fn capacity(&mut self) -> usize {
+        self.inner.get_mut().capacity()
+    }
+
     /// Returns whether the list is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {

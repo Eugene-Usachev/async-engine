@@ -26,7 +26,7 @@ macro_rules! create_control_cap_wrapper {
 
         impl Drop for $name {
             fn drop(&mut self) {
-                if self.guard.len() < 128 {
+                if self.guard.capacity() < 32 {
                     // Drop guard to return the object to the pool.
                 } else {
                     // Shrink the pool.
@@ -39,7 +39,7 @@ macro_rules! create_control_cap_wrapper {
 
 /// # Arguments
 ///
-/// - vis: Visibility specifier for the generated structs and methods (e.g., pub, pub(self));
+/// - `vis`: Visibility specifier for the generated structs and methods (e.g., pub, pub(self));
 ///
 /// - `pool_thread_static_name`: Name of the thread-local static pool;
 ///

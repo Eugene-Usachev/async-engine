@@ -11,6 +11,7 @@ use crate::sync::mutexes::naive_shared::NaiveMutex;
 use crate::sync::{
     AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, RecvErr, SendErr, TryRecvErr, TrySendErr,
 };
+use crate::utils::hints::unreachable_hint;
 use crate::utils::Ptr;
 use std::collections::VecDeque;
 use std::future::Future;
@@ -334,18 +335,10 @@ macro_rules! generate_send_or_subscribe {
             &self,
             data: NonNull<Self::Data>,
             state: CallStatePtr,
-            mut task_in_select_branch: TaskInSelectBranch,
+            task_in_select_branch: TaskInSelectBranch,
         ) -> SelectNonBlockingBranchResult {
-            #[cfg(debug_assertions)]
-            {
-                debug_assert!(
-                    !task_in_select_branch.is_local(),
-                    "Tried to use `local` task in `select` in a non-local channel."
-                );
-            }
-
             let Some(mut inner_lock) = self.inner.try_lock() else {
-                return SelectNonBlockingBranchResult::Locked;
+                return SelectNonBlockingBranchResult::Locked(task_in_select_branch);
             };
 
             if inner_lock.is_closed {
@@ -372,45 +365,47 @@ macro_rules! generate_send_or_subscribe {
 
                         call_state.write(CallState::WokenToReturnReady);
                     },
-                    &mut task_in_select_branch,
+                    task_in_select_branch,
                 );
 
             match result {
                 PopIfAcquiredResult::Ok => {
                     mem::forget(inner_lock); // Was released above
 
-                    return SelectNonBlockingBranchResult::Success;
-                }
-
-                PopIfAcquiredResult::NotAcquired => {
-                    return SelectNonBlockingBranchResult::AlreadyAcquired
-                }
-
-                PopIfAcquiredResult::NoData => {}
-            }
-
-            let len = inner_lock.storage.len();
-            if len >= inner_lock.capacity {
-                inner_lock.deque.push_back_sender(WaitingTask::in_selector(
-                    task_in_select_branch,
-                    state,
-                    data,
-                ));
-
-                return SelectNonBlockingBranchResult::NotReady;
-            }
-
-            match task_in_select_branch.acquire_once() {
-                Some(task) => {
-                    inner_lock.storage.push_back(unsafe { data.read() });
-
-                    drop(inner_lock);
-
-                    local_executor().spawn_shared_task(task);
-
                     SelectNonBlockingBranchResult::Success
                 }
-                None => SelectNonBlockingBranchResult::AlreadyAcquired,
+
+                PopIfAcquiredResult::AlreadyAcquired => {
+                    SelectNonBlockingBranchResult::AlreadyAcquired
+                }
+
+                PopIfAcquiredResult::NoData(task_in_select_branch) => {
+                    let len = inner_lock.storage.len();
+                    if len >= inner_lock.capacity {
+                        inner_lock.deque.push_back_sender(WaitingTask::in_selector(
+                            task_in_select_branch,
+                            state,
+                            data,
+                        ));
+
+                        return SelectNonBlockingBranchResult::NotReady;
+                    }
+
+                    match task_in_select_branch.acquire_once() {
+                        Some(task) => {
+                            inner_lock.storage.push_back(unsafe { data.read() });
+
+                            drop(inner_lock);
+
+                            local_executor().spawn_shared_task(task);
+
+                            SelectNonBlockingBranchResult::Success
+                        }
+                        None => SelectNonBlockingBranchResult::AlreadyAcquired,
+                    }
+                }
+
+                _ => unreachable_hint(),
             }
         }
     };
@@ -476,19 +471,11 @@ macro_rules! generate_recv_or_subscribe {
             &self,
             slot: NonNull<Self::Data>,
             state: CallStatePtr,
-            mut task_in_select_branch: TaskInSelectBranch,
+            task_in_select_branch: TaskInSelectBranch,
         ) -> SelectNonBlockingBranchResult {
-            #[cfg(debug_assertions)]
-            {
-                debug_assert!(
-                    !task_in_select_branch.is_local(),
-                    "Tried to use `local` task in `select` in a non-local channel."
-                );
-            }
-
             let mut inner_lock = match self.inner.try_lock() {
                 Some(inner_lock) => inner_lock,
-                None => return SelectNonBlockingBranchResult::Locked,
+                None => return SelectNonBlockingBranchResult::Locked(task_in_select_branch),
             };
 
             if inner_lock.is_closed {
@@ -513,7 +500,7 @@ macro_rules! generate_recv_or_subscribe {
 
                         call_state.write(CallState::WokenToReturnReady);
                     },
-                    &mut task_in_select_branch,
+                    task_in_select_branch,
                 );
 
                 match result {
@@ -523,22 +510,24 @@ macro_rules! generate_recv_or_subscribe {
                         return SelectNonBlockingBranchResult::Success;
                     }
 
-                    PopIfAcquiredResult::NotAcquired => {
+                    PopIfAcquiredResult::AlreadyAcquired => {
                         return SelectNonBlockingBranchResult::AlreadyAcquired;
                     }
 
-                    PopIfAcquiredResult::NoData => {}
+                    PopIfAcquiredResult::NoData(task_in_select_branch) => {
+                        inner_lock
+                            .deque
+                            .push_back_receiver(WaitingTask::in_selector(
+                                task_in_select_branch,
+                                state,
+                                slot,
+                            ));
+
+                        return SelectNonBlockingBranchResult::NotReady;
+                    }
+
+                    _ => unreachable_hint(),
                 }
-
-                inner_lock
-                    .deque
-                    .push_back_receiver(WaitingTask::in_selector(
-                        task_in_select_branch,
-                        state,
-                        slot,
-                    ));
-
-                return SelectNonBlockingBranchResult::NotReady;
             }
 
             match task_in_select_branch.acquire_once() {

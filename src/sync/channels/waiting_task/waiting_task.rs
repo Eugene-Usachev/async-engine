@@ -22,13 +22,6 @@ impl<T> WaitingTask<T> {
         Self::InSelector(task, state, slot)
     }
 
-    pub(crate) fn is_local(&self) -> bool {
-        match self {
-            Self::Common(task, _, _) => task.is_local(),
-            Self::InSelector(task, _, _) => task.is_local(),
-        }
-    }
-
     #[cfg(test)]
     pub(crate) fn new_with_usize_for_tests(value: usize) -> Self {
         use crate::runtime::Locality;

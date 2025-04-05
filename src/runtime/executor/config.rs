@@ -254,6 +254,7 @@ impl Config {
     /// Sets the level of work sharing between threads. It is responsible for
     /// how many tasks the [`Executor`](crate::runtime::executor::Executor) can hold before assigning
     /// them to the shared queue.
+    ///
     /// If [`usize::MAX`] is provided, work sharing will be disabled.
     #[must_use]
     pub const fn set_work_sharing_level(mut self, work_sharing_level: usize) -> Self {

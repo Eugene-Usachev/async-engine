@@ -113,7 +113,7 @@ pub fn local_executor() -> &'static mut Executor {
     }
 }
 
-/// The executor that runs futures in the current thread.
+/// The executor that runs tasks in the current thread.
 ///
 /// # The difference between `local` and `shared` task and futures
 ///
@@ -197,7 +197,7 @@ impl Executor {
 
         let valid_config = config.validate();
         crate::utils::core::set_for_current(core_id);
-        let executor_id = FREE_EXECUTOR_ID.fetch_add(1, Ordering::Relaxed);
+        let executor_id = FREE_EXECUTOR_ID.fetch_add(1, Ordering::AcqRel);
         TaskPool::init();
         let (shared_tasks, shared_tasks_list_cap) = if valid_config.is_work_sharing_enabled() {
             (

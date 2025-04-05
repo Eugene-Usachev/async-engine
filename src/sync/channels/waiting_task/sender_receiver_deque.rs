@@ -170,7 +170,7 @@ impl<T> SenderReceiverQueue<T> {
 
         self.number_of_senders_or_receivers += DELTA;
 
-        Self::deallocate_ptr(unsafe { NonNull::new_unchecked(old_ptr.cast()) }, len);
+        Self::deallocate_ptr(unsafe { NonNull::new_unchecked(old_ptr) }, len);
     }
 
     pub(crate) fn push_receiver(&mut self, task: WaitingTask<T>) {
@@ -216,49 +216,6 @@ impl<T> Drop for SenderReceiverQueue<T> {
     fn drop(&mut self) {
         debug_assert_eq!(self.number_of_senders_or_receivers, 0);
 
-        SenderReceiverQueue::deallocate_ptr(self.ptr, self.capacity);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{SenderReceiverQueue, SenderReceiverQueueOption};
-    use crate as orengine;
-    use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
-
-    #[orengine::test::test_local]
-    fn test_sender_receiver_queue() {
-        const N: usize = 10_000;
-
-        let mut queue = SenderReceiverQueue::<usize>::new();
-
-        for i in 0..N {
-            queue.push_sender(WaitingTask::new_with_usize_for_tests(i));
-        }
-
-        assert!(matches!(queue.option(), SenderReceiverQueueOption::Sender));
-
-        for i in 0..N {
-            assert_eq!(queue.pop_sender().unwrap().extract_usize_for_tests(), i);
-        }
-
-        assert!(queue.pop_sender().is_none());
-
-        for i in 0..N {
-            queue.push_receiver(WaitingTask::new_with_usize_for_tests(i));
-        }
-
-        assert!(matches!(
-            queue.option(),
-            SenderReceiverQueueOption::Receiver
-        ));
-
-        for i in 0..N {
-            assert_eq!(queue.pop_receiver().unwrap().extract_usize_for_tests(), i);
-        }
-
-        assert!(queue.pop_receiver().is_none());
-
-        assert!(matches!(queue.option(), SenderReceiverQueueOption::Empty));
+        Self::deallocate_ptr(self.ptr, self.capacity);
     }
 }

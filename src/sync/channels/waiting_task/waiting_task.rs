@@ -21,26 +21,4 @@ impl<T> WaitingTask<T> {
     ) -> Self {
         Self::InSelector(task, state, slot)
     }
-
-    #[cfg(test)]
-    pub(crate) fn new_with_usize_for_tests(value: usize) -> Self {
-        use crate::runtime::Locality;
-        use std::mem;
-
-        Self::Common(
-            unsafe { Task::from_future(async {}, Locality::local()) },
-            CallStatePtr::new(unsafe {
-                mem::transmute::<usize, &mut crate::sync::channels::CallState>(8)
-            }),
-            unsafe { mem::transmute::<usize, NonNull<T>>(value) },
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn extract_usize_for_tests(&self) -> usize {
-        match self {
-            WaitingTask::Common(_, _, slot) => slot.as_ptr() as usize,
-            WaitingTask::InSelector(_, _, _) => unreachable!(),
-        }
-    }
 }

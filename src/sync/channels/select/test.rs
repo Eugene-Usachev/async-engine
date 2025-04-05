@@ -2,7 +2,7 @@
 use crate as orengine;
 use crate::sync::{
     AsyncChannel, AsyncReceiver, AsyncSender, AsyncWaitGroup, Channel, LocalChannel,
-    LocalWaitGroup, WaitGroup,
+    LocalWaitGroup, SendErr, WaitGroup,
 };
 use crate::test::sched_future_to_another_thread;
 use crate::{local_executor, sleep, yield_now, Local};
@@ -1221,3 +1221,105 @@ fn test_shared_select_stress_without_default() {
 }
 
 // endregion
+
+#[orengine::test::test_local]
+fn test_select_one_channel_recv() {
+    let chan = Rc::new(LocalChannel::bounded(0));
+    let chan_clone = chan.clone();
+
+    local_executor().spawn_local(async move {
+        sleep(Duration::from_micros(10)).await;
+
+        chan_clone.send(1).await.expect("failed to send");
+    });
+
+    let res: i32 = select! {
+        recv(&chan) -> res => res
+    }
+    .expect("failed to recv");
+
+    assert_eq!(res, 1);
+
+    let chan_clone = chan.clone();
+
+    local_executor().spawn_local(async move {
+        sleep(Duration::from_micros(10)).await;
+
+        chan_clone.close().await;
+    });
+
+    let res = select! {
+        recv(&chan) -> res => res
+    };
+
+    res.unwrap_err();
+}
+
+#[orengine::test::test_local]
+fn test_select_one_channel_send() {
+    let chan = Rc::new(LocalChannel::bounded(1));
+    let res = select! {
+        send(&chan, 1) -> res => res
+    };
+
+    res.unwrap();
+
+    let chan_clone = chan.clone();
+
+    local_executor().spawn_local(async move {
+        sleep(Duration::from_micros(10)).await;
+
+        chan_clone.close().await;
+    });
+
+    let res = select! {
+        send(&chan, 1) -> res => res
+    }
+    .unwrap_err();
+
+    match res {
+        SendErr::Closed(val) => assert_eq!(val, 1),
+    }
+}
+
+#[test]
+fn test_select_one_channel_try_recv() {
+    let chan = LocalChannel::bounded(1);
+
+    let res = select! {
+        recv(&chan) -> res => res
+        default => Ok(1)
+    };
+
+    assert_eq!(res.unwrap(), 1);
+
+    chan.try_send(2).expect("failed to send");
+
+    let res = select! {
+        recv(&chan) -> res => res
+        default => Ok(1)
+    };
+
+    assert_eq!(res.unwrap(), 2);
+}
+
+#[test]
+fn test_select_one_channel_try_send() {
+    let chan = LocalChannel::bounded(0);
+
+    let res = select! {
+        send(&chan, 1) -> _res => panic!("Success try_send to zero bounded channel")
+        default => 1
+    };
+
+    assert_eq!(res, 1);
+
+    let chan = LocalChannel::bounded(1);
+
+    let res = select! {
+        send(&chan, 1) -> _res => 3
+        default => 1
+    };
+
+    assert_eq!(res, 3);
+}

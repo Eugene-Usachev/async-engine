@@ -78,7 +78,7 @@ macro_rules! create_pool_of_objects_with_control_cap_wrapper {
 
         /// Returns a control capacity wrapper for the pool.
         ///
-        /// The wrapper shrinks the capacity of the pool to 2 if it is greater than 128.
+        /// The wrapper shrinks the capacity of the pool to 2 if it is greater than 32.
         #[allow(clippy::needless_pub_self, reason = "Cannot write private code in macro else.")]
         $vis fn $get_control_cap_wrapper_fn_name() -> $control_cap_wrapper_name {
             $control_cap_wrapper_name::new()

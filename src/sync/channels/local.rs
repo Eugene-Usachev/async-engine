@@ -306,7 +306,7 @@ macro_rules! generate_send_or_subscribe {
                         return SelectNonBlockingBranchResult::NotReady;
                     }
 
-                    match unsafe { task_in_select_branch.acquire_once() } {
+                    match task_in_select_branch.acquire_once() {
                         // It all is `local`, then other thread can't acquire the task. So, in select
                         // we can definitely acquire it.
                         Some(task) => {

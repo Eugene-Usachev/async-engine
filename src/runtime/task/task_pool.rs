@@ -72,3 +72,13 @@ impl TaskPool {
         self.storage.insert(size, vec![task]);
     }
 }
+
+impl Drop for TaskPool {
+    fn drop(&mut self) {
+        for (_, tasks) in self.storage.drain() {
+            for task in tasks {
+                unsafe { drop(Box::from_raw(task.future_ptr())) };
+            }
+        }
+    }
+}

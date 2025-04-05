@@ -207,7 +207,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///
     /// # fn process_msg(msg: &Msg) {}
     ///
-    /// async fn handle_new_messages<R: AsyncReceiver<Msg>>(receiver: R) -> Result<usize, ()> {
+    /// fn handle_new_messages<R: AsyncReceiver<Msg>>(receiver: R) -> Result<usize, ()> {
     ///     let mut msg = unsafe { std::mem::MaybeUninit::uninit() };
     ///     let mut processed = 0;
     ///
@@ -319,7 +319,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///
     /// # fn process_msg(msg: &Msg) {}
     ///
-    /// async fn handle_new_messages<R: AsyncReceiver<Msg>>(receiver: R) -> Result<usize, ()> {
+    /// fn handle_new_messages<R: AsyncReceiver<Msg>>(receiver: R) -> Result<usize, ()> {
     ///     let mut msg = match receiver.try_recv() {
     ///         Ok(msg) => {
     ///             process_msg(&msg);
@@ -424,22 +424,29 @@ pub trait AsyncReceiver<T>: IsLocal {
     /// # Example
     ///
     /// ```rust
-    /// use orengine::sync::{AsyncReceiver, RecvErr};
+    /// use orengine::sync::{AsyncReceiver, TryRecvErr};
     ///
-    /// # type Payload = i32;
+    /// type Payload = i32;
     ///
     /// // Must be dropped.
     /// struct Msg { value: Box<Payload> }
     ///
     /// # fn process_msg(msg: &Msg) {}
     ///
-    /// async fn handle_messages<R: AsyncReceiver<Msg>>(receiver: R) {
+    /// fn handle_new_messages<R: AsyncReceiver<Msg>>(receiver: R) -> Result<usize, ()> {
+    ///     let mut processed = 0;
+    ///
     ///     loop {
-    ///         match receiver.recv().await {
+    ///         match receiver.try_recv() {
     ///             Ok(msg) => {
     ///                 process_msg(&msg);
+    ///
+    ///                 processed += 1;
     ///             }
-    ///             Err(_) => return // closed
+    ///             Err(e) => return match e {
+    ///                 TryRecvErr::Empty | TryRecvErr::Locked => Ok(processed),
+    ///                 TryRecvErr::Closed => Err(())
+    ///             }
     ///         }
     ///     }
     /// }

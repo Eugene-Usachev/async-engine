@@ -4,17 +4,18 @@ use crate::local_executor;
 use crate::runtime::Task;
 use crate::sync::channels::state::CallStatePtr;
 use crate::utils::hints::unreachable_hint;
-use std::cell::UnsafeCell;
 use std::hint::spin_loop;
+use std::ops::{Deref, DerefMut};
 use std::ptr;
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
-use std::sync::atomic::{fence, AtomicUsize};
+use std::sync::atomic::{fence, AtomicBool, AtomicUsize};
+use std::sync::Mutex;
 
 const NOT_ACQUIRED: usize = 0;
 const ACQUIRED: usize = 1;
 
-pub struct TaskInSelect {
+pub struct Inner {
     task: Task,
     resolved_branch_id: NonNull<usize>,
     /// Can be:
@@ -32,25 +33,49 @@ pub struct TaskInSelect {
     ///   (as usize) task will acquire both tasks.
     state: AtomicUsize,
     ref_count: AtomicUsize,
+    // TODO r
+    was_released: AtomicBool,
 }
 
+impl Drop for Inner {
+    fn drop(&mut self) {
+        assert!(self.was_released.load(Acquire));
+    }
+}
+
+pub struct TaskInSelect {
+    inner: NonNull<Inner>,
+}
+
+unsafe impl Send for Inner {}
+unsafe impl Sync for Inner {}
+
 impl TaskInSelect {
-    pub fn acquire_for_task(task: Task, resolved_branch_id: NonNull<usize>) -> NonNull<Self> {
+    pub fn acquire_for_task(task: Task, resolved_branch_id: NonNull<usize>) -> Self {
         #[cfg(not(debug_assertions))]
         {
-            return task_in_select_pool().acquire_for_task(task, resolved_branch_id);
+            return Self {
+                // TODO inner: task_in_select_pool().acquire_for_task(task, resolved_branch_id),
+                inner: TASK_IN_SELECT_POOL
+                    .lock()
+                    .unwrap()
+                    .acquire_for_task(task, resolved_branch_id),
+            };
         }
 
         #[cfg(debug_assertions)]
         {
-            let mut task_in_select =
-                task_in_select_pool().acquire_for_task(task, resolved_branch_id);
+            // TODO let mut inner = task_in_select_pool().acquire_for_task(task, resolved_branch_id);
+            let mut inner = TASK_IN_SELECT_POOL
+                .lock()
+                .unwrap()
+                .acquire_for_task(task, resolved_branch_id);
 
             unsafe {
-                task_in_select.as_mut().resolved_branch_id.write(usize::MAX);
+                inner.as_mut().resolved_branch_id.write(usize::MAX);
             };
 
-            task_in_select
+            Self { inner }
         }
     }
 
@@ -72,7 +97,36 @@ impl TaskInSelect {
             "Attempt to drop TaskSelect (ref count is 0) that was not acquired"
         );
 
-        task_in_select_pool().release(NonNull::from(self));
+        assert!(!self.was_released.swap(true, Release));
+
+        // TODO task_in_select_pool().release(self.inner);
+        TASK_IN_SELECT_POOL.lock().unwrap().release(self.inner);
+    }
+}
+
+impl Deref for TaskInSelect {
+    type Target = Inner;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.inner.as_ref() }
+    }
+}
+
+impl DerefMut for TaskInSelect {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { self.inner.as_mut() }
+    }
+}
+
+impl Clone for TaskInSelect {
+    fn clone(&self) -> Self {
+        if self.task.is_local() {
+            *unsafe { &mut *self.inner.as_ptr() }.ref_count.get_mut() += 1;
+        } else {
+            self.ref_count.fetch_add(1, Relaxed);
+        }
+
+        TaskInSelect { inner: self.inner }
     }
 }
 
@@ -116,40 +170,21 @@ pub(crate) enum PopIfAcquiredResult {
 #[repr(C)]
 #[derive(Clone)]
 pub struct TaskInSelectBranch {
-    inner_ptr: NonNull<TaskInSelect>,
+    task_in_select: TaskInSelect,
     associated_branch_id: usize,
 }
 
 impl TaskInSelectBranch {
-    pub unsafe fn from_owned_task_in_select_ptr(
-        task_in_select: NonNull<TaskInSelect>,
-        associated_branch_id: usize,
-    ) -> Self {
+    pub fn new(task_in_select: TaskInSelect, associated_branch_id: usize) -> Self {
         Self {
-            inner_ptr: task_in_select,
-            associated_branch_id,
-        }
-    }
-
-    pub fn new(mut task_in_select: NonNull<TaskInSelect>, associated_branch_id: usize) -> Self {
-        if unsafe { task_in_select.as_ref().task.is_local() } {
-            *unsafe { task_in_select.as_mut() }.ref_count.get_mut() += 1;
-        } else {
-            unsafe { task_in_select.as_ref() }
-                .ref_count
-                .fetch_add(1, Relaxed);
-        }
-
-        Self {
-            inner_ptr: task_in_select,
+            task_in_select,
             associated_branch_id,
         }
     }
 
     pub(crate) fn acquire_once(mut self) -> Option<Task> {
-        if unsafe { self.inner_ptr.as_ref().task.is_local() } {
-            let inner = unsafe { self.inner_ptr.as_mut() };
-            let was_acquired_ref = inner.state.get_mut();
+        if self.task_in_select.task.is_local() {
+            let was_acquired_ref = self.task_in_select.state.get_mut();
 
             debug_assert!(*was_acquired_ref < 2);
 
@@ -157,21 +192,19 @@ impl TaskInSelectBranch {
                 None
             } else {
                 *was_acquired_ref = ACQUIRED;
-                unsafe {
-                    self.inner_ptr
-                        .as_ref()
-                        .set_resolved_branch_id(self.associated_branch_id);
-                };
+                self.task_in_select
+                    .set_resolved_branch_id(self.associated_branch_id);
 
-                Some(unsafe { ptr::read(&self.inner_ptr.as_ref().task) })
+                Some(unsafe { ptr::read(&self.task_in_select.task) })
             }
         } else {
-            let inner = unsafe { self.inner_ptr.as_ref() };
-
             loop {
-                let prev_ = inner
-                    .state
-                    .compare_exchange(NOT_ACQUIRED, ACQUIRED, AcqRel, Acquire);
+                let prev_ = self.task_in_select.state.compare_exchange(
+                    NOT_ACQUIRED,
+                    ACQUIRED,
+                    AcqRel,
+                    Acquire,
+                );
 
                 if let Err(prev) = prev_ {
                     // Can be `ACQUIRED` or `ACQUIRING_NOW`.
@@ -185,9 +218,10 @@ impl TaskInSelectBranch {
                     // happens very rarely, and we wait at max time of `load` + `store`.
                     spin_loop();
                 } else {
-                    inner.set_resolved_branch_id(self.associated_branch_id);
+                    self.task_in_select
+                        .set_resolved_branch_id(self.associated_branch_id);
 
-                    return Some(unsafe { ptr::read(&inner.task) });
+                    return Some(unsafe { ptr::read(&self.task_in_select.task) });
                 }
             }
         }
@@ -203,29 +237,30 @@ impl TaskInSelectBranch {
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
-        debug_assert!(unsafe { self.inner_ptr.as_ref().task.is_local() });
+        debug_assert!(self.task_in_select.task.is_local());
+        debug_assert!(other.task_in_select.task.is_local());
 
-        let this_inner = unsafe { self.inner_ptr.as_mut() };
-        let other_inner = unsafe { other.inner_ptr.as_mut() };
-
-        if *this_inner.state.get_mut() == ACQUIRED {
+        if *self.task_in_select.state.get_mut() == ACQUIRED {
             return PopIfAcquiredResult::NotAcquired(other);
         }
 
-        *this_inner.state.get_mut() = ACQUIRED;
+        *self.task_in_select.state.get_mut() = ACQUIRED;
 
-        if *other_inner.state.get_mut() == ACQUIRED {
-            *this_inner.state.get_mut() = NOT_ACQUIRED;
+        if *other.task_in_select.state.get_mut() == ACQUIRED {
+            *self.task_in_select.state.get_mut() = NOT_ACQUIRED;
 
             return PopIfAcquiredResult::NoData(self);
         }
 
         // Two tasks are acquired
-        this_inner.set_resolved_branch_id(self.associated_branch_id);
-        other_inner.set_resolved_branch_id(other.associated_branch_id);
+        self.task_in_select
+            .set_resolved_branch_id(self.associated_branch_id);
+        other
+            .task_in_select
+            .set_resolved_branch_id(other.associated_branch_id);
 
-        let this_task = unsafe { ptr::read(&this_inner.task) };
-        let other_task = unsafe { ptr::read(&other_inner.task) };
+        let this_task = unsafe { ptr::read(&self.task_in_select.task) };
+        let other_task = unsafe { ptr::read(&other.task_in_select.task) };
 
         setter_fn(state, data); // set data to receiver/sender task
 
@@ -289,11 +324,9 @@ impl TaskInSelectBranch {
             };
         }
 
-        debug_assert!(!unsafe { self.inner_ptr.as_ref().task.is_local() });
+        debug_assert!(!self.task_in_select.task.is_local());
 
-        let this_inner = unsafe { self.inner_ptr.as_ref() };
-        let other_inner = unsafe { other.inner_ptr.as_ref() };
-        let other_ptr_as_usize = other.inner_ptr.as_ptr() as usize;
+        let other_ptr_as_usize = (&raw const *other.task_in_select) as usize;
 
         debug_assert!(
             other_ptr_as_usize != NOT_ACQUIRED && other_ptr_as_usize != ACQUIRED,
@@ -301,10 +334,12 @@ impl TaskInSelectBranch {
         );
 
         // set state to acquiring now with other task. Read below for details.
-        let prev_ =
-            this_inner
-                .state
-                .compare_exchange(NOT_ACQUIRED, other_ptr_as_usize, AcqRel, Acquire);
+        let prev_ = self.task_in_select.state.compare_exchange(
+            NOT_ACQUIRED,
+            other_ptr_as_usize,
+            AcqRel,
+            Acquire,
+        );
 
         if let Err(prev) = prev_ {
             // Can be only `ACQUIRED`.
@@ -319,10 +354,12 @@ impl TaskInSelectBranch {
             }
         } else {
             loop {
-                let other_prev_ =
-                    other_inner
-                        .state
-                        .compare_exchange(NOT_ACQUIRED, ACQUIRED, AcqRel, Acquire);
+                let other_prev_ = other.task_in_select.state.compare_exchange(
+                    NOT_ACQUIRED,
+                    ACQUIRED,
+                    AcqRel,
+                    Acquire,
+                );
 
                 if let Err(other_prev) = other_prev_ {
                     match other_prev {
@@ -330,12 +367,12 @@ impl TaskInSelectBranch {
                         ACQUIRED => {
                             // We can't acquire other task, because it is already acquired.
 
-                            this_inner.state.store(NOT_ACQUIRED, Release);
+                            self.task_in_select.state.store(NOT_ACQUIRED, Release);
 
                             break PopIfAcquiredResult::NoData(self);
                         }
                         acquiring_now_with => {
-                            let this_ptr_as_usize = self.inner_ptr.as_ptr() as usize;
+                            let this_ptr_as_usize = (&raw const *self.task_in_select) as usize;
                             debug_assert!(
                                 other_ptr_as_usize != NOT_ACQUIRED
                                     && other_ptr_as_usize != ACQUIRED,
@@ -366,12 +403,12 @@ impl TaskInSelectBranch {
                             if this_ptr_as_usize > other_ptr_as_usize {
                                 // Current thread acquires both tasks.
 
-                                this_inner.state.store(ACQUIRED, Release);
-                                other_inner.state.store(ACQUIRED, Release);
+                                self.task_in_select.state.store(ACQUIRED, Release);
+                                other.task_in_select.state.store(ACQUIRED, Release);
 
                                 exec_two_tasks!(
-                                    this_inner,
-                                    other_inner,
+                                    self.task_in_select,
+                                    other.task_in_select,
                                     self,
                                     other,
                                     setter_fn,
@@ -391,12 +428,18 @@ impl TaskInSelectBranch {
                     }
                 }
 
-                unsafe { self.inner_ptr.as_ref() }
-                    .state
-                    .store(ACQUIRED, Release);
+                self.task_in_select.state.store(ACQUIRED, Release);
                 // other task is already acquired above
 
-                exec_two_tasks!(this_inner, other_inner, self, other, setter_fn, state, data);
+                exec_two_tasks!(
+                    self.task_in_select,
+                    other.task_in_select,
+                    self,
+                    other,
+                    setter_fn,
+                    state,
+                    data
+                );
 
                 break PopIfAcquiredResult::Ok;
             }
@@ -414,7 +457,7 @@ impl TaskInSelectBranch {
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
-        if unsafe { self.inner_ptr.as_ref().task.is_local() } {
+        if self.task_in_select.task.is_local() {
             unsafe { self.try_acquire_two_local_tasks_in_select(other, setter_fn, state, data) }
         } else {
             unsafe { self.try_acquire_two_shared_tasks_in_select(other, setter_fn, state, data) }
@@ -422,14 +465,8 @@ impl TaskInSelectBranch {
     }
 }
 
-impl Drop for TaskInSelectBranch {
-    fn drop(&mut self) {
-        unsafe { self.inner_ptr.drop_in_place() }
-    }
-}
-
 struct TaskInSelectPool {
-    vec: Vec<NonNull<TaskInSelect>>,
+    vec: Vec<NonNull<Inner>>,
 }
 
 impl TaskInSelectPool {
@@ -441,7 +478,7 @@ impl TaskInSelectPool {
         &mut self,
         task: Task,
         resolved_branch_id: NonNull<usize>,
-    ) -> NonNull<TaskInSelect> {
+    ) -> NonNull<Inner> {
         if let Some(mut inner) = self.vec.pop() {
             let inner_ref = unsafe { inner.as_mut() };
 
@@ -449,22 +486,26 @@ impl TaskInSelectPool {
             inner_ref.resolved_branch_id = resolved_branch_id;
             inner_ref.state = AtomicUsize::new(NOT_ACQUIRED);
             inner_ref.ref_count = AtomicUsize::new(1);
+            inner_ref.was_released = AtomicBool::new(false);
 
             inner
         } else {
-            NonNull::from(Box::leak(Box::new(TaskInSelect {
+            NonNull::from(Box::leak(Box::new(Inner {
                 task,
                 resolved_branch_id,
                 state: AtomicUsize::new(NOT_ACQUIRED),
                 ref_count: AtomicUsize::new(1),
+                was_released: AtomicBool::new(false),
             })))
         }
     }
 
-    fn release(&mut self, inner: NonNull<TaskInSelect>) {
-        self.vec.push(inner.cast());
+    fn release(&mut self, inner: NonNull<Inner>) {
+        self.vec.push(inner);
     }
 }
+
+unsafe impl Send for TaskInSelectPool {}
 
 // TODO think about it
 impl Drop for TaskInSelectPool {
@@ -475,12 +516,15 @@ impl Drop for TaskInSelectPool {
     }
 }
 
-thread_local! {
-    /// Thread-local [`TaskInSelectPool`], therefore it is lockless.
-    // Before refactor: it must be thread-local, or rewrite drop logic in `TaskInSelect`.
-    static TASK_IN_SELECT_POOL: UnsafeCell<TaskInSelectPool> = const { UnsafeCell::new(TaskInSelectPool::new()) };
-}
+// TODO
+// thread_local! {
+//     /// Thread-local [`TaskInSelectPool`], therefore it is lockless.
+//     // Before refactor: it must be thread-local, or rewrite drop logic in `TaskInSelect`.
+//     static TASK_IN_SELECT_POOL: UnsafeCell<TaskInSelectPool> = const { UnsafeCell::new(TaskInSelectPool::new()) };
+// }
+//
+// fn task_in_select_pool() -> &'static mut TaskInSelectPool {
+//     unsafe { TASK_IN_SELECT_POOL.with(|pool| &mut *pool.get()) }
+// }
 
-fn task_in_select_pool() -> &'static mut TaskInSelectPool {
-    unsafe { TASK_IN_SELECT_POOL.with(|pool| &mut *pool.get()) }
-}
+static TASK_IN_SELECT_POOL: Mutex<TaskInSelectPool> = Mutex::new(TaskInSelectPool::new());

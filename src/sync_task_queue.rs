@@ -44,7 +44,7 @@ impl SyncTaskList {
     /// Shrinks capacity of the list to `min_capacity`.
     #[inline]
     pub fn shrink_to(&mut self, min_capacity: usize) {
-        self.inner.lock().shrink_to(min_capacity);
+        self.inner.get_mut().shrink_to(min_capacity);
     }
 
     /// Pushes a task at the end of the list.

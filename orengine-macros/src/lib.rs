@@ -8,8 +8,10 @@
 #![allow(clippy::panic)]
 
 extern crate proc_macro;
+mod ident_helper;
 mod select;
 
+use crate::ident_helper::is_ident_has_first_underline;
 use crate::select::SelectInput;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
@@ -248,6 +250,174 @@ pub fn select(input: TokenStream) -> TokenStream {
         });
     }
 
+    if len == 1 {
+        let expanded = if let Some(default_body) = default {
+            match &branches[0] {
+                select::Branch::Recv { channel, var, body } => {
+                    let success_result_initialization = if is_ident_has_first_underline(var) {
+                        quote! {}
+                    } else {
+                        quote! { let #var = Ok(var); }
+                    };
+                    let error_result_initialization = if is_ident_has_first_underline(var) {
+                        quote! {}
+                    } else {
+                        quote! { let #var = Err(RecvErr::Closed); }
+                    };
+
+                    quote! {
+                        {
+                            use orengine::sync::{AsyncReceiver, TryRecvErr, RecvErr};
+
+                            let mut step = 0;
+
+                            loop {
+                                match (#channel).try_recv() {
+                                    Ok(var) => break {
+                                        #success_result_initialization
+                                        #body
+                                    },
+                                    Err(e) => match e {
+                                        TryRecvErr::Empty => break #default_body,
+                                        TryRecvErr::Closed => break {
+                                            #error_result_initialization
+                                            #body
+                                        },
+                                        TryRecvErr::Locked => {
+                                            for _ in 0..1 << step {
+                                                std::hint::spin_loop();
+                                            }
+
+                                            step += 1;
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                select::Branch::Send {
+                    channel,
+                    value,
+                    var,
+                    body,
+                } => {
+                    let success_result_initialization = if is_ident_has_first_underline(var) {
+                        quote! {}
+                    } else {
+                        quote! { let #var = Ok(()); }
+                    };
+                    let error_result_initialization = if is_ident_has_first_underline(var) {
+                        quote! {}
+                    } else {
+                        quote! { let #var = Err(SendErr::Closed(var)); }
+                    };
+
+                    quote! {
+                        {
+                            use orengine::sync::{AsyncSender, TrySendErr, SendErr};
+
+                            let mut step = 0;
+                            let mut value = #value;
+
+                            loop {
+                                match (#channel).try_send(#value) {
+                                    Ok(()) => break {
+                                        #success_result_initialization
+                                        #body
+                                    },
+                                    Err(e) => match e {
+                                        TrySendErr::Full(_) => break #default_body,
+                                        TrySendErr::Closed(var) => break {
+                                            #error_result_initialization
+                                            #body
+                                        },
+                                        TrySendErr::Locked(var) => {
+                                            value = var;
+                                            for _ in 0..1 << step {
+                                                std::hint::spin_loop();
+                                            }
+
+                                            step += 1;
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            match &branches[0] {
+                select::Branch::Recv { channel, var, body } => {
+                    let success_result_initialization = if is_ident_has_first_underline(var) {
+                        quote! {}
+                    } else {
+                        quote! { let #var = Ok(var); }
+                    };
+                    let error_result_initialization = if is_ident_has_first_underline(var) {
+                        quote! {}
+                    } else {
+                        quote! { let #var = Err(RecvErr::Closed); }
+                    };
+
+                    quote! {
+                        {
+                            use orengine::sync::{AsyncReceiver, RecvErr};
+
+                            match (#channel).recv().await {
+                                Ok(var) => {
+                                    #success_result_initialization
+                                    #body
+                                },
+                                Err(_) => {
+                                    #error_result_initialization
+                                    #body
+                                },
+                            }
+                        }
+                    }
+                }
+                select::Branch::Send {
+                    channel,
+                    value,
+                    var,
+                    body,
+                } => {
+                    let success_result_initialization = if is_ident_has_first_underline(var) {
+                        quote! {}
+                    } else {
+                        quote! { let #var = Ok(()); }
+                    };
+                    let error_result_initialization = if is_ident_has_first_underline(var) {
+                        quote! {}
+                    } else {
+                        quote! { let #var = Err(SendErr::Closed(var)); }
+                    };
+
+                    quote! {
+                        {
+                            use orengine::sync::{AsyncSender, SendErr};
+
+                            match (#channel).send(#value).await {
+                                Ok(()) => {
+                                    #success_result_initialization
+                                    #body
+                                },
+                                Err(SendErr::Closed(var)) => {
+                                    #error_result_initialization
+                                    #body
+                                },
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        return expanded.into();
+    }
+
     let expanded = if let Some(default_body) = default {
         let mut select_generics = Vec::with_capacity(branches.len());
         let mut generics_names = Vec::with_capacity(branches.len());
@@ -445,12 +615,12 @@ pub fn select(input: TokenStream) -> TokenStream {
             let name_of_task_in_select_branch = format_ident!("task_in_select_branch{idx}");
             let create_task_in_select_branch = if idx != branches.len() - 1 {
                 quote! {
-                    let #name_of_task_in_select_branch = TaskInSelectBranch::new(task_in_select, #idx);
+                    let #name_of_task_in_select_branch = TaskInSelectBranch::new(task_in_select.clone(), #idx);
                 }
             } else {
                 quote! {
                     let #name_of_task_in_select_branch = unsafe {
-                        TaskInSelectBranch::from_owned_task_in_select_ptr(task_in_select, #idx)
+                        TaskInSelectBranch::new(task_in_select, #idx)
                     };
                 }
             };

@@ -207,8 +207,7 @@ impl RefUnwindSafe for Task {}
 #[macro_export]
 macro_rules! check_task_local_safety {
     ($task:expr) => {
-        #[cfg(debug_assertions)]
-        {
+        if cfg!(debug_assertions) {
             if $task.is_local() && $crate::local_executor().id() != $task.executor_id {
                 if cfg!(test) && $task.executor_id == usize::MAX {
                     // All is ok
@@ -239,19 +238,20 @@ macro_rules! check_task_local_safety {
 #[macro_export]
 macro_rules! panic_if_local_in_future {
     ($cx:expr, $name_of_future:expr) => {
-        #[cfg(debug_assertions)]
-        #[allow(
-            clippy::macro_metavars_in_unsafe,
-            reason = "else we need to allow unused `unsafe` for `release`"
-        )]
-        unsafe {
-            let task = $crate::runtime::Task::from_context($cx);
-            if task.is_local() {
-                panic!(
-                    "You cannot call a `local` task in {}, because it can be moved! \
-                    Use `shared` task instead or use `local` structures if it is possible.",
-                    $name_of_future
-                );
+        if cfg!(debug_assertions) {
+            #[allow(
+                clippy::macro_metavars_in_unsafe,
+                reason = "else we need to allow unused `unsafe` for `release`"
+            )]
+            unsafe {
+                let task = $crate::runtime::Task::from_context($cx);
+                if task.is_local() {
+                    panic!(
+                        "You cannot call a `local` task in {}, because it can be moved! \
+                        Use `shared` task instead or use `local` structures if it is possible.",
+                        $name_of_future
+                    );
+                }
             }
         }
     };
@@ -270,19 +270,20 @@ macro_rules! panic_if_local_in_future {
 #[macro_export]
 macro_rules! panic_if_shared_in_future {
     ($cx:expr, $name_of_future:expr) => {
-        #[cfg(debug_assertions)]
-        #[allow(
-            clippy::macro_metavars_in_unsafe,
-            reason = "else we need to allow unused `unsafe` for `release`"
-        )]
-        unsafe {
-            let task = $crate::runtime::Task::from_context($cx);
-            if !task.is_local() {
-                panic!(
-                    "You cannot call a `shared` task in {}, because it can be moved! \
-                    Use `local` task instead or use `shared` structures if it is possible.",
-                    $name_of_future
-                );
+        if cfg!(debug_assertions) {
+            #[allow(
+                clippy::macro_metavars_in_unsafe,
+                reason = "else we need to allow unused `unsafe` for `release`"
+            )]
+            unsafe {
+                let task = $crate::runtime::Task::from_context($cx);
+                if !task.is_local() {
+                    panic!(
+                        "You cannot call a `shared` task in {}, because it can be moved! \
+                        Use `local` task instead or use `shared` structures if it is possible.",
+                        $name_of_future
+                    );
+                }
             }
         }
     };

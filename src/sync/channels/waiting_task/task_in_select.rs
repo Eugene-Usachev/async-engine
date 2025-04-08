@@ -52,19 +52,7 @@ unsafe impl Sync for Inner {}
 
 impl TaskInSelect {
     pub fn acquire_for_task(task: Task, resolved_branch_id: NonNull<usize>) -> Self {
-        #[cfg(not(debug_assertions))]
-        {
-            return Self {
-                // TODO inner: task_in_select_pool().acquire_for_task(task, resolved_branch_id),
-                inner: TASK_IN_SELECT_POOL
-                    .lock()
-                    .unwrap()
-                    .acquire_for_task(task, resolved_branch_id),
-            };
-        }
-
-        #[cfg(debug_assertions)]
-        {
+        if cfg!(debug_assertions) {
             // TODO let mut inner = task_in_select_pool().acquire_for_task(task, resolved_branch_id);
             let mut inner = TASK_IN_SELECT_POOL
                 .lock()
@@ -76,6 +64,14 @@ impl TaskInSelect {
             };
 
             Self { inner }
+        } else {
+            Self {
+                // TODO inner: task_in_select_pool().acquire_for_task(task, resolved_branch_id),
+                inner: TASK_IN_SELECT_POOL
+                    .lock()
+                    .unwrap()
+                    .acquire_for_task(task, resolved_branch_id),
+            }
         }
     }
 
@@ -487,6 +483,18 @@ impl TaskInSelectPool {
             inner_ref.state = AtomicUsize::new(NOT_ACQUIRED);
             inner_ref.ref_count = AtomicUsize::new(1);
             inner_ref.was_released = AtomicBool::new(false);
+
+            let must_shrink = (self.vec.len() << 3 >= self.vec.capacity()) && self.vec.len() > 1024;
+
+            if !must_shrink {
+                return inner;
+            }
+
+            for _ in 0..self.vec.len() >> 2 {
+                drop(unsafe { Box::from_raw(self.vec.pop().unwrap_unchecked().as_mut()) });
+            }
+
+            self.vec.shrink_to_fit();
 
             inner
         } else {

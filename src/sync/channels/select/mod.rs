@@ -1,5 +1,4 @@
 pub mod receiver;
-pub(crate) mod receiver_or_sender;
 mod result;
 pub mod sender;
 #[cfg(test)]

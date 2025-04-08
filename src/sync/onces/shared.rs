@@ -102,16 +102,12 @@ impl AsyncOnce for Once {
 
     #[inline]
     fn state(&self) -> OnceState {
-        #[cfg(debug_assertions)]
-        {
+        if cfg!(debug_assertions) {
             use crate::bug_message::BUG_MESSAGE;
 
             OnceState::try_from(self.state.load(Acquire)).expect(BUG_MESSAGE)
-        }
-
-        #[cfg(not(debug_assertions))]
-        unsafe {
-            OnceState::try_from(self.state.load(Acquire)).unwrap_unchecked()
+        } else {
+            unsafe { OnceState::try_from(self.state.load(Acquire)).unwrap_unchecked() }
         }
     }
 }

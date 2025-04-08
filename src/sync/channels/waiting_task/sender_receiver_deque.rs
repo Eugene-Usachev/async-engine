@@ -126,16 +126,16 @@ impl<T> SenderReceiverQueue<T> {
         // H = head
         // T = tail
         // From any of:
-        //    H              L
+        //    H              T
         // 1: [o o o o o o o o ]
-        //         L H
+        //         T H
         // 2: [o o o o o o o o ]
         //
         // To:
-        //    H             L
+        //    H             T
         //   [o o o o o o o o . . . ]
 
-        // Here self.head is an old head, self.ptr is a new ptr, self.capacity is a new capacity.
+        // `self.head` is an old head, `self.ptr` is a new ptr, `self.capacity` is a new capacity.
 
         if self.head == 0 {
             // 1
@@ -188,11 +188,52 @@ impl<T> SenderReceiverQueue<T> {
     unsafe fn pop_front<const DELTA: isize>(&mut self) -> WaitingTask<T> {
         debug_assert!(!self.is_empty());
         let old_head = self.head;
+        let len = self.len();
 
         self.head = self.to_physical_idx(1);
         self.number_of_senders_or_receivers -= DELTA;
 
-        unsafe { self.ptr.add(old_head).read() }
+        let res = unsafe { self.ptr.add(old_head).read() };
+        let must_shrink = (len * 3 < self.capacity) && len > 4;
+
+        if !must_shrink {
+            return res;
+        }
+
+        let old_ptr = self.ptr.as_ptr();
+        let old_capacity = self.capacity;
+        let tail = self.to_physical_idx(len - 1);
+        self.capacity = (self.capacity >> 1) + 2;
+        self.ptr = Self::new_ptr(self.capacity);
+
+        if self.head < tail {
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    old_ptr.add(self.head),
+                    self.ptr.as_ptr(),
+                    tail - self.head,
+                );
+            }
+        } else {
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    old_ptr.add(self.head),
+                    self.ptr.as_ptr(),
+                    old_capacity - self.head,
+                );
+                ptr::copy_nonoverlapping(
+                    old_ptr,
+                    self.ptr.as_ptr().add(old_capacity - self.head),
+                    tail,
+                );
+            }
+        }
+
+        self.head = 0;
+
+        Self::deallocate_ptr(unsafe { NonNull::new_unchecked(old_ptr) }, old_capacity);
+
+        res
     }
 
     pub(crate) fn pop_receiver(&mut self) -> Option<WaitingTask<T>> {

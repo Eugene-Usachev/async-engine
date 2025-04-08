@@ -25,11 +25,6 @@ impl<V> VecMap<V> {
     ///
     /// Returns `None` or previous value.
     pub(crate) fn insert(&mut self, key: usize, value: V) -> Option<V> {
-        debug_assert!(
-            key < self.inner.len() + 100,
-            "The provided key is too far from the previous one."
-        );
-
         if self.inner.len() <= key {
             let new_len = (key + 1).max(self.inner.len() * 12 / 10);
             for _ in self.inner.len()..new_len {

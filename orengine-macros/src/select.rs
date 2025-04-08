@@ -1,6 +1,9 @@
+use crate::ident_helper::is_ident_has_first_underline;
+use proc_macro::TokenStream;
+use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
-use syn::{Expr, Ident, Token};
+use syn::{parse_macro_input, Expr, Ident, Token};
 
 pub(crate) struct SelectInput {
     pub(crate) branches: Vec<Branch>,
@@ -154,4 +157,652 @@ impl Parse for SelectInput {
 
         Ok(SelectInput { branches, default })
     }
+}
+
+fn maybe_can_be_simplified(
+    len: usize,
+    branches: &[Branch],
+    default: &Option<Expr>,
+) -> Option<TokenStream> {
+    if len != 1 {
+        return None;
+    }
+
+    let expanded = if let Some(default_body) = default {
+        match &branches[0] {
+            Branch::Recv { channel, var, body } => {
+                let success_result_initialization = if is_ident_has_first_underline(var) {
+                    quote! {}
+                } else {
+                    quote! { let #var = Ok(var); }
+                };
+                let error_result_initialization = if is_ident_has_first_underline(var) {
+                    quote! {}
+                } else {
+                    quote! { let #var = Err(RecvErr::Closed); }
+                };
+
+                quote! {
+                    {
+                        use orengine::sync::{AsyncReceiver, TryRecvErr, RecvErr};
+
+                        let mut step = 0;
+
+                        loop {
+                            match (#channel).try_recv() {
+                                Ok(var) => break {
+                                    #success_result_initialization
+                                    #body
+                                },
+                                Err(e) => match e {
+                                    TryRecvErr::Empty => break #default_body,
+                                    TryRecvErr::Closed => break {
+                                        #error_result_initialization
+                                        #body
+                                    },
+                                    TryRecvErr::Locked => {
+                                        for _ in 0..1 << step {
+                                            std::hint::spin_loop();
+                                        }
+
+                                        if step <= 6 {
+                                            step += 1;
+                                        }
+                                    },
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Branch::Send {
+                channel,
+                value,
+                var,
+                body,
+            } => {
+                let success_result_initialization = if is_ident_has_first_underline(var) {
+                    quote! {}
+                } else {
+                    quote! { let #var = Ok(()); }
+                };
+                let error_result_initialization = if is_ident_has_first_underline(var) {
+                    quote! {}
+                } else {
+                    quote! { let #var = Err(SendErr::Closed(var)); }
+                };
+
+                quote! {
+                    {
+                        use orengine::sync::{AsyncSender, TrySendErr, SendErr};
+
+                        let mut step = 0;
+                        let mut value = #value;
+
+                        loop {
+                            match (#channel).try_send(#value) {
+                                Ok(()) => break {
+                                    #success_result_initialization
+                                    #body
+                                },
+                                Err(e) => match e {
+                                    TrySendErr::Full(_) => break #default_body,
+                                    TrySendErr::Closed(var) => break {
+                                        #error_result_initialization
+                                        #body
+                                    },
+                                    TrySendErr::Locked(var) => {
+                                        value = var;
+                                        for _ in 0..1 << step {
+                                            std::hint::spin_loop();
+                                        }
+
+                                        if step <= 6 {
+                                            step += 1;
+                                        }
+                                    },
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        match &branches[0] {
+            Branch::Recv { channel, var, body } => {
+                let success_result_initialization = if is_ident_has_first_underline(var) {
+                    quote! {}
+                } else {
+                    quote! { let #var = Ok(var); }
+                };
+                let error_result_initialization = if is_ident_has_first_underline(var) {
+                    quote! {}
+                } else {
+                    quote! { let #var = Err(RecvErr::Closed); }
+                };
+
+                quote! {
+                    {
+                        use orengine::sync::{AsyncReceiver, RecvErr};
+
+                        match (#channel).recv().await {
+                            Ok(var) => {
+                                #success_result_initialization
+                                #body
+                            },
+                            Err(_) => {
+                                #error_result_initialization
+                                #body
+                            },
+                        }
+                    }
+                }
+            }
+            Branch::Send {
+                channel,
+                value,
+                var,
+                body,
+            } => {
+                let success_result_initialization = if is_ident_has_first_underline(var) {
+                    quote! {}
+                } else {
+                    quote! { let #var = Ok(()); }
+                };
+                let error_result_initialization = if is_ident_has_first_underline(var) {
+                    quote! {}
+                } else {
+                    quote! { let #var = Err(SendErr::Closed(var)); }
+                };
+
+                quote! {
+                    {
+                        use orengine::sync::{AsyncSender, SendErr};
+
+                        match (#channel).send(#value).await {
+                            Ok(()) => {
+                                #success_result_initialization
+                                #body
+                            },
+                            Err(SendErr::Closed(var)) => {
+                                #error_result_initialization
+                                #body
+                            },
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    Some(expanded.into())
+}
+
+// TODO rename to static_select or generic_select or smt like it
+pub(crate) fn static_select(input: TokenStream, is_sequenced: bool) -> TokenStream {
+    // TODO
+
+    let SelectInput { branches, default } = parse_macro_input!(input as SelectInput);
+
+    let len = branches.len();
+    let branches_len = quote! { #len };
+
+    if len == 0 {
+        return TokenStream::from(quote! {
+            compile_error!("Select must have at least one `recv` or `send` branch!");
+        });
+    }
+
+    if let Some(simplified_select) = maybe_can_be_simplified(len, &*branches, &default) {
+        return simplified_select;
+    }
+
+    let expanded = if let Some(default_body) = default {
+        let mut select_generics = Vec::with_capacity(branches.len());
+        let mut generics_names = Vec::with_capacity(branches.len());
+        let mut select_ready_variants = Vec::with_capacity(branches.len());
+        let mut match_arms = Vec::with_capacity(branches.len());
+        let mut select_calls = Vec::with_capacity(branches.len());
+        let mut retry_select_calls = Vec::with_capacity(branches.len());
+        let mut fn_select_args = Vec::with_capacity(branches.len());
+        let mut fn_select_args_types = Vec::with_capacity(branches.len());
+
+        for (idx, branch) in branches.iter().enumerate() {
+            match branch {
+                Branch::Recv { channel, var, body } => {
+                    let receiver_arg_name = format_ident!("receiver{idx}");
+                    let generic_name = format_ident!("R{idx}");
+                    let variant = format_ident!("Receiver{idx}");
+                    let enum_variant = quote! { __SelectReady__::#variant };
+
+                    select_generics.push(quote! {
+                        #generic_name: SelectReceiver
+                    });
+
+                    select_ready_variants.push(quote! {
+                        #variant(Result<#generic_name::Data, RecvErr>)
+                    });
+
+                    generics_names.push(quote! {
+                        #generic_name
+                    });
+
+                    match_arms.push(quote! {
+                        #enum_variant(#var) => { #body }
+                    });
+
+                    select_calls.push(quote! {
+                        match #receiver_arg_name.try_recv() {
+                            Ok(data) => return #enum_variant(Ok(data)),
+                            Err(TryRecvErr::Empty) => {},
+                            Err(TryRecvErr::Locked) => {
+                                number_of_needed_to_retry_branches += 1;
+                                locked[#idx] = true;
+                            },
+                            Err(TryRecvErr::Closed) => return #enum_variant(Err(RecvErr::Closed)),
+                        }
+                    });
+
+                    retry_select_calls.push(quote! {
+                        if locked[#idx] {
+                            match #receiver_arg_name.try_recv() {
+                                Ok(data) => return #enum_variant(Ok(data)),
+                                Err(TryRecvErr::Empty) => {
+                                    number_of_needed_to_retry_branches -= 1;
+                                    locked[#idx] = false;
+                                },
+                                Err(TryRecvErr::Locked) => {},
+                                Err(TryRecvErr::Closed) => return #enum_variant(Err(RecvErr::Closed)),
+                            }
+                        }
+                    });
+
+                    fn_select_args.push(quote! {
+                        #channel
+                    });
+
+                    fn_select_args_types.push(quote! {
+                        #receiver_arg_name: &#generic_name
+                    });
+                }
+
+                Branch::Send {
+                    channel,
+                    value,
+                    var,
+                    body,
+                } => {
+                    let sender_arg_name = format_ident!("sender{}", idx);
+                    let generic_name = format_ident!("S{}", idx);
+                    let variant = format_ident!("Sender{}", idx);
+                    let enum_variant = quote! { __SelectReady__::#variant };
+
+                    select_generics.push(quote! {
+                        #generic_name: SelectSender
+                    });
+
+                    generics_names.push(quote! {
+                        #generic_name
+                    });
+
+                    select_ready_variants.push(quote! {
+                        #variant(Result<(), SendErr<#generic_name::Data>>)
+                    });
+
+                    match_arms.push(quote! {
+                        #enum_variant(#var) => { #body }
+                    });
+
+                    select_calls.push(quote! {
+                        match #sender_arg_name.0.try_send(#sender_arg_name.1.take().unwrap_unchecked()) {
+                            Ok(()) => return #enum_variant(Ok(())),
+                            Err(TrySendErr::Full(_)) => {},
+                            Err(TrySendErr::Locked(v)) => {
+                                #sender_arg_name.1 = Some(v);
+                                number_of_needed_to_retry_branches += 1;
+                                locked[#idx] = true;
+                            },
+                            Err(TrySendErr::Closed(v)) => return #enum_variant(Err(SendErr::Closed(v))),
+                        }
+                    });
+
+                    retry_select_calls.push(quote! {
+                        if locked[#idx] {
+                            match #sender_arg_name.0.try_send(#sender_arg_name.1.take().unwrap_unchecked()) {
+                                Ok(()) => return #enum_variant(Ok(())),
+                                Err(TrySendErr::Full(_)) => {
+                                    number_of_needed_to_retry_branches -= 1;
+                                    locked[#idx] = false;
+                                },
+                                Err(TrySendErr::Locked(v)) => {
+                                    #sender_arg_name.1 = Some(v);
+                                },
+                                Err(TrySendErr::Closed(v)) => return #enum_variant(Err(SendErr::Closed(v))),
+                            }
+                        }
+                    });
+
+                    fn_select_args.push(quote! {
+                        (#channel, Some(#value))
+                    });
+
+                    fn_select_args_types.push(quote! {
+                        mut #sender_arg_name: (&#generic_name, Option<#generic_name::Data>)
+                    });
+                }
+            }
+        }
+
+        select_ready_variants.push(quote! {
+            Default,
+        });
+
+        quote! {
+            {
+                use orengine::sync::channels::{SelectReceiver, SelectSender, TryRecvErr};
+                use orengine::sync::{RecvErr, SendErr, TrySendErr};
+
+                enum __SelectReady__<#(#select_generics),*> {
+                    #(#select_ready_variants),*
+                }
+
+                // Let the compiler decide whether to inline the function or not.
+                #[allow(clippy::too_many_arguments)]
+                fn __select__<#(#select_generics),*>(#(#fn_select_args_types),*) -> __SelectReady__<#(#generics_names),*> {
+                    // Does locked work?
+                    let mut locked = [false; #branches_len];
+                    let mut number_of_needed_to_retry_branches = 0;
+
+                    unsafe {
+                        #(#select_calls)*
+
+                        loop {
+                            if number_of_needed_to_retry_branches == 0 {
+                                break;
+                            }
+
+                            #(#retry_select_calls)*
+                        }
+                    }
+
+                    __SelectReady__::Default
+                }
+
+                match __select__(#(#fn_select_args),*) {
+                    __SelectReady__::Default => { #default_body },
+                    #(#match_arms),*
+                }
+            }
+        }
+    } else {
+        // TODO maybe Call::select with accepting args?
+
+        let mut send_vars = Vec::with_capacity(branches.len()); // move it to avoid temporary values
+        let mut generics = Vec::with_capacity(branches.len());
+        let mut union_generic_params = Vec::with_capacity(branches.len());
+        let mut match_arms = Vec::with_capacity(branches.len());
+        let mut fn_select_args = Vec::with_capacity(branches.len());
+        let mut fn_select_args_types = Vec::with_capacity(branches.len());
+        let mut select_calls = Vec::with_capacity(branches.len());
+        let mut union_variants = Vec::with_capacity(branches.len());
+        let mut union_generics = Vec::with_capacity(branches.len());
+        let mut is_local_consts = Vec::with_capacity(branches.len());
+
+        for (idx, branch) in branches.iter().enumerate() {
+            let name_of_task_in_select_branch = format_ident!("task_in_select_branch{idx}");
+            let create_task_in_select_branch = if idx != branches.len() - 1 {
+                quote! {
+                    let #name_of_task_in_select_branch = TaskInSelectBranch::new(task_in_select.clone(), #idx);
+                }
+            } else {
+                quote! {
+                    let #name_of_task_in_select_branch = unsafe {
+                        TaskInSelectBranch::new(task_in_select, #idx)
+                    };
+                }
+            };
+
+            match branch {
+                Branch::Recv { channel, var, body } => {
+                    let variant = format_ident!("variant{idx}");
+                    let generic_name = format_ident!("R{idx}");
+                    let receiver_name = format_ident!("receiver_{idx}");
+
+                    fn_select_args.push(quote! {
+                        #channel
+                    });
+
+                    fn_select_args_types.push(quote! {
+                        #receiver_name: &#generic_name
+                    });
+
+                    is_local_consts.push(quote! {
+                        orengine::runtime::is_local::<#generic_name>()
+                    });
+
+                    union_variants.push(quote! {
+                       #variant: std::mem::ManuallyDrop<#generic_name::Data>
+                    });
+
+                    union_generics.push(quote! {
+                        #generic_name: SelectReceiver
+                    });
+
+                    generics.push(quote! {
+                        #generic_name: SelectReceiver
+                    });
+
+                    union_generic_params.push(quote! {
+                        #generic_name
+                    });
+
+                    match_arms.push(quote! {
+                        #idx => {
+                            let #var = if !general_state.is_closed() {
+                                unsafe { Ok(std::mem::ManuallyDrop::take(&mut recv_slot.#variant)) }
+                            } else {
+                                Err(RecvErr::Closed)
+                            };
+
+                            #body
+                        }
+                    });
+
+                    select_calls.push(quote! {
+                        #create_task_in_select_branch
+
+                        // TODO it can't be AlreadyAcquired when __is_all_local == true
+                        match #receiver_name.recv_or_subscribe(
+                            recv_slot.cast(),
+                            general_state,
+                            #name_of_task_in_select_branch,
+                        ) {
+                            SelectNonBlockingBranchResult::Success => {
+                                // `recv_or_subscribe` have already woken the task up
+                                // and set the `resolved_branch_id`
+                                return;
+                            }
+                            SelectNonBlockingBranchResult::NotReady => {
+                                // Go on, the receiver have been subscribed
+                            }
+                            SelectNonBlockingBranchResult::AlreadyAcquired => {
+                                // Another thread already acquired the lock and wake the task up.
+                                return;
+                            }
+                        }
+                    });
+                }
+
+                Branch::Send {
+                    channel,
+                    value,
+                    var,
+                    body,
+                } => {
+                    let generic_name = format_ident!("S{idx}");
+                    let var_name = format_ident!("__data{idx}");
+                    let sender_name = format_ident!("sender_{idx}");
+
+                    send_vars.push(quote! {
+                        let #var_name = #value;
+                    });
+
+                    fn_select_args.push(quote! {
+                        #channel, &raw const #var_name
+                    });
+
+                    fn_select_args_types.push(quote! {
+                        #sender_name: &#generic_name, #var_name: *const #generic_name::Data
+                    });
+
+                    is_local_consts.push(quote! {
+                        orengine::runtime::is_local::<#generic_name>()
+                    });
+
+                    generics.push(quote! {
+                        #generic_name: SelectSender
+                    });
+
+                    match_arms.push(quote! {
+                        #idx => {
+                            let #var = if !general_state.is_closed() {
+                                Ok(())
+                            } else {
+                                Err(SendErr::Closed(#var_name))
+                            };
+
+                            #body
+                        }
+                    });
+
+                    select_calls.push(quote! {
+                        #create_task_in_select_branch
+
+                        // TODO it can't be AlreadyAcquired when __is_all_local == true
+                        match #sender_name.send_or_subscribe(
+                            unsafe { NonNull::new_unchecked(#var_name.cast_mut()) },
+                            general_state,
+                            #name_of_task_in_select_branch,
+                        ) {
+                            SelectNonBlockingBranchResult::Success => {
+                                // `send_or_subscribe` have already woken the task up
+                                // and set the `resolved_branch_id`
+                                return;
+                            }
+                            SelectNonBlockingBranchResult::NotReady => {
+                                // Go on, the receiver have been subscribed
+                            }
+                            SelectNonBlockingBranchResult::AlreadyAcquired => {
+                                // Another thread already acquired the lock and wake the task up.
+                                return;
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        quote! {
+            {
+                use std::ptr::NonNull;
+                use orengine::local_executor;
+                use orengine::utils::SendableNonNull;
+                use orengine::sync::channels::waiting_task::{TaskInSelect, TaskInSelectBranch};
+                use orengine::sync::channels::select::SelectNonBlockingBranchResult;
+                use orengine::sync::channels::{RecvErr, SendErr, SelectReceiver, SelectSender};
+
+                // Task will be woken up when three things are written:
+                // 1. `resolved_branch_id` with the id of the branch that has been resolved;
+                // 2. `general_state` with `true` if the channel associated with the branch has been closed;
+                // 3. `recv_slot` with the value that has been received (or not changed if sent).
+
+                union __RecvSlot__<#(#union_generics),*> {
+                    uninit: (),
+                    #(#union_variants),*
+                }
+
+                unsafe impl<#(#union_generics),*> Send for __RecvSlot__<#(#union_generic_params),*> {}
+
+                #[allow(clippy::too_many_arguments)]
+                fn __select__<#(#generics),*>(
+                    recv_slot: SendableNonNull<__RecvSlot__<#(#union_generic_params),*>>,
+                    resolved_branch_id: SendableNonNull<usize>,
+                    general_state: orengine::sync::channels::CallStatePtr,
+                    task: orengine::runtime::Task,
+                    #(#fn_select_args_types),*
+                ) {
+                    let __is_all_local: bool = #(#is_local_consts) &&*;
+
+                    // We need to check whether `local` task is used in `shared` channel.
+                    debug_assert!(
+                        !task.is_local() || __is_all_local,
+                        "Tried to use `local` task in `select` where at least one channel is `shared`.",
+                    );
+
+                    let task_in_select = TaskInSelect::acquire_for_task(task, *resolved_branch_id);
+
+                    unsafe {
+                        #(#select_calls)*
+                    };
+
+                    // The task is subscribed for all branches. Some of them will wake it up.
+                }
+
+                #(#send_vars);*
+
+                let mut recv_slot = __RecvSlot__ { uninit: () };
+                let mut resolved_branch_id = usize::MAX;
+                // Protected by lock in task in select.
+                let mut general_state = orengine::sync::channels::CallState::FirstCall;
+                let general_state_ptr = orengine::sync::channels::CallStatePtr::new(&mut general_state);
+
+                let recv_slot_ptr = SendableNonNull::from(&mut recv_slot);
+                let resolved_branch_id_ptr = SendableNonNull::from(&mut resolved_branch_id);
+
+                let mut select_closure = |task| {
+                    __select__(
+                        recv_slot_ptr,
+                        resolved_branch_id_ptr,
+                        general_state_ptr,
+                        task,
+                        #(#fn_select_args),*
+                    );
+                };
+
+                unsafe {
+                    local_executor()
+                        .invoke_call(
+                            orengine::runtime::Call::call_fn(
+                                std::mem::transmute::<
+                                    &mut dyn FnMut(orengine::runtime::Task),
+                                    *mut dyn FnMut(orengine::runtime::Task)
+                                >(&mut select_closure)
+                            ),
+                        );
+                    orengine::runtime::Task::park_current_task().await;
+                };
+
+                // Task is unparked here. So, we can read the result
+
+                let __res = match resolved_branch_id {
+                    #(#match_arms),*
+                    _ => orengine::utils::hints::unreachable_hint()
+                };
+
+                __res
+            }
+        }
+    };
+
+    expanded.into()
+}
+
+pub(crate) fn static_select_with_different_channels(input: TokenStream) -> TokenStream {
+    // TODO fix work with locked
+    todo!()
+}
+
+pub(crate) fn dynamic_select(input: TokenStream, is_sequenced: bool) -> TokenStream {
+    todo!();
 }

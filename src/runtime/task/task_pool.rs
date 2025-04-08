@@ -64,6 +64,7 @@ impl TaskPool {
         let size = size_of_val(unsafe { &*task.future_ptr() });
         if let Some(pool) = self.storage.get_mut(&size) {
             pool.push(task);
+
             return;
         }
 

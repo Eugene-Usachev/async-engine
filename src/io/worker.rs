@@ -40,17 +40,13 @@ pub(crate) unsafe fn init_local_worker(config: IoWorkerConfig) {
 /// If the thread-local worker has not been initialized in `release` mode.
 #[inline]
 pub(crate) fn local_worker() -> &'static mut WorkerSys {
-    #[cfg(debug_assertions)]
-    {
+    if cfg!(debug_assertions) {
         get_local_worker_ref().as_mut().expect(
             "An attempt to call io-operation has failed, \
              because an Executor has no io-worker. Look at the config of the Executor.",
         )
-    }
-
-    #[cfg(not(debug_assertions))]
-    unsafe {
-        get_local_worker_ref().as_mut().unwrap_unchecked()
+    } else {
+        unsafe { get_local_worker_ref().as_mut().unwrap_unchecked() }
     }
 }
 

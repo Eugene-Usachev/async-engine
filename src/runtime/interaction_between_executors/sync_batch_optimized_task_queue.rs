@@ -46,12 +46,6 @@ impl SyncBatchOptimizedTaskQueue {
         }
 
         if let Some(mut guard) = self.task_deque.try_lock() {
-            #[cfg(not(debug_assertions))]
-            {
-                guard.local_tasks.append(local_tasks);
-                guard.shared_tasks.append(shared_tasks);
-            }
-
             #[cfg(debug_assertions)]
             {
                 for mut task in local_tasks.drain(..) {
@@ -67,6 +61,12 @@ impl SyncBatchOptimizedTaskQueue {
 
                     guard.shared_tasks.push_back(task);
                 }
+            }
+
+            #[cfg(not(debug_assertions))]
+            {
+                guard.local_tasks.append(local_tasks);
+                guard.shared_tasks.append(shared_tasks);
             }
 
             return true;

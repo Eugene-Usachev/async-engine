@@ -106,11 +106,7 @@ pub fn local_executor() -> &'static mut Executor {
     }
 
     #[cfg(not(debug_assertions))]
-    unsafe {
-        crate::runtime::executor::get_local_executor_ref()
-            .as_mut()
-            .unwrap_unchecked()
-    }
+    unsafe { get_local_executor_ref().as_mut().unwrap_unchecked() }
 }
 
 /// The executor that runs futures in the current thread.
@@ -493,9 +489,11 @@ impl Executor {
 
         let future = unsafe { &mut *task.future_ptr() };
         #[cfg(debug_assertions)]
-        unsafe {
-            task.check_safety();
-            task.is_executing.as_ref().store(true, Ordering::SeqCst);
+        {
+            unsafe {
+                task.check_safety();
+                task.is_executing.as_ref().store(true, Ordering::SeqCst);
+            }
         }
 
         let waker = create_waker(&mut task);
@@ -504,14 +502,15 @@ impl Executor {
             .as_mut()
             .poll(&mut context);
         #[cfg(debug_assertions)]
-        unsafe {
-            task.is_executing.as_ref().store(false, Ordering::SeqCst);
+        {
+            unsafe {
+                task.is_executing.as_ref().store(false, Ordering::SeqCst);
+            }
         }
 
         match poll_res {
             Poll::Ready(()) => {
-                #[cfg(debug_assertions)]
-                {
+                if cfg!(debug_assertions) {
                     match *self.current_call.inner() {
                         CallInner::None => {}
                         _ => {

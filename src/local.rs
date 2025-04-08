@@ -97,7 +97,9 @@ impl<T> Deref for LocalRef<'_, T> {
         }
 
         #[cfg(not(debug_assertions))]
-        self.shared_reference
+        {
+            self.shared_reference
+        }
     }
 }
 
@@ -170,7 +172,9 @@ impl<T> Deref for LocalRefMut<'_, T> {
         }
 
         #[cfg(not(debug_assertions))]
-        self.exclusive_reference
+        {
+            self.exclusive_reference
+        }
     }
 }
 
@@ -183,7 +187,9 @@ impl<T> DerefMut for LocalRefMut<'_, T> {
         }
 
         #[cfg(not(debug_assertions))]
-        self.exclusive_reference
+        {
+            self.exclusive_reference
+        }
     }
 }
 

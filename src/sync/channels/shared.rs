@@ -337,10 +337,13 @@ macro_rules! generate_send_or_subscribe {
             state: CallStatePtr,
             task_in_select_branch: TaskInSelectBranch,
         ) -> SelectNonBlockingBranchResult {
-            // TODO r
             let mut inner_lock = {
+                let backoff = crossbeam::utils::Backoff::new();
+
                 loop {
                     let Some(inner_lock) = self.inner.try_lock() else {
+                        backoff.spin();
+
                         continue;
                     };
 
@@ -480,22 +483,19 @@ macro_rules! generate_recv_or_subscribe {
             state: CallStatePtr,
             task_in_select_branch: TaskInSelectBranch,
         ) -> SelectNonBlockingBranchResult {
-            // TODO r
             let mut inner_lock = {
+                let backoff = crossbeam::utils::Backoff::new();
+
                 loop {
                     let Some(inner_lock) = self.inner.try_lock() else {
+                        backoff.spin();
+
                         continue;
                     };
 
                     break inner_lock;
                 }
             };
-
-            // TODO
-            // let mut inner_lock = match self.inner.try_lock() {
-            //     Some(inner_lock) => inner_lock,
-            //     None => return SelectNonBlockingBranchResult::Locked(task_in_select_branch),
-            // };
 
             if inner_lock.is_closed {
                 return match task_in_select_branch.acquire_once() {

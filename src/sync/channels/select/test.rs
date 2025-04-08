@@ -1,9 +1,6 @@
 // TODO
 use crate as orengine;
-use crate::sync::{
-    AsyncChannel, AsyncReceiver, AsyncSender, AsyncWaitGroup, Channel, LocalChannel,
-    LocalWaitGroup, SendErr, WaitGroup,
-};
+use crate::sync::{AsyncChannel, AsyncReceiver, AsyncSender, AsyncWaitGroup, Channel, LocalChannel, LocalWaitGroup, SendErr, WaitGroup};
 use crate::test::sched_future_to_another_thread;
 use crate::{local_executor, sleep, yield_now, Local};
 use orengine::select;
@@ -1201,12 +1198,12 @@ async fn test_shared_select_stress(with_default: bool) {
 
         stress_test_with_creators_select(
             with_default,
-            one_bounded_chan_creator,
+            zero_bounded_chan_creator,
             zero_bounded_chan_creator,
             one_bounded_chan_creator,
-            zero_bounded_chan_creator,
+            one_bounded_chan_creator,
         )
-        .await;
+            .await;
     }
 }
 
@@ -1308,7 +1305,7 @@ fn test_select_one_channel_try_send() {
     let chan = LocalChannel::bounded(0);
 
     let res = select! {
-        send(&chan, 1) -> _res => panic!("Success try_send to zero bounded channel")
+        send(&chan, 1) -> _res => panic!("Success or failed by closed try_send to zero bounded channel")
         default => 1
     };
 

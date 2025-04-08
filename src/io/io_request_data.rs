@@ -47,14 +47,10 @@ impl IoRequestData {
     /// Returns the result.
     #[inline]
     pub(crate) fn ret(&mut self) -> Result<usize> {
-        #[cfg(debug_assertions)]
-        {
+        if cfg!(debug_assertions) {
             std::mem::replace(&mut self.ret, UNINIT_RESULT)
-        }
-
-        #[cfg(not(debug_assertions))]
-        {
-            unsafe { std::ptr::read(&self.ret) }
+        } else {
+            unsafe { ptr::read(&self.ret) }
         }
     }
 

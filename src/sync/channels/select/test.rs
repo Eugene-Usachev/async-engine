@@ -1305,7 +1305,7 @@ fn test_select_one_channel_try_send() {
     let chan = LocalChannel::bounded(0);
 
     let res = select! {
-        send(&chan, 1) -> _res => panic!("Success or failed by closed try_send to zero bounded channel")
+        send(&chan, 1) -> _res => 2
         default => 1
     };
 

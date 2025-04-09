@@ -171,46 +171,50 @@ fn maybe_can_be_simplified(
     let expanded = if let Some(default_body) = default {
         match &branches[0] {
             Branch::Recv { channel, var, body } => {
+                let var_declaration = if is_ident_has_first_underline(var) {
+                    quote! {}
+                } else {
+                    quote! { let #var; }
+                };
                 let success_result_initialization = if is_ident_has_first_underline(var) {
                     quote! {}
                 } else {
-                    quote! { let #var = Ok(var); }
+                    quote! { #var = Ok(var); }
                 };
                 let error_result_initialization = if is_ident_has_first_underline(var) {
                     quote! {}
                 } else {
-                    quote! { let #var = Err(RecvErr::Closed); }
+                    quote! { #var = Err(RecvErr::Closed); }
                 };
 
                 quote! {
                     {
                         use orengine::sync::{AsyncReceiver, TryRecvErr, RecvErr};
 
-                        let mut step = 0;
-
+                        let mut __step__ = 0;
+                        #var_declaration
+                        
                         loop {
                             match (#channel).try_recv() {
-                                Ok(var) => break {
-                                    #success_result_initialization
-                                    #body
-                                },
+                                Ok(var) => { #success_result_initialization },
                                 Err(e) => match e {
                                     TryRecvErr::Empty => break #default_body,
-                                    TryRecvErr::Closed => break {
-                                        #error_result_initialization
-                                        #body
-                                    },
+                                    TryRecvErr::Closed => { #error_result_initialization },
                                     TryRecvErr::Locked => {
-                                        for _ in 0..1 << step {
+                                        for _ in 0..1 << __step__ {
                                             std::hint::spin_loop();
                                         }
 
-                                        if step <= 6 {
-                                            step += 1;
+                                        if __step__ <= 6 {
+                                            __step__ += 1;
                                         }
+                                    
+                                        continue;
                                     },
                                 }
                             }
+
+                            break #body;
                         }
                     }
                 }
@@ -221,48 +225,52 @@ fn maybe_can_be_simplified(
                 var,
                 body,
             } => {
+                let var_declaration = if is_ident_has_first_underline(var) {
+                    quote! {}
+                } else {
+                    quote! { let #var; }
+                };
                 let success_result_initialization = if is_ident_has_first_underline(var) {
                     quote! {}
                 } else {
-                    quote! { let #var = Ok(()); }
+                    quote! { #var = Ok(()); }
                 };
                 let error_result_initialization = if is_ident_has_first_underline(var) {
                     quote! {}
                 } else {
-                    quote! { let #var = Err(SendErr::Closed(var)); }
+                    quote! { #var = Err(RecvErr::Closed(var)); }
                 };
 
                 quote! {
                     {
-                        use orengine::sync::{AsyncSender, TrySendErr, SendErr};
+                        use orengine::sync::{AsyncSender, TrySendErr};
 
-                        let mut step = 0;
+                        let mut __step__ = 0;
                         let mut value = #value;
+                        #var_declaration
 
                         loop {
                             match (#channel).try_send(#value) {
-                                Ok(()) => break {
-                                    #success_result_initialization
-                                    #body
-                                },
+                                Ok(()) => { #success_result_initialization },
                                 Err(e) => match e {
                                     TrySendErr::Full(_) => break #default_body,
-                                    TrySendErr::Closed(var) => break {
-                                        #error_result_initialization
-                                        #body
-                                    },
+                                    TrySendErr::Closed(var) => { #error_result_initialization },
                                     TrySendErr::Locked(var) => {
                                         value = var;
-                                        for _ in 0..1 << step {
+                                        for _ in 0..1 << __step__ {
                                             std::hint::spin_loop();
                                         }
 
-                                        if step <= 6 {
-                                            step += 1;
+                                        if __step__ <= 6 {
+                                            __step__ += 1;
                                         }
+                                    
+                                        continue;
                                     },
                                 }
                             }
+                        
+                            break #body;
                         }
                     }
                 }
@@ -271,31 +279,34 @@ fn maybe_can_be_simplified(
     } else {
         match &branches[0] {
             Branch::Recv { channel, var, body } => {
+                let var_declaration = if is_ident_has_first_underline(var) {
+                    quote! {}
+                } else {
+                    quote! { let #var; }
+                };
                 let success_result_initialization = if is_ident_has_first_underline(var) {
                     quote! {}
                 } else {
-                    quote! { let #var = Ok(var); }
+                    quote! { #var = Ok(var); }
                 };
                 let error_result_initialization = if is_ident_has_first_underline(var) {
                     quote! {}
                 } else {
-                    quote! { let #var = Err(RecvErr::Closed); }
+                    quote! { #var = Err(RecvErr::Closed); }
                 };
 
                 quote! {
                     {
                         use orengine::sync::{AsyncReceiver, RecvErr};
+                        
+                        #var_declaration
 
                         match (#channel).recv().await {
-                            Ok(var) => {
-                                #success_result_initialization
-                                #body
-                            },
-                            Err(_) => {
-                                #error_result_initialization
-                                #body
-                            },
-                        }
+                            Ok(var) => { #success_result_initialization },
+                            Err(_) => { #error_result_initialization },
+                        };
+                        
+                        #body
                     }
                 }
             }
@@ -305,31 +316,38 @@ fn maybe_can_be_simplified(
                 var,
                 body,
             } => {
+                let var_declaration = if is_ident_has_first_underline(var) {
+                    quote! {}
+                } else {
+                    quote! { let #var; }
+                };
                 let success_result_initialization = if is_ident_has_first_underline(var) {
                     quote! {}
                 } else {
-                    quote! { let #var = Ok(()); }
+                    quote! { #var = Ok(()); }
                 };
                 let error_result_initialization = if is_ident_has_first_underline(var) {
                     quote! {}
                 } else {
-                    quote! { let #var = Err(SendErr::Closed(var)); }
+                    quote! { #var = Err(SendErr::Closed(var)); }
                 };
 
                 quote! {
                     {
                         use orengine::sync::{AsyncSender, SendErr};
+                        
+                        #var_declaration
 
                         match (#channel).send(#value).await {
                             Ok(()) => {
                                 #success_result_initialization
-                                #body
                             },
                             Err(SendErr::Closed(var)) => {
                                 #error_result_initialization
-                                #body
                             },
-                        }
+                        };
+                        
+                        #body
                     }
                 }
             }

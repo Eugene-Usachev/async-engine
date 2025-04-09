@@ -12,7 +12,9 @@ mod task_structures_pool;
 mod progressive_timeout;
 mod sendable_ptr;
 pub(crate) mod vec_map;
+mod array_deque;
 
+pub use array_deque::ArrayDeque;
 pub use core::*;
 pub(crate) use hints::assert_hint;
 pub(crate) use progressive_timeout::*;

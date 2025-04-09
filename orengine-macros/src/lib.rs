@@ -11,7 +11,6 @@ extern crate proc_macro;
 mod ident_helper;
 mod select;
 
-use crate::select::static_select;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse_macro_input;
@@ -239,5 +238,5 @@ pub fn test_shared(_: TokenStream, input: TokenStream) -> TokenStream {
 // TODO rename to static_select or generic_select or smt like it
 #[proc_macro]
 pub fn select(input: TokenStream) -> TokenStream {
-    static_select(input, true)
+    select::select(input, true)
 }

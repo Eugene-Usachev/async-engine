@@ -20,6 +20,8 @@ __Before the pull request, do the following:__
 
 - Run `cargo test`, `cargo test --all-features`, `cargo test --release` and `cargo test --release --all-features`;
 
+- Run `cargo test --release` in `stress_tests` directory;
+
 - If needed, update examples and benchmarks;
 
 - Run benchmarks in `benchmarks` directory and compare with the previous version.

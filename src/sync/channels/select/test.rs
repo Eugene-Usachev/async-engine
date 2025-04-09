@@ -42,14 +42,13 @@ fn test_local_select_with_default() {
 
         let ch1 = LocalChannel::<u32>::bounded(1);
         let ch2 = LocalChannel::<u32>::bounded(1);
-        let ch3 = LocalChannel::<u32>::bounded(1);
 
         ch2.send(31).await.expect("failed to send");
 
         let a = select! {
             recv(&ch1) -> var => var.unwrap()
             recv(&ch2) -> var => var.unwrap()
-            send(&ch3, 20) -> _var => 1
+            send(&ch2, 20) -> _var => 1
             default => 4
         };
 
@@ -96,7 +95,7 @@ fn test_local_select_with_default() {
     {
         let ch1 = LocalChannel::<u32>::bounded(1);
         let ch2 = LocalChannel::<u32>::bounded(1);
-        let ch3 = LocalChannel::<u32>::bounded(1);
+        let ch3 = LocalChannel::<u32>::bounded(0);
 
         ch2.close().await;
 
@@ -367,14 +366,13 @@ fn test_shared_select_with_default() {
 
         let ch1 = Channel::<u32>::bounded(1);
         let ch2 = Channel::<u32>::bounded(1);
-        let ch3 = Channel::<u32>::bounded(1);
 
         ch2.send(31).await.expect("failed to send");
 
         let a = select! {
             recv(&ch1) -> var => var.unwrap()
             recv(&ch2) -> var => var.unwrap()
-            send(&ch3, 20) -> _var => 1
+            send(&ch2, 20) -> _var => 1
             default => 4
         };
 
@@ -421,7 +419,7 @@ fn test_shared_select_with_default() {
     {
         let ch1 = Channel::<u32>::bounded(1);
         let ch2 = Channel::<u32>::bounded(1);
-        let ch3 = Channel::<u32>::bounded(1);
+        let ch3 = Channel::<u32>::bounded(0);
 
         ch2.close().await;
 

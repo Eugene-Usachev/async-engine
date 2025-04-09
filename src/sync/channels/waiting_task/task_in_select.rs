@@ -4,6 +4,7 @@ use crate::local_executor;
 use crate::runtime::Task;
 use crate::sync::channels::state::CallStatePtr;
 use crate::utils::hints::unreachable_hint;
+use std::cell::UnsafeCell;
 use std::hint::spin_loop;
 use std::ops::{Deref, DerefMut};
 use std::ptr;
@@ -53,11 +54,12 @@ unsafe impl Sync for Inner {}
 impl TaskInSelect {
     pub fn acquire_for_task(task: Task, resolved_branch_id: NonNull<usize>) -> Self {
         if cfg!(debug_assertions) {
-            // TODO let mut inner = task_in_select_pool().acquire_for_task(task, resolved_branch_id);
-            let mut inner = TASK_IN_SELECT_POOL
-                .lock()
-                .unwrap()
-                .acquire_for_task(task, resolved_branch_id);
+            let mut inner = task_in_select_pool().acquire_for_task(task, resolved_branch_id);
+            // TODO r
+            // let mut inner = TASK_IN_SELECT_POOL
+            //     .lock()
+            //     .unwrap()
+            //     .acquire_for_task(task, resolved_branch_id);
 
             unsafe {
                 inner.as_mut().resolved_branch_id.write(usize::MAX);
@@ -66,11 +68,12 @@ impl TaskInSelect {
             Self { inner }
         } else {
             Self {
-                // TODO inner: task_in_select_pool().acquire_for_task(task, resolved_branch_id),
-                inner: TASK_IN_SELECT_POOL
-                    .lock()
-                    .unwrap()
-                    .acquire_for_task(task, resolved_branch_id),
+                inner: task_in_select_pool().acquire_for_task(task, resolved_branch_id),
+                // TODO r
+                // inner: TASK_IN_SELECT_POOL
+                //     .lock()
+                //     .unwrap()
+                //     .acquire_for_task(task, resolved_branch_id),
             }
         }
     }
@@ -95,8 +98,8 @@ impl TaskInSelect {
 
         assert!(!self.was_released.swap(true, Release));
 
-        // TODO task_in_select_pool().release(self.inner);
-        TASK_IN_SELECT_POOL.lock().unwrap().release(self.inner);
+        task_in_select_pool().release(self.inner);
+        // TODO r TASK_IN_SELECT_POOL.lock().unwrap().release(self.inner);
     }
 }
 
@@ -484,7 +487,7 @@ impl TaskInSelectPool {
             inner_ref.ref_count = AtomicUsize::new(1);
             inner_ref.was_released = AtomicBool::new(false);
 
-            let must_shrink = (self.vec.len() << 3 >= self.vec.capacity()) && self.vec.len() > 1024;
+            let must_shrink = (self.vec.len() << 3 >= self.vec.capacity()) && self.vec.len() > 64;
 
             if !must_shrink {
                 return inner;
@@ -524,15 +527,15 @@ impl Drop for TaskInSelectPool {
     }
 }
 
-// TODO
-// thread_local! {
-//     /// Thread-local [`TaskInSelectPool`], therefore it is lockless.
-//     // Before refactor: it must be thread-local, or rewrite drop logic in `TaskInSelect`.
-//     static TASK_IN_SELECT_POOL: UnsafeCell<TaskInSelectPool> = const { UnsafeCell::new(TaskInSelectPool::new()) };
-// }
-//
-// fn task_in_select_pool() -> &'static mut TaskInSelectPool {
-//     unsafe { TASK_IN_SELECT_POOL.with(|pool| &mut *pool.get()) }
-// }
+thread_local! {
+    /// Thread-local [`TaskInSelectPool`], therefore it is lockless.
+    // Before refactor: it must be thread-local, or rewrite drop logic in `TaskInSelect`.
+    static TASK_IN_SELECT_POOL: UnsafeCell<TaskInSelectPool> = const { UnsafeCell::new(TaskInSelectPool::new()) };
+}
 
-static TASK_IN_SELECT_POOL: Mutex<TaskInSelectPool> = Mutex::new(TaskInSelectPool::new());
+fn task_in_select_pool() -> &'static mut TaskInSelectPool {
+    unsafe { TASK_IN_SELECT_POOL.with(|pool| &mut *pool.get()) }
+}
+
+// TODO r
+// static TASK_IN_SELECT_POOL: Mutex<TaskInSelectPool> = Mutex::new(TaskInSelectPool::new());

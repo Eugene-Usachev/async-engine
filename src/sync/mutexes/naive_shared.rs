@@ -56,8 +56,8 @@ impl<'mutex, T: ?Sized> NaiveMutexGuard<'mutex, T> {
     /// It is safe, because only one thread can access the value at the same time.
     ///
     /// It is used to get one more reference to the value.
-    pub(crate) fn get_mut<'old_life_time, 'new_life_time>(
-        &'old_life_time self,
+    pub(crate) fn get_mut<'new_life_time>(
+        &self,
     ) -> &'new_life_time mut T {
         unsafe { &mut *self.mutex.value.get() }
     }
@@ -383,43 +383,6 @@ mod tests {
         match value {
             Some(v) => assert!(*v, "not waited"),
             None => panic!("can't acquire lock"),
-        }
-    }
-
-    #[orengine::test::test_shared]
-    fn stress_test_naive_mutex() {
-        const PAR: usize = 10;
-        const TRIES: usize = 100;
-
-        async fn work_with_lock(mutex: &NaiveMutex<usize>, wg: &WaitGroup) {
-            let mut lock = mutex.lock().await;
-            *lock += 1;
-
-            wg.done();
-        }
-
-        for _ in 0..20 {
-            let mutex = Arc::new(NaiveMutex::new(0));
-            let wg = Arc::new(WaitGroup::new());
-            wg.add(PAR * TRIES);
-            for _ in 1..PAR {
-                let wg = wg.clone();
-                let mutex = mutex.clone();
-
-                sched_future_to_another_thread(async move {
-                    for _ in 0..TRIES {
-                        work_with_lock(&mutex, &wg).await;
-                    }
-                });
-            }
-
-            for _ in 0..TRIES {
-                work_with_lock(&mutex, &wg).await;
-            }
-
-            wg.wait().await;
-
-            assert_eq!(*mutex.lock().await, TRIES * PAR);
         }
     }
 }

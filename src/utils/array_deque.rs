@@ -3,6 +3,7 @@
 use crate::utils::assert_hint;
 use std::mem;
 use std::mem::{ManuallyDrop, MaybeUninit};
+use std::ops::{Deref, DerefMut};
 use std::ptr::drop_in_place;
 
 pub struct ArrayDeque<T, const N: usize> {
@@ -85,6 +86,32 @@ impl<T, const N: usize> ArrayDeque<T, N> {
         }
 
         self.len = 0;
+    }
+}
+
+impl<T, const N: usize> Deref for ArrayDeque<T, N> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        &*self.stack
+    }
+}
+
+impl<T, const N: usize> AsRef<[T]> for ArrayDeque<T, N> {
+    fn as_ref(&self) -> &[T] {
+        &*self.stack
+    }
+}
+
+impl<T, const N: usize> DerefMut for ArrayDeque<T, N> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.stack
+    }
+}
+
+impl<T, const N: usize> AsMut<[T]> for ArrayDeque<T, N> {
+    fn as_mut(&mut self) -> &mut [T] {
+        &mut *self.stack
     }
 }
 

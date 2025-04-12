@@ -141,7 +141,7 @@ fn test_local_select_without_default_non_blocking() {
 
         let ch1 = LocalChannel::<u32>::bounded(1);
         let ch2 = LocalChannel::<u32>::bounded(1);
-        let ch3 = LocalChannel::<u32>::bounded(1);
+        let ch3 = LocalChannel::<u32>::bounded(0);
 
         ch2.send(31).await.expect("failed to send");
 
@@ -196,7 +196,7 @@ fn test_local_select_without_default_non_blocking() {
     {
         let ch1 = LocalChannel::<u32>::bounded(1);
         let ch2 = LocalChannel::<u32>::bounded(1);
-        let ch3 = LocalChannel::<u32>::bounded(1);
+        let ch3 = LocalChannel::<u32>::bounded(0);
 
         ch2.close().await;
 
@@ -520,7 +520,7 @@ fn test_shared_select_without_default_non_blocking() {
     {
         let ch1 = Channel::<u32>::bounded(1);
         let ch2 = Channel::<u32>::bounded(1);
-        let ch3 = Channel::<u32>::bounded(1);
+        let ch3 = Channel::<u32>::bounded(0);
 
         ch2.close().await;
 

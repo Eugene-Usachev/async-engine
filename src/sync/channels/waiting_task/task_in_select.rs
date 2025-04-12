@@ -11,7 +11,6 @@ use std::ptr;
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::sync::atomic::{fence, AtomicBool, AtomicUsize};
-use std::sync::Mutex;
 
 const NOT_ACQUIRED: usize = 0;
 const ACQUIRED: usize = 1;

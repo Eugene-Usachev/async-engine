@@ -238,5 +238,5 @@ pub fn test_shared(_: TokenStream, input: TokenStream) -> TokenStream {
 // TODO rename to static_select or generic_select or smt like it
 #[proc_macro]
 pub fn select(input: TokenStream) -> TokenStream {
-    select::select(input, true)
+    select::select(input, false)
 }

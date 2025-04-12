@@ -1016,20 +1016,18 @@ fn test_compile_shared_channel() {}
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicUsize;
-    use std::sync::atomic::Ordering::{Relaxed, SeqCst};
     use std::sync::Arc;
     use std::time::Duration;
 
     use crate as orengine;
+    use crate::sleep;
     use crate::sync::{
         AsyncChannel, AsyncReceiver, AsyncSender, AsyncWaitGroup, Channel, RecvErr, SendErr,
         TryRecvErr, TrySendErr, WaitGroup,
     };
     use crate::test::sched_future_to_another_thread;
     use crate::utils::droppable_element::DroppableElement;
-    use crate::utils::{get_core_ids, Ptr, SpinLock};
-    use crate::{local_executor, sleep, yield_now};
+    use crate::utils::{Ptr, SpinLock};
 
     #[orengine::test::test_shared]
     fn test_zero_capacity_shared_channel() {

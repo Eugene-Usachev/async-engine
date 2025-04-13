@@ -1,10 +1,28 @@
-use crate::runtime::interaction_between_executors::{SendTaskResult, SyncBatchOptimizedTaskQueue};
+use crate::runtime::interaction_between_executors::SyncBatchOptimizedTaskQueue;
 use crate::runtime::Task;
 use crate::utils::vec_map::VecMap;
 use std::collections::VecDeque;
+use std::fmt::{Debug, Display};
 use std::mem;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// The error of [`send_task_to_executor`](Interactor::send_task_to_executor).
+///
+/// Contains the id of the not registered [`Executor`](crate::runtime::Executor).
+pub struct ExecutorIsNotRegisteredErr(pub usize);
+
+impl Display for ExecutorIsNotRegisteredErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Executor with id {} is not registered", self.0)
+    }
+}
+
+impl Debug for ExecutorIsNotRegisteredErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Executor with id {} is not registered", self.0)
+    }
+}
 
 /// `OtherSharedTaskList` contains the list and `local` and `shared` task batches.
 pub(crate) struct SharedTaskListForSendTo {
@@ -58,7 +76,7 @@ impl Interactor {
         &mut self,
         task: Task,
         executor_id: usize,
-    ) -> SendTaskResult {
+    ) -> Result<(), ExecutorIsNotRegisteredErr> {
         if let Some(shared_task_list) = self.all.get_mut(executor_id) {
             if task.is_local() {
                 shared_task_list.local_task_batch.push_back(task);
@@ -66,10 +84,10 @@ impl Interactor {
                 shared_task_list.shared_task_batch.push_back(task);
             }
 
-            return SendTaskResult::Ok;
+            return Ok(());
         }
 
-        SendTaskResult::ExecutorIsNotRegistered
+        Err(ExecutorIsNotRegisteredErr(executor_id))
     }
 
     /// Flushes the accumulated tasks to the other executors.

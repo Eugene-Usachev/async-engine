@@ -7,7 +7,7 @@ use crate::runtime::config::{Config, ValidConfig};
 use crate::runtime::executor::end_local_thread_and_write_into_ptr::EndLocalThreadAndWriteIntoPtr;
 use crate::runtime::global_state::{register_local_executor, SubscribedState};
 #[cfg(not(feature = "disable_send_task_to"))]
-use crate::runtime::interaction_between_executors::{Interactor, SendTaskResult};
+use crate::runtime::interaction_between_executors::{ExecutorIsNotRegisteredErr, Interactor};
 use crate::runtime::local_thread_pool::LocalThreadWorkerPool;
 use crate::runtime::task::{Task, TaskPool};
 use crate::runtime::waker::create_waker;
@@ -842,13 +842,13 @@ impl Executor {
         &mut self,
         task: Task,
         executor_id: usize,
-    ) -> SendTaskResult {
+    ) -> Result<(), ExecutorIsNotRegisteredErr> {
         if executor_id != self.id {
             self.interactor.send_task_to_executor(task, executor_id)
         } else {
             self.spawn_task(task);
 
-            SendTaskResult::Ok
+            Ok(())
         }
     }
 
@@ -896,7 +896,7 @@ impl Executor {
         &mut self,
         creator: F,
         executor_id: usize,
-    ) -> SendTaskResult
+    ) -> Result<(), ExecutorIsNotRegisteredErr>
     where
         Fut: Future<Output = ()>,
         F: FnOnce() -> Fut,
@@ -922,7 +922,7 @@ impl Executor {
         &mut self,
         creator: F,
         executor_id: usize,
-    ) -> SendTaskResult
+    ) -> Result<(), ExecutorIsNotRegisteredErr>
     where
         Fut: Future<Output = ()> + Send,
         F: FnOnce() -> Fut,
@@ -1032,7 +1032,7 @@ impl Executor {
     /// Executes all ready CPU tasks.
     #[inline]
     fn exec_cpu_tasks(&mut self) {
-        // A round is a number of tasks that must be completed before the next background_work call.
+        // A round is a number of tasks that must be completed before the next round is started.
         // It is needed to avoid case like:
         //   Task with yield -> repeat this task -> repeat this task -> ...
         //

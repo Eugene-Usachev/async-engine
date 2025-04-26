@@ -8,6 +8,7 @@ use std::ptr::NonNull;
 const RECEIVER_DELTA: isize = 1;
 const SENDER_DELTA: isize = -1;
 
+#[repr(C)]
 pub(crate) struct SenderReceiverQueue<T = ()> {
     ptr: NonNull<WaitingTask<T>>,
     capacity: usize,

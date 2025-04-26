@@ -15,6 +15,7 @@ use std::sync::atomic::{fence, AtomicBool, AtomicUsize};
 const NOT_ACQUIRED: usize = 0;
 const ACQUIRED: usize = 1;
 
+#[repr(C)]
 pub struct Inner {
     task: Task,
     resolved_branch_id: NonNull<usize>,
@@ -25,22 +26,15 @@ pub struct Inner {
     /// * [`ACQUIRED`] - acquired.
     ///
     /// * `Was acquiring now` - trying to acquire. It contains another `NonNull<TaskInSelect>`.
-    ///   It is needed to prevent deadlocks. Example: two threads are trying to select. First
-    ///   acquiring the first task, and the second acquiring the second task. Next, the first
+    ///   It is necessary to prevent deadlocks.
+    ///   Example: two threads are trying to select. The first is
+    ///   acquiring the first task, and the second is acquiring the second task. Next, the first
     ///   thread tries to acquire the second task, and the second thread tries to acquire
-    ///   the first task. We need to prevent this. In current implementation, threads will
-    ///   see that they are trying to acquire the same tasks and the thread with more bigger
+    ///   the first task. We need to prevent this. In the current implementation, threads will
+    ///   see that they are trying to acquire the same tasks and the thread with a bigger
     ///   (as usize) task will acquire both tasks.
     state: AtomicUsize,
     ref_count: AtomicUsize,
-    // TODO r
-    was_released: AtomicBool,
-}
-
-impl Drop for Inner {
-    fn drop(&mut self) {
-        assert!(self.was_released.load(Acquire));
-    }
 }
 
 pub struct TaskInSelect {
@@ -95,8 +89,6 @@ impl TaskInSelect {
             "Attempt to drop TaskSelect (ref count is 0) that was not acquired"
         );
 
-        assert!(!self.was_released.swap(true, Release));
-
         task_in_select_pool().release(self.inner);
         // TODO r TASK_IN_SELECT_POOL.lock().unwrap().release(self.inner);
     }
@@ -124,7 +116,7 @@ impl Clone for TaskInSelect {
             self.ref_count.fetch_add(1, Relaxed);
         }
 
-        TaskInSelect { inner: self.inner }
+        Self { inner: self.inner }
     }
 }
 
@@ -331,7 +323,7 @@ impl TaskInSelectBranch {
             "NonNull<TaskInSelect> contains ptr that equals to 0 or 1. It means that is is invalid."
         );
 
-        // set state to acquiring now with other task. Read below for details.
+        // Set state to acquiring now with another task. Read below for details.
         let prev_ = self.task_in_select.state.compare_exchange(
             NOT_ACQUIRED,
             other_ptr_as_usize,
@@ -472,11 +464,24 @@ impl TaskInSelectPool {
         Self { vec: Vec::new() }
     }
 
+    fn shrink(&mut self) {
+        for _ in 0..self.vec.len() >> 2 {
+            drop(unsafe { Box::from_raw(self.vec.pop().unwrap_unchecked().as_mut()) });
+        }
+
+        self.vec.shrink_to_fit();
+    }
+
     fn acquire_for_task(
         &mut self,
         task: Task,
         resolved_branch_id: NonNull<usize>,
     ) -> NonNull<Inner> {
+        // ~ 100k tasks. It is a ceiling, not preallocation size, therefore, it is fine.
+        const TASKS_IN_SELECT_IN_64_MB: usize = (64 * 1024 * 1024) / size_of::<Inner>();
+
+        static ACQUIRING: AtomicUsize = AtomicUsize::new(0);
+
         if let Some(mut inner) = self.vec.pop() {
             let inner_ref = unsafe { inner.as_mut() };
 
@@ -484,19 +489,14 @@ impl TaskInSelectPool {
             inner_ref.resolved_branch_id = resolved_branch_id;
             inner_ref.state = AtomicUsize::new(NOT_ACQUIRED);
             inner_ref.ref_count = AtomicUsize::new(1);
-            inner_ref.was_released = AtomicBool::new(false);
 
-            let must_shrink = (self.vec.len() << 3 >= self.vec.capacity()) && self.vec.len() > 64;
+            let must_shrink = (self.vec.len() << 3 >= self.vec.capacity()) && self.vec.len() > TASKS_IN_SELECT_IN_64_MB;
 
-            if !must_shrink {
+            if must_shrink {
                 return inner;
             }
 
-            for _ in 0..self.vec.len() >> 2 {
-                drop(unsafe { Box::from_raw(self.vec.pop().unwrap_unchecked().as_mut()) });
-            }
-
-            self.vec.shrink_to_fit();
+            self.shrink();
 
             inner
         } else {
@@ -505,7 +505,6 @@ impl TaskInSelectPool {
                 resolved_branch_id,
                 state: AtomicUsize::new(NOT_ACQUIRED),
                 ref_count: AtomicUsize::new(1),
-                was_released: AtomicBool::new(false),
             })))
         }
     }
@@ -527,7 +526,7 @@ impl Drop for TaskInSelectPool {
 }
 
 thread_local! {
-    /// Thread-local [`TaskInSelectPool`], therefore it is lockless.
+    /// Thread-local [`TaskInSelectPool`] therefore, it is lockless.
     // Before refactor: it must be thread-local, or rewrite drop logic in `TaskInSelect`.
     static TASK_IN_SELECT_POOL: UnsafeCell<TaskInSelectPool> = const { UnsafeCell::new(TaskInSelectPool::new()) };
 }

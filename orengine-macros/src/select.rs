@@ -768,7 +768,7 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                         }
 
                         let chan_ref = channels.get_unchecked_mut(#branches_len - 1);
-                        let task_in_select_branch = TaskInSelectBranch::new(task_in_select.clone(), chan_ref.index());
+                        let task_in_select_branch = TaskInSelectBranch::new(task_in_select, chan_ref.index());
 
                         match chan_ref {
                             #(#channels_enum_handle),*

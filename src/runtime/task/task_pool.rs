@@ -8,6 +8,7 @@ use std::mem::size_of;
 /// A pool of tasks.
 #[derive(Default)]
 pub(crate) struct TaskPool {
+    bytes_allocated: usize,
     /// Key is a size.
     storage: AHashMap<usize, Vec<Task>>,
 }
@@ -27,6 +28,8 @@ impl TaskPool {
 
         let pool = executor.task_pool().storage.entry(size).or_default();
         if let Some(mut task) = pool.pop() {
+            executor.task_pool().bytes_allocated -= size;
+
             let future_ptr: *mut F = task.future_ptr().cast();
 
             unsafe {
@@ -44,31 +47,31 @@ impl TaskPool {
 
             task
         } else {
-            #[allow(unused_unsafe, reason = "False positive")]
-            let future_ptr: *mut F = unsafe { &raw mut *(Box::into_raw(Box::new(future))) };
-            Task {
-                data: TaskData::new(future_ptr as *mut _, locality),
-                #[cfg(debug_assertions)]
-                executor_id,
-                #[cfg(debug_assertions)]
-                is_executing: crate::utils::Ptr::move_to_heap(std::sync::atomic::AtomicBool::new(
-                    false,
-                )),
-            }
+            Task::allocate_new(future, locality)
         }
     }
 
     /// Puts a task into the pool.
     #[inline]
     pub fn put(&mut self, task: Task) {
+        // TODO up the limit
+        if self.bytes_allocated >= 128 * 1024 * 1024 {
+            unsafe { drop(Box::from_raw(task.future_ptr())) };
+
+            return;
+        }
+
         let size = size_of_val(unsafe { &*task.future_ptr() });
+
+        self.bytes_allocated += size;
+
         if let Some(pool) = self.storage.get_mut(&size) {
             pool.push(task);
 
             return;
         }
 
-        // A task that have been allocated in another thread ended up here
+        // A task that has been allocated in another thread ended up here
 
         self.storage.insert(size, vec![task]);
     }

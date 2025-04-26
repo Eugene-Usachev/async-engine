@@ -47,7 +47,7 @@ pub(crate) fn get_local_executor_ref() -> &'static mut Option<Executor> {
     LOCAL_EXECUTOR.with(|local_executor| unsafe { &mut *local_executor.get() })
 }
 
-/// Message that prints out when local executor is not initialized
+/// Message that prints out when the local executor is not initialized
 /// but [`local_executor()`](local_executor) is called.
 #[cfg(debug_assertions)]
 pub const MSG_LOCAL_EXECUTOR_IS_NOT_INIT: &str = "\
@@ -115,17 +115,17 @@ pub fn local_executor() -> &'static mut Executor {
 ///
 /// - `local` tasks and futures are executed only in the current thread.
 ///    It means that the tasks and futures can't be moved between threads.
-///    It allows to use `Shared-nothing architecture` that means that in these futures and tasks
+///    It allows using `Shared-nothing architecture` that means that in these futures and tasks
 ///    you can use [`Local`](crate::Local) and `local primitives of synchronization`.
 ///    Using `local` types can improve performance.
 ///
 /// - `shared` tasks and futures can be moved between threads.
-///   It allows to use `shared primitives of synchronization` and to `share work`.
+///   It allows using `shared primitives of synchronization` and to `share work`.
 ///
 /// # Share work
 ///
-/// When a number of shared tasks in the executor is become greater
-/// than [`runtime::Config.work_sharing_level`](Config::set_work_sharing_level) `Executor`
+/// When the number of shared tasks in the executor is becoming greater
+/// than [`runtime::Config.work_sharing_level`](Config::set_work_sharing_level), `Executor`
 /// shares the half of work with other executors.
 ///
 /// When `Executor` has no work, it tries to take tasks from other executors.
@@ -236,6 +236,7 @@ impl Executor {
                 id: executor_id,
                 config: valid_config,
                 current_call: Call::default(),
+                #[cfg(not(feature = "disable_task_pool"))]
                 task_pool: TaskPool::default(),
                 subscribed_state: Arc::new(SubscribedState::new()),
                 rng: Rng::new(),
@@ -353,7 +354,7 @@ impl Executor {
         Config::from(&self.config)
     }
 
-    /// Returns when current round started.
+    /// Returns when the current round started.
     pub fn start_round_time(&self) -> Instant {
         self.start_round_time
     }
@@ -1390,7 +1391,7 @@ mod tests {
 
         yield_now().await;
 
-        assert_eq!(&vec![10, 30, 20], &*arr.borrow()); // 30, 20 because of LIFO
+        assert_eq!(*vec![10, 30, 20], *arr.borrow()); // 30, 20 because of LIFO
 
         let arr = Local::new(Vec::new());
 
@@ -1398,7 +1399,7 @@ mod tests {
         local_executor().exec_local_future(insert(20, arr.clone()));
         local_executor().exec_local_future(insert(30, arr.clone()));
 
-        assert_eq!(&vec![10, 20, 30], &*arr.borrow()); // 20, 30 because we don't use the list here
+        assert_eq!(*vec![10, 20, 30], *arr.borrow()); // 20, 30 because we don't use the list here
     }
 
     #[test]

@@ -11,18 +11,98 @@ use crate::utils::hints::unreachable_hint;
 use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
 use std::panic::{RefUnwindSafe, UnwindSafe};
-use std::ptr;
 use std::ptr::NonNull;
+
+const WAITING_TASKS_SIZE: usize = size_of::<WaitingTask<()>>();
+
+struct WaitingTaskDequePool<T = ()> {
+    queues: Vec<SenderReceiverQueue<T>>,
+    /// All queues with its capacity in bytes.
+    bytes_allocated: usize,
+}
+
+impl<T> WaitingTaskDequePool<T> {
+    const fn new() -> Self {
+        Self {
+            queues: Vec::new(),
+            bytes_allocated: 0,
+        }
+    }
+
+    fn maybe_shrink(&mut self) {
+        let average = (self.bytes_allocated - self.queues.len() * size_of::<SenderReceiverQueue<()>>()) / self.queues.len(); // average is not the median, but it is too expensive to calculate the median.
+
+        self.queues.retain(|queue| {
+            if queue.capacity() < average {
+                true
+            } else {
+                self.bytes_allocated -= queue.capacity() * WAITING_TASKS_SIZE;
+                self.bytes_allocated -= size_of::<SenderReceiverQueue<()>>();
+
+                false
+            }
+        });
+
+        if self.bytes_allocated < 48 * 1024 * 1024 {
+            // nice shrink
+
+            return;
+        }
+
+        // Probably, too many queues.
+
+        self.bytes_allocated = 0;
+        let half_of_len = self.queues.len() >> 1;
+        let mut i = 0;
+
+        self.queues.retain(|queue| {
+            if i > half_of_len {
+                return false;
+            }
+
+            self.bytes_allocated += queue.capacity() * WAITING_TASKS_SIZE;
+            self.bytes_allocated += size_of::<ManuallyDrop<SenderReceiverQueue<()>>>();
+
+            i += 1;
+
+            true
+        });
+    }
+
+    fn push(&mut self, deque: SenderReceiverQueue<T>) {
+        self.bytes_allocated += deque.capacity() * WAITING_TASKS_SIZE;
+        self.bytes_allocated += size_of::<ManuallyDrop<SenderReceiverQueue<()>>>();
+
+        self.queues.push(deque);
+
+        if self.bytes_allocated <= 64 * 1024 * 1024 {
+            return;
+        }
+
+        self.maybe_shrink();
+    }
+
+    fn pop(&mut self) -> Option<SenderReceiverQueue<T>> {
+        if let Some(queue) = self.queues.pop() {
+            self.bytes_allocated -= queue.capacity() * WAITING_TASKS_SIZE;
+            self.bytes_allocated -= size_of::<ManuallyDrop<SenderReceiverQueue<()>>>();
+
+            return Some(queue);
+        }
+
+        None
+    }
+}
 
 thread_local! {
     /// A pool of [`waiting task`](WaitingTask) deques.
-    static WAITING_TASK_DEQUE_POOL: UnsafeCell<Vec<SenderReceiverQueue<()>>> = const { UnsafeCell::new(Vec::new()) };
+    static WAITING_TASK_DEQUE_POOL: UnsafeCell<WaitingTaskDequePool<()>> = const { UnsafeCell::new(WaitingTaskDequePool::new()) };
 }
 
 /// Acquires a [`WaitingTaskDeque`] from the pool.
 fn acquire_waiting_task_deque_from_pool<T>() -> SenderReceiverQueue<T> {
     WAITING_TASK_DEQUE_POOL.with(|pool| {
-        unsafe { &mut *pool.get().cast::<Vec<SenderReceiverQueue<T>>>() }
+        unsafe { &mut *pool.get().cast::<WaitingTaskDequePool<T>>() }
             .pop()
             .map_or_else(SenderReceiverQueue::new, |deque| deque)
     })
@@ -31,7 +111,13 @@ fn acquire_waiting_task_deque_from_pool<T>() -> SenderReceiverQueue<T> {
 /// Puts the provided [`WaitingTaskDeque`] back into the pool.
 fn put_waiting_task_deque_to_pool<T>(deque: SenderReceiverQueue<T>) {
     WAITING_TASK_DEQUE_POOL
-        .with(|pool| unsafe { &mut *pool.get().cast::<Vec<SenderReceiverQueue<T>>>() }.push(deque));
+        .with(|pool| {
+            let pool = unsafe {
+                &mut *pool.get().cast::<WaitingTaskDequePool<T>>()
+            };
+
+            pool.push(deque);
+        });
 }
 
 macro_rules! generate_struct {
@@ -148,13 +234,7 @@ macro_rules! generate_drop {
         fn drop(&mut self) {
             debug_assert!(self.queue.is_empty());
 
-            if self.queue.capacity() < 32 {
-                put_waiting_task_deque_to_pool(unsafe { ptr::read(ptr::from_ref(&*self.queue)) });
-
-                return;
-            }
-
-            unsafe { ManuallyDrop::drop(&mut self.queue) };
+            put_waiting_task_deque_to_pool(unsafe { ManuallyDrop::take(&mut self.queue) });
         }
     };
 }

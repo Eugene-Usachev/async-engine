@@ -162,21 +162,21 @@ impl Task {
     /// use orengine::{local_executor, sleep};
     /// use orengine::runtime::{Task};
     ///
-    /// async fn manual_notifier() {
-    ///     let current_task = unsafe { Task::get_current() };
+    /// # async fn manual_notifier() {
+    /// let current_task = unsafe { Task::get_current() };
     ///
-    ///     local_executor().spawn_local(async move { // it is safe only because of `spawning`! It guarantees that the current task will be parked before the spawned task will unpark it.
-    ///         sleep(Duration::from_millis(1)).await;
+    /// local_executor().spawn_local(async move { // it is safe only because of `spawning`! It guarantees that the current task will be parked before the spawned task will unpark it.
+    ///     sleep(Duration::from_millis(1)).await;
     ///
-    ///         local_executor().spawn_local(current_task);
-    ///     });
+    ///     local_executor().spawn_local(current_task);
+    /// });
     ///
-    ///     println!("Start parking");
+    /// println!("Start parking");
     ///
-    ///     unsafe { Task::park_current_task() }.await;
+    /// unsafe { Task::park_current_task() }.await;
     ///
-    ///     println!("Was unparked");
-    /// }
+    /// println!("Was unparked");
+    /// # }
     /// ```
     pub unsafe fn park_current_task() -> impl Future<Output = ()> {
         #[repr(C)]
@@ -240,7 +240,11 @@ impl Task {
     /// Provided [`Task`] is no longer used.
     #[inline]
     pub(crate) unsafe fn release(self, executor: &mut Executor) {
-        executor.task_pool().put(self);
+        #[cfg(not(feature = "disable_task_pool"))]
+        { executor.task_pool().put(self); }
+
+        #[cfg(feature = "disable_task_pool")]
+        unsafe { drop(Box::from_raw(self.future_ptr())) }
     }
 }
 

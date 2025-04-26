@@ -7,10 +7,10 @@ use crate::utils::hints::unreachable_hint;
 use std::cell::UnsafeCell;
 use std::hint::spin_loop;
 use std::ops::{Deref, DerefMut};
-use std::ptr;
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
-use std::sync::atomic::{fence, AtomicBool, AtomicUsize};
+use std::sync::atomic::{fence, AtomicUsize};
+use std::{mem, ptr};
 
 const NOT_ACQUIRED: usize = 0;
 const ACQUIRED: usize = 1;
@@ -48,11 +48,6 @@ impl TaskInSelect {
     pub fn acquire_for_task(task: Task, resolved_branch_id: NonNull<usize>) -> Self {
         if cfg!(debug_assertions) {
             let mut inner = task_in_select_pool().acquire_for_task(task, resolved_branch_id);
-            // TODO r
-            // let mut inner = TASK_IN_SELECT_POOL
-            //     .lock()
-            //     .unwrap()
-            //     .acquire_for_task(task, resolved_branch_id);
 
             unsafe {
                 inner.as_mut().resolved_branch_id.write(usize::MAX);
@@ -62,11 +57,6 @@ impl TaskInSelect {
         } else {
             Self {
                 inner: task_in_select_pool().acquire_for_task(task, resolved_branch_id),
-                // TODO r
-                // inner: TASK_IN_SELECT_POOL
-                //     .lock()
-                //     .unwrap()
-                //     .acquire_for_task(task, resolved_branch_id),
             }
         }
     }
@@ -90,7 +80,6 @@ impl TaskInSelect {
         );
 
         task_in_select_pool().release(self.inner);
-        // TODO r TASK_IN_SELECT_POOL.lock().unwrap().release(self.inner);
     }
 }
 
@@ -464,24 +453,7 @@ impl TaskInSelectPool {
         Self { vec: Vec::new() }
     }
 
-    fn shrink(&mut self) {
-        for _ in 0..self.vec.len() >> 2 {
-            drop(unsafe { Box::from_raw(self.vec.pop().unwrap_unchecked().as_mut()) });
-        }
-
-        self.vec.shrink_to_fit();
-    }
-
-    fn acquire_for_task(
-        &mut self,
-        task: Task,
-        resolved_branch_id: NonNull<usize>,
-    ) -> NonNull<Inner> {
-        // ~ 100k tasks. It is a ceiling, not preallocation size, therefore, it is fine.
-        const TASKS_IN_SELECT_IN_64_MB: usize = (64 * 1024 * 1024) / size_of::<Inner>();
-
-        static ACQUIRING: AtomicUsize = AtomicUsize::new(0);
-
+    fn acquire_for_task(&mut self, task: Task, resolved_branch_id: NonNull<usize>) -> NonNull<Inner> {
         if let Some(mut inner) = self.vec.pop() {
             let inner_ref = unsafe { inner.as_mut() };
 
@@ -489,14 +461,6 @@ impl TaskInSelectPool {
             inner_ref.resolved_branch_id = resolved_branch_id;
             inner_ref.state = AtomicUsize::new(NOT_ACQUIRED);
             inner_ref.ref_count = AtomicUsize::new(1);
-
-            let must_shrink = (self.vec.len() << 3 >= self.vec.capacity()) && self.vec.len() > TASKS_IN_SELECT_IN_64_MB;
-
-            if must_shrink {
-                return inner;
-            }
-
-            self.shrink();
 
             inner
         } else {
@@ -510,7 +474,13 @@ impl TaskInSelectPool {
     }
 
     fn release(&mut self, inner: NonNull<Inner>) {
-        self.vec.push(inner);
+        if self.vec.len() * size_of::<Inner>() <= 64 * 1024 * 1024 {
+            self.vec.push(inner);
+
+            return;
+        }
+
+        unsafe { drop(Box::from_raw(inner.as_ptr())) };
     }
 }
 

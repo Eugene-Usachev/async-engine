@@ -1,11 +1,12 @@
 //! This module provides an __blocking__ mutex (e.g. [`std::sync::Mutex`]) type [`SpinLock`].
 //!
-//! It allows for __blocking__ locking and unlocking, and provides
+//! It allows for __blocking__ locking and unlocking and provides
 //! ownership-based locking through [`SpinLockGuard`].
 //!
 //! It locks the current __thread__ until it acquires the lock. Use it only for short locks and
 //! only if it is not possible to use asynchronous locking.
-use crossbeam::utils::{Backoff, CachePadded};
+use crate::utils::Backoff;
+use crossbeam::utils::CachePadded;
 use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
@@ -116,7 +117,7 @@ impl<T: ?Sized> Drop for SpinLockGuard<'_, T> {
 ///
 /// # The difference between `SpinLock` and other mutexes
 ///
-/// It locks the current __thread__ until it acquires the lock. Use it only for short locks and
+/// It locks the current __thread__ until it acquires the lock. Use it only for short locks, and
 /// only if it is not possible to use asynchronous locking.
 pub struct SpinLock<T: ?Sized> {
     is_locked: CachePadded<AtomicBool>,

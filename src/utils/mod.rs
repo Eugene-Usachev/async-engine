@@ -14,8 +14,11 @@ mod sendable_ptr;
 pub(crate) mod vec_map;
 mod array_deque;
 mod shuffle;
+mod backoff;
+
 
 pub use array_deque::ArrayDeque;
+pub(crate) use backoff::Backoff;
 pub use core::*;
 pub(crate) use hints::assert_hint;
 pub(crate) use progressive_timeout::*;

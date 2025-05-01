@@ -4,35 +4,25 @@ use crate::local_executor;
 use crate::runtime::Task;
 use crate::sync::channels::state::CallStatePtr;
 use crate::utils::hints::unreachable_hint;
+use crate::utils::Backoff;
+use fastrand::Rng;
 use std::cell::UnsafeCell;
 use std::hint::spin_loop;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
-use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
-use std::sync::atomic::{fence, AtomicUsize};
-use std::{mem, ptr};
+use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst};
+use std::sync::atomic::{fence, AtomicBool, AtomicUsize};
+use std::time::Duration;
+use std::{mem, ptr, thread};
 
 const NOT_ACQUIRED: usize = 0;
 const ACQUIRED: usize = 1;
+const ACQUIRING_NOW: usize = 2;
 
 #[repr(C)]
 pub struct Inner {
     task: Task,
     resolved_branch_id: NonNull<usize>,
-    /// Can be:
-    ///
-    /// * [`Default`] - neither acquired nor trying to acquire.
-    ///
-    /// * [`ACQUIRED`] - acquired.
-    ///
-    /// * `Was acquiring now` - trying to acquire. It contains another `NonNull<TaskInSelect>`.
-    ///   It is necessary to prevent deadlocks.
-    ///   Example: two threads are trying to select. The first is
-    ///   acquiring the first task, and the second is acquiring the second task. Next, the first
-    ///   thread tries to acquire the second task, and the second thread tries to acquire
-    ///   the first task. We need to prevent this. In the current implementation, threads will
-    ///   see that they are trying to acquire the same tasks and the thread with a bigger
-    ///   (as usize) task will acquire both tasks.
     state: AtomicUsize,
     ref_count: AtomicUsize,
 }
@@ -177,6 +167,8 @@ impl TaskInSelectBranch {
                 Some(unsafe { ptr::read(&self.task_in_select.task) })
             }
         } else {
+            let backoff = Backoff::new();
+
             loop {
                 let prev_ = self.task_in_select.state.compare_exchange(
                     NOT_ACQUIRED,
@@ -191,11 +183,11 @@ impl TaskInSelectBranch {
                         return None;
                     }
 
-                    // Another thread acquire first of two task and trying to acquire second one.
+                    // Another thread acquires first of two task and trying to acquire second one.
                     // It may fail (and set `NOT_ACQUIRED`) or succeed (and set `ACQUIRED`).
                     // We will for this update. It is not a performance issue, because it
                     // happens very rarely, and we wait at max time of `load` + `store`.
-                    spin_loop();
+                    backoff.spin();
                 } else {
                     self.task_in_select
                         .set_resolved_branch_id(self.associated_branch_id);
@@ -305,122 +297,84 @@ impl TaskInSelectBranch {
 
         debug_assert!(!self.task_in_select.task.is_local());
 
-        let other_ptr_as_usize = (&raw const *other.task_in_select) as usize;
+        let mut is_first_try = true;
+        let backoff = Backoff::new();
 
-        debug_assert!(
-            other_ptr_as_usize != NOT_ACQUIRED && other_ptr_as_usize != ACQUIRED,
-            "NonNull<TaskInSelect> contains ptr that equals to 0 or 1. It means that is is invalid."
-        );
+        'this_task: loop {
+            if is_first_try {
+                is_first_try = false;
+            } else {
+                self.task_in_select.state.store(NOT_ACQUIRED, SeqCst);
 
-        // Set state to acquiring now with another task. Read below for details.
-        let prev_ = self.task_in_select.state.compare_exchange(
-            NOT_ACQUIRED,
-            other_ptr_as_usize,
-            AcqRel,
-            Acquire,
-        );
-
-        if let Err(prev) = prev_ {
-            // Can be only `ACQUIRED`.
-            match prev {
-                ACQUIRED => PopIfAcquiredResult::NotAcquired(other),
-
-                // bug is occurred,
-                // because it can be acquiring now only if it is in select,
-                // but we are in select and can't acquire,
-                // so select was called twice with one TaskInSelect
-                _ => unreachable_hint(),
+                backoff.reset();
             }
-        } else {
-            loop {
-                let other_prev_ = other.task_in_select.state.compare_exchange(
-                    NOT_ACQUIRED,
-                    ACQUIRED,
-                    AcqRel,
-                    Acquire,
-                );
 
-                if let Err(other_prev) = other_prev_ {
-                    match other_prev {
-                        // Can be `ACQUIRED` or acquiring now.
-                        ACQUIRED => {
-                            // We can't acquire other task, because it is already acquired.
+            // Set state to acquiring now with another task. Read below for details.
+            let prev_ = self.task_in_select.state.compare_exchange(
+                NOT_ACQUIRED,
+                ACQUIRING_NOW,
+                AcqRel,
+                Acquire,
+            );
 
-                            self.task_in_select.state.store(NOT_ACQUIRED, Release);
+            if let Err(prev) = prev_ {
+                // Can be only `ACQUIRED`.
+                match prev {
+                    ACQUIRED => return PopIfAcquiredResult::NotAcquired(other),
 
-                            break PopIfAcquiredResult::NoData(self);
-                        }
-                        acquiring_now_with => {
-                            let this_ptr_as_usize = (&raw const *self.task_in_select) as usize;
-                            debug_assert!(
-                                other_ptr_as_usize != NOT_ACQUIRED
-                                    && other_ptr_as_usize != ACQUIRED,
-                                "NonNull<TaskInSelect> contains ptr that equals to 0 or 1. \
-                                It means that is is invalid."
-                            );
+                    // bug is occurred
+                    // because it can be acquiring now only if it is in select,
+                    // but we are in select and can't acquire,
+                    // so select was called twice with one TaskInSelect
+                    _ => unreachable_hint(),
+                }
+            } else {
+                loop {
+                    let other_prev_ = other.task_in_select.state.compare_exchange(
+                        NOT_ACQUIRED,
+                        ACQUIRED,
+                        AcqRel,
+                        Acquire,
+                    );
 
-                            if acquiring_now_with != this_ptr_as_usize {
-                                spin_loop();
-                                continue; // Now other task is trying to acquire another task.
-                                // We wait until another thread acquire it
-                                // or stop acquiring with fail.
-                                // It is not a performance issue, because it
-                                // happens very rarely, and we wait at max time
-                                // of `compare_exchange` + `store`.
+                    if let Err(other_prev) = other_prev_ {
+                        match other_prev {
+                            // Can be `ACQUIRED` or acquiring now.
+                            ACQUIRED => {
+                                // We can't acquire the other task because it is already acquired.
+
+                                self.task_in_select.state.store(NOT_ACQUIRED, Release);
+
+                                return PopIfAcquiredResult::NoData(self);
                             }
+                            ACQUIRING_NOW => {
+                                if !backoff.is_completed() {
+                                    backoff.spin();
+                                } else {
+                                    // Probably a deadlock has occurred
 
-                            // Now two threads are trying to acquire both tasks.
-                            // First thread acquired first task and trying to acquire second task.
-                            // Second thread acquired second task and trying to acquire first task.
-                            // So, it is a deadlock if not to solve it.
-                            // But this and other threads know that it is happening now.
-                            // So, they can solve it. We can represent TaskInSelect as usize.
-                            // And the thread that acquires the "greatest" task will capture
-                            // both tasks.
-                            // The other knows this and continues to execute.
-
-                            if this_ptr_as_usize > other_ptr_as_usize {
-                                // Current thread acquires both tasks.
-
-                                self.task_in_select.state.store(ACQUIRED, Release);
-                                other.task_in_select.state.store(ACQUIRED, Release);
-
-                                exec_two_tasks!(
-                                    self.task_in_select,
-                                    other.task_in_select,
-                                    self,
-                                    other,
-                                    setter_fn,
-                                    state,
-                                    data
-                                );
-
-                                break PopIfAcquiredResult::Ok;
+                                    continue 'this_task;
+                                }
                             }
-
-                            // Other thread will acquire both tasks
-                            // and will drop pointers
-                            // and will execute both tasks.
-
-                            break PopIfAcquiredResult::Ok;
+                            _ => unreachable_hint()
                         }
+                    } else {
+                        self.task_in_select.state.store(ACQUIRED, Release);
+
+                        // TODO rewrite without the macro
+                        exec_two_tasks!(
+                            self.task_in_select,
+                            other.task_in_select,
+                            self,
+                            other,
+                            setter_fn,
+                            state,
+                            data
+                        );
+
+                        return PopIfAcquiredResult::Ok;
                     }
                 }
-
-                self.task_in_select.state.store(ACQUIRED, Release);
-                // other task is already acquired above
-
-                exec_two_tasks!(
-                    self.task_in_select,
-                    other.task_in_select,
-                    self,
-                    other,
-                    setter_fn,
-                    state,
-                    data
-                );
-
-                break PopIfAcquiredResult::Ok;
             }
         }
     }

@@ -13,13 +13,14 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::task::{Context, Poll};
 
-use crossbeam::utils::{Backoff, CachePadded};
+use crossbeam::utils::CachePadded;
 
 use crate::panic_if_local_in_future;
 use crate::runtime::call::Call;
 use crate::runtime::{local_executor, IsLocal, Task};
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncMutex, AsyncMutexGuard};
+use crate::utils::Backoff;
 use crate::utils::{acquire_sync_task_list_from_pool, SyncTaskListFromPool};
 
 /// An RAII implementation of a "scoped lock" of a mutex. When this structure is

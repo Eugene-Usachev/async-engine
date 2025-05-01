@@ -338,7 +338,7 @@ macro_rules! generate_send_or_subscribe {
             task_in_select_branch: TaskInSelectBranch,
         ) -> SelectNonBlockingBranchResult {
             let mut inner_lock = {
-                let backoff = crossbeam::utils::Backoff::new();
+                let backoff = $crate::utils::Backoff::new();
 
                 loop {
                     let Some(inner_lock) = self.inner.try_lock() else {
@@ -484,7 +484,7 @@ macro_rules! generate_recv_or_subscribe {
             task_in_select_branch: TaskInSelectBranch,
         ) -> SelectNonBlockingBranchResult {
             let mut inner_lock = {
-                let backoff = crossbeam::utils::Backoff::new();
+                let backoff = $crate::utils::Backoff::new();
 
                 loop {
                     let Some(inner_lock) = self.inner.try_lock() else {

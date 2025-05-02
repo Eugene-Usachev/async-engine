@@ -55,7 +55,7 @@ pub mod test;
 #[cfg(feature = "unstable_features")]
 pub mod unstable;
 pub mod utils;
-pub mod yield_now;
+mod yield_now;
 
 pub(crate) use bug_message::BUG_MESSAGE;
 pub use local::Local;
@@ -64,4 +64,4 @@ pub use run::*;
 pub use runtime::{local_executor, stop_all_executors, stop_executor, Executor};
 pub use sleep::{sleep, Sleep};
 pub use socket2;
-pub use yield_now::yield_now;
+pub use yield_now::{yield_now, Yield};

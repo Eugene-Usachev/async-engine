@@ -54,8 +54,7 @@ impl TaskPool {
     /// Puts a task into the pool.
     #[inline]
     pub fn put(&mut self, task: Task) {
-        // TODO limit
-        if self.bytes_allocated >= 1 * 1024 {
+        if self.bytes_allocated >= 128 * 1024 * 1024 {
             unsafe { drop(Box::from_raw(task.future_ptr())) };
 
             return;

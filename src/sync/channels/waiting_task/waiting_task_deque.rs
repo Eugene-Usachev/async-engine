@@ -327,7 +327,7 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
     generate_try_pop_and_call!();
 
     /// Pops a [`waiting task`](WaitingTask) from the deque if [`TaskInSelectBranch`] was acquired,
-    /// next calls provided function, and after it execute the task.
+    /// next calls provided function, and after it executes the task.
     #[must_use]
     fn try_pop_and_call_if_acquired<const IS_RECEIVER_POP: bool, SetterFn>(
         &mut self,

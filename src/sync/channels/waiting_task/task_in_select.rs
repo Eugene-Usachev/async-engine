@@ -5,15 +5,12 @@ use crate::runtime::Task;
 use crate::sync::channels::state::CallStatePtr;
 use crate::utils::hints::unreachable_hint;
 use crate::utils::Backoff;
-use fastrand::Rng;
 use std::cell::UnsafeCell;
-use std::hint::spin_loop;
 use std::ops::{Deref, DerefMut};
+use std::ptr;
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst};
-use std::sync::atomic::{fence, AtomicBool, AtomicUsize};
-use std::time::Duration;
-use std::{mem, ptr, thread};
+use std::sync::atomic::{fence, AtomicUsize};
 
 const NOT_ACQUIRED: usize = 0;
 const ACQUIRED: usize = 1;
@@ -243,19 +240,19 @@ impl TaskInSelectBranch {
         PopIfAcquiredResult::Ok
     }
 
-    /// Tries to acquire two tasks in that are used in `shared` context.
+    /// Tries to acquire two tasks in that are used in a `shared` context.
     ///
-    /// Returns [`PopIfAcquiredResult::NotAcquired`] if `self` task have been already acquired.
+    /// Returns [`PopIfAcquiredResult::NotAcquired`] if the `self` task has been already acquired.
     ///
-    /// Returns [`PopIfAcquiredResult::NoData`] if `other` task have been already acquired.
+    /// Returns [`PopIfAcquiredResult::NoData`] if the other task has been already acquired.
     ///
-    /// It is used only when both tasks are in `shared` context.
+    /// It is used only when both tasks are in a `shared` context.
     ///
     /// # Safety
     ///
     /// * It is called in select;
     ///
-    /// * If returns `false` then `other` task must be not lost (saved into queue again).
+    /// * If returns `false` then the other task must be not lost (saved into queue again).
     #[must_use]
     pub(crate) unsafe fn try_acquire_two_shared_tasks_in_select<T, SetterFn>(
         self,

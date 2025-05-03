@@ -9,8 +9,10 @@ use crate::runtime::global_state::{register_local_executor, SubscribedState};
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::runtime::interaction_between_executors::{ExecutorIsNotRegisteredErr, Interactor};
 use crate::runtime::local_thread_pool::LocalThreadWorkerPool;
-use crate::runtime::task::{Task, TaskPool};
+use crate::runtime::task::Task;
 use crate::runtime::waker::create_waker;
+#[cfg(not(feature = "disable_task_pool"))]
+use crate::runtime::TaskPool;
 use crate::runtime::{get_core_id_for_executor, CallInner, ExecutorSharedTaskList, Locality};
 use crate::utils::{assert_hint, CoreId, ProgressiveTimeout};
 use fastrand::Rng;
@@ -135,6 +137,7 @@ pub struct Executor {
     id: usize,
     config: ValidConfig,
     subscribed_state: Arc<SubscribedState>,
+    #[cfg(not(feature = "disable_task_pool"))]
     task_pool: TaskPool,
     rng: Rng,
     progressive_timeout: ProgressiveTimeout<64, 131_072>,
@@ -329,6 +332,7 @@ impl Executor {
     }
 
     /// Returns a reference to the [`TaskPool`] of the executor.
+    #[cfg(not(feature = "disable_task_pool"))]
     pub(crate) fn task_pool(&mut self) -> &mut TaskPool {
         &mut self.task_pool
     }
@@ -1363,7 +1367,6 @@ impl Executor {
     ) -> Result<T, &'static str> {
         generate_run_and_block_on_function!(Self::spawn_shared, future, self)
     }
-
     //endregion
 }
 

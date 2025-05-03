@@ -116,12 +116,78 @@ pub struct WaitGroup {
 }
 
 impl WaitGroup {
-    /// Creates a new `WaitGroup`.
-    pub fn new() -> Self {
+    /// Creates a new `WaitGroup` with the specified count.
+    ///
+    /// # Example
+    ///
+    /// ``` no_run
+    /// use std::sync::Arc;
+    /// use std::time::Duration;
+    /// use orengine::{local_executor, sleep};
+    /// use orengine::sync::{AsyncWaitGroup, WaitGroup};
+    ///
+    /// # async fn wg_new_with_count_example() {
+    /// let mut wg = Arc::new(WaitGroup::new_with_count(10));
+    ///
+    /// for i in 0..10 {
+    ///     let wg = wg.clone();
+    ///
+    ///     local_executor().spawn_shared(async move {
+    ///         sleep(Duration::from_millis(i)).await;
+    ///
+    ///         wg.done();
+    ///     });
+    /// }
+    ///
+    /// wg.wait().await;
+    /// # }
+    /// ```
+    pub fn new_with_count(count: usize) -> Self {
         Self {
-            counter: CachePadded::new(AtomicUsize::new(0)),
+            counter: CachePadded::new(AtomicUsize::new(count)),
             waited_tasks: acquire_sync_task_list_from_pool(),
         }
+    }
+
+    /// Creates a new `WaitGroup`.
+    pub fn new() -> Self {
+        Self::new_with_count(0)
+    }
+
+    /// Sets the count.
+    /// It accepts a mutable reference, therefore, it doesn't use atomic operations.
+    ///
+    /// # Example
+    ///
+    /// ``` no_run
+    /// use std::sync::Arc;
+    /// use std::time::Duration;
+    /// use orengine::{local_executor, sleep};
+    /// use orengine::sync::{AsyncWaitGroup, WaitGroup};
+    ///
+    /// fn acquire_wg() -> WaitGroup { WaitGroup::new() }
+    ///
+    /// # async fn wg_set_example() {
+    /// let mut wg = acquire_wg();
+    /// wg.set_mut(10);
+    ///
+    /// let wg = Arc::new(wg);
+    ///
+    /// for i in 0..10 {
+    ///     let wg = wg.clone();
+    ///
+    ///     local_executor().spawn_shared(async move {
+    ///         sleep(Duration::from_millis(i)).await;
+    ///
+    ///         wg.done();
+    ///     });
+    /// }
+    ///
+    /// wg.wait().await;
+    /// # }
+    /// ```
+    pub fn set_mut(&mut self, count: usize) {
+        *self.counter.get_mut() = count;
     }
 }
 

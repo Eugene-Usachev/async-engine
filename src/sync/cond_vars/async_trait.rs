@@ -131,7 +131,7 @@ pub trait AsyncCondVar: IsLocal {
     ///
     /// # Attention
     ///
-    /// Drop a lock before call [`notify_one`](Self::notify_one).
+    /// Release a lock before call [`notify_one`](Self::notify_one).
     ///
     /// # Example
     ///
@@ -155,7 +155,7 @@ pub trait AsyncCondVar: IsLocal {
     ///
     /// # Attention
     ///
-    /// Drop a lock before call [`notify_all`](Self::notify_all).
+    /// Release a lock before call [`notify_all`](Self::notify_all).
     ///
     /// # Example
     ///

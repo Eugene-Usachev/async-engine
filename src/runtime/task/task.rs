@@ -239,6 +239,7 @@ impl Task {
     ///
     /// Provided [`Task`] is no longer used.
     #[inline]
+    #[allow(unused_variables, reason = "it is wrong only with disable_task_pool")]
     pub(crate) unsafe fn release(self, executor: &mut Executor) {
         #[cfg(not(feature = "disable_task_pool"))]
         { executor.task_pool().put(self); }

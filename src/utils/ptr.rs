@@ -234,6 +234,12 @@ impl<T> From<u64> for Ptr<T> {
     }
 }
 
+impl<T> From<*mut T> for Ptr<T> {
+    fn from(ptr: *mut T) -> Self {
+        Self { ptr }
+    }
+}
+
 impl<T> From<&mut T> for Ptr<T> {
     fn from(ptr: &mut T) -> Self {
         Self { ptr }
@@ -408,7 +414,8 @@ mod tests {
         let value = 130;
         let ptr = Ptr::move_to_heap(value);
         let debug_str = format!("{ptr:?}");
-        assert_eq!(debug_str, "130");
+
+        assert_eq!(&debug_str, "130");
 
         unsafe {
             ptr.deallocate();

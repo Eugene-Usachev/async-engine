@@ -91,15 +91,45 @@ pub struct LocalWaitGroup {
 }
 
 impl LocalWaitGroup {
-    /// Creates a new `LocalWaitGroup`.
-    pub fn new() -> Self {
+    /// Creates a new `LocalWaitGroup` with the specified count.
+    ///
+    /// # Example
+    ///
+    /// ``` no_run
+    /// use std::rc::Rc;
+    /// use std::time::Duration;
+    /// use orengine::{local_executor, sleep};
+    /// use orengine::sync::{AsyncWaitGroup, LocalWaitGroup};
+    ///
+    /// # async fn local_wg_new_with_count_example() {
+    /// let mut wg = Rc::new(LocalWaitGroup::new_with_count(10));
+    ///
+    /// for i in 0..10 {
+    ///     let wg = wg.clone();
+    ///
+    ///     local_executor().spawn_local(async move {
+    ///         sleep(Duration::from_millis(i)).await;
+    ///
+    ///         wg.done();
+    ///     });
+    /// }
+    ///
+    /// wg.wait().await;
+    /// # }
+    /// ```
+    pub fn new_with_count(count: usize) -> Self {
         Self {
             inner: UnsafeCell::new(Inner {
-                count: 0,
+                count,
                 waited_tasks: acquire_task_vec_from_pool(),
             }),
             no_send_marker: std::marker::PhantomData,
         }
+    }
+
+    /// Creates a new `LocalWaitGroup`.
+    pub fn new() -> Self {
+        Self::new_with_count(0)
     }
 
     /// Returns a mutable reference to the [`Inner`].
@@ -107,6 +137,42 @@ impl LocalWaitGroup {
     #[allow(clippy::mut_from_ref, reason = "this is local and Sync")]
     fn get_inner(&self) -> &mut Inner {
         unsafe { &mut *self.inner.get() }
+    }
+
+    /// Sets the count.
+    /// It accepts a mutable reference, therefore, it doesn't use atomic operations.
+    ///
+    /// # Example
+    ///
+    /// ``` no_run
+    /// use std::rc::Rc;
+    /// use std::time::Duration;
+    /// use orengine::{local_executor, sleep};
+    /// use orengine::sync::{AsyncWaitGroup, LocalWaitGroup};
+    ///
+    /// fn acquire_wg() -> LocalWaitGroup { LocalWaitGroup::new() }
+    ///
+    /// # async fn local_wg_set_example() {
+    /// let mut wg = acquire_wg();
+    /// wg.set_mut(10);
+    ///
+    /// let wg = Rc::new(wg);
+    ///
+    /// for i in 0..10 {
+    ///     let wg = wg.clone();
+    ///
+    ///     local_executor().spawn_local(async move {
+    ///         sleep(Duration::from_millis(i)).await;
+    ///
+    ///         wg.done();
+    ///     });
+    /// }
+    ///
+    /// wg.wait().await;
+    /// # }
+    /// ```
+    pub fn set_mut(&mut self, count: usize) {
+        self.get_inner().count = count;
     }
 }
 

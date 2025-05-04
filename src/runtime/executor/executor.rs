@@ -108,7 +108,9 @@ pub fn local_executor() -> &'static mut Executor {
     }
 
     #[cfg(not(debug_assertions))]
-    unsafe { get_local_executor_ref().as_mut().unwrap_unchecked() }
+    unsafe {
+        get_local_executor_ref().as_mut().unwrap_unchecked()
+    }
 }
 
 /// The executor that runs futures in the current thread.
@@ -489,6 +491,11 @@ impl Executor {
     /// # Attention
     ///
     /// Execute [`tasks`](Task) only by this method or [`exec_task`](Executor::exec_task)!
+    ///
+    /// # Panics
+    ///
+    /// If the provided [`Task`] can't be executed.
+    /// For more details read [`Task::check_safety`].
     pub fn exec_task_now(&mut self, mut task: Task) {
         self.exec_series += 1;
 
@@ -543,6 +550,11 @@ impl Executor {
     /// # Attention
     ///
     /// Execute [`tasks`](Task) only by this method or [`exec_task_now`](Executor::exec_task_now)!
+    ///
+    /// # Panics
+    ///
+    /// If the provided [`Task`] can't be executed.
+    /// For more details read [`Task::check_safety`].
     #[inline]
     pub fn exec_task(&mut self, task: Task) {
         if self.exec_series < 63 {

@@ -7,12 +7,12 @@ use std::task::{Context, Poll};
 /// `EndLocalThreadAndWriteIntoPtr` is a wrapper of a future. After the future is done,
 /// a result of the future is written into the pointer.
 ///
-/// # Why it is needed?
+/// # Why it is necessary?
 ///
 /// Async block in async block allocates double memory.
-/// But if we use async block in `Future::poll`, it allocates only one memory.
+/// But if we use an async block in `Future::poll`, it allocates only one memory.
 ///
-/// When I say "async block" I mean future that is represented by `async {}`.
+/// When I say "async block," I mean the future represented by `async {}`.
 pub(crate) struct EndLocalThreadAndWriteIntoPtr<R, Fut: Future<Output = R>> {
     res_ptr: *mut Option<R>,
     future: Fut,

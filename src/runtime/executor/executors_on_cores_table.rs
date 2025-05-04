@@ -1,5 +1,5 @@
-use crate::utils::{get_core_ids, CoreId};
 use crate::BUG_MESSAGE;
+use crate::utils::{CoreId, get_core_ids};
 use std::collections::VecDeque;
 use std::sync::{LazyLock, Mutex};
 

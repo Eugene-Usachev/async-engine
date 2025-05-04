@@ -1,6 +1,6 @@
-use crate::io::{buf_pool, SendableBuffer};
+use crate::io::{SendableBuffer, buf_pool};
 use crate::runtime::executor::get_local_executor_ref;
-use crate::runtime::{update_current_task_locality, Locality};
+use crate::runtime::{Locality, update_current_task_locality};
 use std::future::Future;
 
 /// Allows `shared` [`Task`](crate::runtime::Task) to use a [`Buffer`](crate::io::Buffer).
@@ -203,7 +203,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate as orengine;
-    use crate::io::{with_any_len_buffer, with_buffer, with_full_buffer, FixedBuffer};
+    use crate::io::{FixedBuffer, with_any_len_buffer, with_buffer, with_full_buffer};
 
     #[orengine::test::test_shared]
     fn test_with_buffer() {

@@ -1,5 +1,5 @@
 use crate::io::sys::fallback::operations;
-use crate::io::sys::{self, os_sockaddr, MessageRecvHeader, OsMessageHeader, RawSocket};
+use crate::io::sys::{self, MessageRecvHeader, OsMessageHeader, RawSocket, os_sockaddr};
 #[cfg(feature = "fallback_thread_pool")]
 use crate::io::sys::{OsOpenOptions, OsPathPtr, RawFile};
 

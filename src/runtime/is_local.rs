@@ -7,7 +7,8 @@ use std::ops::Deref;
 /// to other threads.
 ///
 /// `Shared` structs can work with both `local` and `shared` tasks. It expects to be [`Send`]
-/// and [`Sync`]. THey can send data and [`Tasks`](crate::runtime::Task) to other threads.
+/// and [`Sync`].
+/// They can send data and [`Tasks`](crate::runtime::Task) to other threads.
 ///
 /// Since at the moment the constant functions in traits are not available, it contains only
 /// the [`IS_LOCAL`](IsLocal::IS_LOCAL) constant. But you can use const [`is_local`]

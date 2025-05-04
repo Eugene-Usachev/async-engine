@@ -208,8 +208,13 @@ impl Task {
     /// It checks `ref_count` and `executor_id` with locality.
     ///
     /// It is zero cost because it can be called only with `debug_assertions`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the provided [`Task`] is already executing or if it is `local` and has been moved
+    /// to another executor.
     #[cfg(debug_assertions)]
-    pub(crate) fn check_safety(&mut self) {
+    pub fn check_safety(&mut self) {
         if unsafe {
             self.is_executing
                 .as_ref()
@@ -242,10 +247,14 @@ impl Task {
     #[allow(unused_variables, reason = "it is wrong only with disable_task_pool")]
     pub(crate) unsafe fn release(self, executor: &mut Executor) {
         #[cfg(not(feature = "disable_task_pool"))]
-        { executor.task_pool().put(self); }
+        {
+            executor.task_pool().put(self);
+        }
 
         #[cfg(feature = "disable_task_pool")]
-        unsafe { drop(Box::from_raw(self.future_ptr())) }
+        unsafe {
+            drop(Box::from_raw(self.future_ptr()))
+        }
     }
 }
 

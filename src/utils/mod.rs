@@ -9,12 +9,12 @@ mod sealed;
 pub mod spin_lock;
 #[macro_use]
 mod task_structures_pool;
+mod array_deque;
+mod backoff;
 mod progressive_timeout;
 mod sendable_ptr;
-pub(crate) mod vec_map;
-mod array_deque;
 mod shuffle;
-mod backoff;
+pub(crate) mod vec_map;
 
 pub use array_deque::ArrayDeque;
 pub use backoff::Backoff;
@@ -27,6 +27,6 @@ pub use sendable_ptr::*;
 pub use shuffle::shuffle;
 pub use spin_lock::*;
 pub use task_structures_pool::{
-    acquire_sync_task_list_from_pool, acquire_task_vec_from_pool, SyncTaskListFromPool,
-    TaskVecFromPool,
+    SyncTaskListFromPool, TaskVecFromPool, acquire_sync_task_list_from_pool,
+    acquire_task_vec_from_pool,
 };

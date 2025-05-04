@@ -1,7 +1,7 @@
 use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::{AsRawSocket, RawSocket};
-use crate::io::worker::{local_worker, IoWorker};
+use crate::io::worker::{IoWorker, local_worker};
 use crate::local_executor;
 use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use std::future::Future;

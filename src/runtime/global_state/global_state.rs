@@ -1,10 +1,10 @@
+use crate::runtime::ExecutorSharedTaskList;
 use crate::runtime::global_state::subscribed_state::SubscribedState;
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::runtime::interaction_between_executors::SyncBatchOptimizedTaskQueue;
-use crate::runtime::ExecutorSharedTaskList;
 use crate::utils::vec_map::VecMap;
 use crate::utils::{SpinLock, SpinLockGuard};
-use crate::{local_executor, Executor};
+use crate::{Executor, local_executor};
 use std::sync::Arc;
 
 /// Contains [`SubscribedState`] and, optionally (`cfg(not(feature = "disable_send_task_to"))`),
@@ -245,7 +245,7 @@ mod tests {
     use super::*;
     use crate as orengine;
     use crate::runtime::Config;
-    use crate::{local_executor, sleep, Executor};
+    use crate::{Executor, local_executor, sleep};
     use std::thread;
     use std::time::Duration;
 

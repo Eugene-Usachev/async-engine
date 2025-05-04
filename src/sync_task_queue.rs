@@ -29,7 +29,7 @@ impl SyncTaskList {
 
     /// Returns the capacity of the list.
     ///
-    /// Calls in drop, so it has a mutability.
+    /// Calls while dropping, so it has mutability.
     #[inline]
     pub(crate) fn capacity(&mut self) -> usize {
         self.inner.get_mut().capacity()
@@ -51,9 +51,9 @@ impl SyncTaskList {
     ///
     /// # Safety
     ///
-    /// - Called not in [`Future::poll`](std::future::Future::poll) with current task.
+    /// - Called not in [`Future::poll`](Future::poll) with the current task.
     ///
-    /// In [`Future::poll`](std::future::Future::poll) [`call`](crate::Executor::invoke_call)
+    /// In [`Future::poll`](Future::poll) [`call`](crate::Executor::invoke_call)
     /// [`PushCurrentTaskTo`](crate::runtime::call::Call::PushCurrentTaskTo) instead.
     pub unsafe fn push(&self, task: Task) {
         self.inner.lock().push(task);
@@ -72,7 +72,7 @@ impl SyncTaskList {
         tasks.append(&mut guard);
     }
 
-    /// Pops all tasks from the list and appends them to provided [`VecDeque`].
+    /// Pops all tasks from the list and appends them to the provided [`VecDeque`].
     #[inline]
     pub fn pop_all_in_deque(&self, other_list: &mut VecDeque<Task>) {
         let mut guard = self.inner.lock();

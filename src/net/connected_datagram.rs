@@ -1,6 +1,6 @@
-use crate::io::{sys, AsyncPeek, AsyncRecv, AsyncSend};
-use crate::net::addr::FromSockAddr;
+use crate::io::{AsyncPeek, AsyncRecv, AsyncSend, sys};
 use crate::net::Socket;
+use crate::net::addr::FromSockAddr;
 use std::io;
 use std::io::Error;
 

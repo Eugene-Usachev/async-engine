@@ -1,4 +1,4 @@
-use crate::runtime::{local_executor, Task};
+use crate::runtime::{Task, local_executor};
 use std::collections::btree_map::Entry::{Occupied, Vacant};
 use std::future::Future;
 use std::pin::Pin;
@@ -90,6 +90,6 @@ mod tests {
         ex.exec_local_future(sleep_for(Duration::from_millis(2), 2, arr.clone()));
 
         sleep(Duration::from_millis(5)).await;
-        assert_eq!(&vec![1, 2, 3, 4], &*arr.borrow());
+        assert_eq!(vec![1, 2, 3, 4], *arr.borrow());
     }
 }

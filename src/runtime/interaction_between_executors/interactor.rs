@@ -1,5 +1,5 @@
-use crate::runtime::interaction_between_executors::SyncBatchOptimizedTaskQueue;
 use crate::runtime::Task;
+use crate::runtime::interaction_between_executors::SyncBatchOptimizedTaskQueue;
 use crate::utils::vec_map::VecMap;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display};

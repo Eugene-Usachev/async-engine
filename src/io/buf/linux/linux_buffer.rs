@@ -1,4 +1,4 @@
-use std::alloc::{alloc, Layout};
+use std::alloc::{Layout, alloc};
 use std::marker::PhantomData;
 use std::ptr;
 

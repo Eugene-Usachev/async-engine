@@ -1,6 +1,6 @@
+use crate::BUG_MESSAGE;
 use crate::io::IoWorkerConfig;
 use crate::utils::SpinLock;
-use crate::BUG_MESSAGE;
 use std::mem::discriminant;
 
 /// A shared config of state of the all runtime.

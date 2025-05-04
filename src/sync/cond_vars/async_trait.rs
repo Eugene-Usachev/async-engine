@@ -1,6 +1,6 @@
 use crate::runtime::IsLocal;
-use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::AsyncMutex;
+use crate::sync::mutexes::AsyncSubscribableMutex;
 use std::future::Future;
 
 /// `AsyncCondVar` is a `condition variable` that allows tasks to wait until

@@ -1263,7 +1263,7 @@ mod tests {
             receiver
                 .recv_in_ptr(Ptr::from(&mut prev_elem))
                 .await
-                .unwrap()
+                .unwrap();
         };
         assert_eq!(prev_elem.value, 3);
         assert_eq!(dropped.lock().as_slice(), [2]);

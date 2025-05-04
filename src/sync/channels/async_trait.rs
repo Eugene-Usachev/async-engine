@@ -602,6 +602,7 @@ pub trait AsyncChannel<T>: AsyncSender<T> + AsyncReceiver<T> {
 }
 
 impl<T, G: AsyncSender<T>, H: Deref<Target = G> + IsLocal> AsyncSender<T> for H {
+    #[allow(clippy::future_not_send, reason = "It is not Send when T or H is not Send, it is fine")]
     async fn send(&self, value: T) -> Result<(), SendErr<T>> {
         (**self).send(value).await
     }
@@ -610,12 +611,14 @@ impl<T, G: AsyncSender<T>, H: Deref<Target = G> + IsLocal> AsyncSender<T> for H 
         (**self).try_send(value)
     }
 
+    #[allow(clippy::future_not_send, reason = "It is not Send when T or H is not Send, it is fine")]
     async fn sender_close(&self) {
         (**self).sender_close().await;
     }
 }
 
 impl<T, G: AsyncReceiver<T>, H: Deref<Target = G> + IsLocal> AsyncReceiver<T> for H {
+    #[allow(clippy::future_not_send, reason = "It is not Send when T or H is not Send, it is fine")]
     async unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), RecvErr> {
         unsafe { (**self).recv_in_ptr(slot).await }
     }
@@ -624,6 +627,7 @@ impl<T, G: AsyncReceiver<T>, H: Deref<Target = G> + IsLocal> AsyncReceiver<T> fo
         unsafe { (**self).try_recv_in_ptr(slot) }
     }
 
+    #[allow(clippy::future_not_send, reason = "It is not Send when T or H is not Send, it is fine")]
     async fn receiver_close(&self) {
         (**self).receiver_close().await;
     }

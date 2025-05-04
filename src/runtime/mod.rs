@@ -10,7 +10,7 @@ mod shutdown;
 pub mod task;
 pub mod waker;
 
-pub use executor::{local_executor, Executor};
+pub use executor::{Executor, local_executor};
 
 pub use asyncify::*;
 pub use call::*;

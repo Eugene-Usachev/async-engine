@@ -162,8 +162,8 @@ impl Drop for UnixStream {
 mod tests {
     use crate as orengine;
     use crate::io::{
-        buffer, get_fixed_buffer, AsyncAccept, AsyncBind, AsyncConnectStream, AsyncPeek,
-        AsyncPollSocket, AsyncRecv, AsyncSend, FixedBuffer,
+        AsyncAccept, AsyncBind, AsyncConnectStream, AsyncPeek, AsyncPollSocket, AsyncRecv,
+        AsyncSend, FixedBuffer, buffer, get_fixed_buffer,
     };
     use crate::net::{UnixListener, UnixStream};
     use crate::sync::{

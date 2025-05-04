@@ -1,11 +1,11 @@
+use crate::BUG_MESSAGE;
 use crate::io::config::IoWorkerConfig;
 use crate::io::io_request_data::IoRequestDataPtr;
 use crate::io::sys;
 use crate::io::sys::{
-    os_sockaddr, MessageRecvHeader, OsMessageHeader, OsOpenOptions, OsPathPtr, RawFile, RawSocket,
-    WorkerSys,
+    MessageRecvHeader, OsMessageHeader, OsOpenOptions, OsPathPtr, RawFile, RawSocket, WorkerSys,
+    os_sockaddr,
 };
-use crate::BUG_MESSAGE;
 use std::cell::UnsafeCell;
 use std::net::Shutdown;
 use std::time::{Duration, Instant};

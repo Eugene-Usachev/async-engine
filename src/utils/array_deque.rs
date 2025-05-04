@@ -39,9 +39,7 @@ impl<T, const N: usize> ArrayDeque<T, N> {
     fn to_physical_idx(&self, idx: usize) -> usize {
         let logical_index = self.head + idx;
 
-        debug_assert!(
-            logical_index < N || (logical_index - N) < N
-        );
+        debug_assert!(logical_index < N || (logical_index - N) < N);
         if logical_index >= N {
             logical_index - N
         } else {
@@ -68,7 +66,10 @@ impl<T, const N: usize> ArrayDeque<T, N> {
             let idx = self.head;
             self.head = self.to_physical_idx(1);
 
-            assert_hint(self.stack.len() >= idx, &format!("idx: {}, len: {}", idx, self.stack.len()));
+            assert_hint(
+                self.stack.len() >= idx,
+                &format!("idx: {}, len: {}", idx, self.stack.len()),
+            );
 
             Some(unsafe { (&raw mut self.stack[idx]).read() })
         } else {
@@ -123,7 +124,11 @@ impl<T, const N: usize> Default for ArrayDeque<T, N> {
 
 impl<T, const N: usize> From<[T; N]> for ArrayDeque<T, N> {
     fn from(array: [T; N]) -> Self {
-        Self { stack: ManuallyDrop::new(array), len: N, head: 0 }
+        Self {
+            stack: ManuallyDrop::new(array),
+            len: N,
+            head: 0,
+        }
     }
 }
 

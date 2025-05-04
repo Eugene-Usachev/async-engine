@@ -2,15 +2,15 @@ use crate::io::config::IoWorkerConfig;
 use crate::io::io_request_data::IoRequestDataPtr;
 use crate::io::sys;
 use crate::io::sys::{
-    os_sockaddr, MessageRecvHeader, OsMessageHeader, OsPathPtr, RawFile, RawSocket,
+    MessageRecvHeader, OsMessageHeader, OsPathPtr, RawFile, RawSocket, os_sockaddr,
 };
 use crate::io::time_bounded_io_task::TimeBoundedIoTask;
 use crate::io::worker::IoWorker;
 use crate::runtime::local_executor;
-use crate::{Executor, BUG_MESSAGE};
+use crate::{BUG_MESSAGE, Executor};
 use io_uring::squeue::Entry;
 use io_uring::types::{OpenHow, SubmitArgs, Timespec};
-use io_uring::{cqueue, opcode, types, IoUring, Probe};
+use io_uring::{IoUring, Probe, cqueue, opcode, types};
 use libc;
 use std::cell::UnsafeCell;
 use std::collections::{BTreeSet, VecDeque};

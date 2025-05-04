@@ -139,12 +139,18 @@ mod tests {
 
             fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
                 for _ in 0..SPIN_LIMIT {
-                    assert!(matches!(Box::pin(self.backoff.snooze()).as_mut().poll(cx), Poll::Ready(())));
+                    assert!(matches!(
+                        Box::pin(self.backoff.snooze()).as_mut().poll(cx),
+                        Poll::Ready(())
+                    ));
                 }
 
                 assert!(self.backoff.is_completed());
 
-                assert!(matches!(Box::pin(self.backoff.snooze()).as_mut().poll(cx), Poll::Pending));
+                assert!(matches!(
+                    Box::pin(self.backoff.snooze()).as_mut().poll(cx),
+                    Poll::Pending
+                ));
 
                 Poll::Ready(())
             }

@@ -1,6 +1,6 @@
-use crate::runtime::{local_executor, IsLocal, Task};
+use crate::runtime::{IsLocal, Task, local_executor};
 use crate::sync::wait_groups::AsyncWaitGroup;
-use crate::utils::{acquire_task_vec_from_pool, TaskVecFromPool};
+use crate::utils::{TaskVecFromPool, acquire_task_vec_from_pool};
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::pin::Pin;

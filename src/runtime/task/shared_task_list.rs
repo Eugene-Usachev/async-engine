@@ -1,6 +1,6 @@
 use crate::runtime::Task;
-use crate::utils::never_wait_lock::NeverWaitLock;
 use crate::utils::SpinLockGuard;
+use crate::utils::never_wait_lock::NeverWaitLock;
 use std::collections::VecDeque;
 use std::ptr;
 

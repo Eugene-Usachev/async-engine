@@ -7,7 +7,7 @@ use crate::runtime::Task;
 
 /// `Yield` implements the [`Future`] trait for yielding the current task.
 ///
-/// When [`Future::poll`] is called, it will add current task to
+/// When [`Future::poll`] is called, it will add the current task to
 /// the beginning of the LIFO queue.
 pub struct Yield {
     was_yielded: bool,

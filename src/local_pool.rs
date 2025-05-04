@@ -1,5 +1,5 @@
 /// This macro creates a new thread local pool.
-/// Because it is thread local it is lockless.
+/// Because it is `thread local`, it is lockless.
 ///
 /// You can use this pool for reusing allocated in heap memory.
 ///
@@ -8,13 +8,13 @@
 /// Generated pool has a method `acquire()` that returns a guard for the pool.
 /// It implements [`Deref`](core::ops::Deref) and [`DerefMut`](core::ops::DerefMut).
 ///
-/// When the guard is dropped the value is released back to the pool.
+/// When the guard is dropped, the value is released back to the pool.
 ///
-/// If you want to get value from guard you can use the guard's method `into_inner`.
+/// If you want to get value from a guard, you can use the guard's method `into_inner`.
 ///
 /// # Arguments
 ///
-/// - vis: Visibility specifier for the generated structs and methods (e.g., pub, pub(self)).
+/// - `vis`: Visibility specifier for the generated structs and methods (e.g., pub, pub(self)).
 ///
 /// - `pool_thread_static_name`: Name of the thread-local static pool.
 ///

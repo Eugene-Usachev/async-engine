@@ -10,11 +10,11 @@ use crate::io::{
     AsyncBind, AsyncConnectDatagram, AsyncPeekFrom, AsyncPollSocket, AsyncRecvFrom, AsyncSendTo,
     AsyncSocketClose,
 };
+use crate::net::BindConfig;
 use crate::net::addr::{IntoSockAddr, ToSockAddrs};
 use crate::net::creators_of_sockets::new_unix_datagram;
 use crate::net::unix::connected_datagram::UnixConnectedDatagram;
 use crate::net::unix::unix_impl_socket;
-use crate::net::BindConfig;
 use crate::net::{Datagram, Socket};
 use crate::runtime::local_executor;
 use crate::utils::each_addr::each_addr;

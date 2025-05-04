@@ -3,14 +3,14 @@
 use crate::local_executor;
 use crate::runtime::Task;
 use crate::sync::channels::state::CallStatePtr;
-use crate::utils::hints::unreachable_hint;
 use crate::utils::Backoff;
+use crate::utils::hints::unreachable_hint;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::ptr;
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst};
-use std::sync::atomic::{fence, AtomicUsize};
+use std::sync::atomic::{AtomicUsize, fence};
 
 const NOT_ACQUIRED: usize = 0;
 const ACQUIRED: usize = 1;
@@ -353,7 +353,7 @@ impl TaskInSelectBranch {
                                     continue 'this_task;
                                 }
                             }
-                            _ => unreachable_hint()
+                            _ => unreachable_hint(),
                         }
                     } else {
                         self.task_in_select.state.store(ACQUIRED, Release);
@@ -404,7 +404,11 @@ impl TaskInSelectPool {
         Self { vec: Vec::new() }
     }
 
-    fn acquire_for_task(&mut self, task: Task, resolved_branch_id: NonNull<usize>) -> NonNull<Inner> {
+    fn acquire_for_task(
+        &mut self,
+        task: Task,
+        resolved_branch_id: NonNull<usize>,
+    ) -> NonNull<Inner> {
         if let Some(mut inner) = self.vec.pop() {
             let inner_ref = unsafe { inner.as_mut() };
 

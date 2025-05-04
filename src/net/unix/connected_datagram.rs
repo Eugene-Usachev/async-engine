@@ -137,7 +137,7 @@ impl Drop for UnixConnectedDatagram {
 
 #[cfg(test)]
 mod tests {
-    use crate::io::{get_fixed_buffer, AsyncBind, AsyncConnectDatagram};
+    use crate::io::{AsyncBind, AsyncConnectDatagram, get_fixed_buffer};
     use crate::net::unix::UnixDatagram;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;

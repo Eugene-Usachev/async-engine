@@ -1,7 +1,7 @@
 // TODO docs
 
 use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 use std::ptr::NonNull;
 

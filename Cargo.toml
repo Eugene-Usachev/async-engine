@@ -24,16 +24,16 @@ disable_task_pool = []
 
 [dependencies]
 orengine-macros = { version = "6.0.0", path = "./orengine-macros" }
-core_affinity = "0.8.1"
-socket2 = { version = "0.5.8", features = ["all"] }
-smallvec = "2.0.0-alpha.10"
+core_affinity = "0.8.3"
+socket2 = { version = "0.5.9", features = ["all"] }
+smallvec = "2.0.0-alpha.11"
 ahash = "0.8.11"
 fastrand = "2.3.0"
 crossbeam = "0.8.4"
 libc = "0.2.169"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = "0.52.0"
+windows-sys = "0.59.0"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 positioned-io = "0.3.3"

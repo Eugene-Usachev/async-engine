@@ -7,7 +7,7 @@ use std::mem::ManuallyDrop;
 use std::net::SocketAddr;
 
 use crate::io::sys::{AsRawSocket, AsSocket, FromRawSocket, IntoRawSocket, RawSocket};
-use crate::io::{sys, AsyncAccept, AsyncBind, AsyncPollSocket, AsyncSocketClose};
+use crate::io::{AsyncAccept, AsyncBind, AsyncPollSocket, AsyncSocketClose, sys};
 use crate::net::creators_of_sockets::new_tcp_socket;
 use crate::net::tcp::TcpStream;
 use crate::net::{BindConfig, Listener, Socket};
@@ -193,10 +193,12 @@ mod tests {
         listener.set_ttl(122).expect("set_ttl call failed");
         assert_eq!(listener.ttl().expect("ttl call failed"), 122);
 
-        assert!(listener
-            .take_error()
-            .expect("take_error call failed")
-            .is_none());
+        assert!(
+            listener
+                .take_error()
+                .expect("take_error call failed")
+                .is_none()
+        );
     }
 
     async fn test_listener_accept_with_config(config: &BindConfig, port: u16) {

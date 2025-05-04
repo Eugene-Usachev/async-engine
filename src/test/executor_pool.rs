@@ -3,7 +3,7 @@
 use crate::bug_message::BUG_MESSAGE;
 use crate::runtime::Config;
 use crate::sync::{AsyncChannel, AsyncReceiver, AsyncSender, Channel};
-use crate::{local_executor, Executor};
+use crate::{Executor, local_executor};
 use crossbeam::queue::SegQueue;
 use std::future::Future;
 use std::panic::UnwindSafe;

@@ -30,7 +30,9 @@ impl<T> WaitingTaskDequePool<T> {
     }
 
     fn maybe_shrink(&mut self) {
-        let average = (self.bytes_allocated - self.queues.len() * size_of::<SenderReceiverQueue<()>>()) / self.queues.len(); // average is not the median, but it is too expensive to calculate the median.
+        let average = (self.bytes_allocated
+            - self.queues.len() * size_of::<SenderReceiverQueue<()>>())
+            / self.queues.len(); // average is not the median, but it is too expensive to calculate the median.
 
         self.queues.retain(|queue| {
             if queue.capacity() < average {
@@ -110,14 +112,11 @@ fn acquire_waiting_task_deque_from_pool<T>() -> SenderReceiverQueue<T> {
 
 /// Puts the provided [`WaitingTaskDeque`] back into the pool.
 fn put_waiting_task_deque_to_pool<T>(deque: SenderReceiverQueue<T>) {
-    WAITING_TASK_DEQUE_POOL
-        .with(|pool| {
-            let pool = unsafe {
-                &mut *pool.get().cast::<WaitingTaskDequePool<T>>()
-            };
+    WAITING_TASK_DEQUE_POOL.with(|pool| {
+        let pool = unsafe { &mut *pool.get().cast::<WaitingTaskDequePool<T>>() };
 
-            pool.push(deque);
-        });
+        pool.push(deque);
+    });
 }
 
 macro_rules! generate_struct {
@@ -350,26 +349,23 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
 
             match data {
                 WaitingTask::Common(task, call_state, slot) => {
-                    return match task_in_select_branch.acquire_once() {
-                        Some(acquired_task) => {
-                            setter_fn(call_state, slot);
+                    return if let Some(acquired_task) = task_in_select_branch.acquire_once() {
+                        setter_fn(call_state, slot);
 
-                            local_executor().exec_task(task);
-                            local_executor().exec_task(acquired_task);
+                        local_executor().exec_task(task);
+                        local_executor().exec_task(acquired_task);
 
-                            PopIfAcquiredResult::Ok
+                        PopIfAcquiredResult::Ok
+                    } else {
+                        if IS_RECEIVER_POP {
+                            self.queue
+                                .push_receiver(WaitingTask::Common(task, call_state, slot));
+                        } else {
+                            self.queue
+                                .push_sender(WaitingTask::Common(task, call_state, slot));
                         }
-                        None => {
-                            if IS_RECEIVER_POP {
-                                self.queue
-                                    .push_receiver(WaitingTask::Common(task, call_state, slot));
-                            } else {
-                                self.queue
-                                    .push_sender(WaitingTask::Common(task, call_state, slot));
-                            }
 
-                            PopIfAcquiredResult::AlreadyAcquired
-                        }
+                        PopIfAcquiredResult::AlreadyAcquired
                     };
                 }
 

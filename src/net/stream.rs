@@ -1,7 +1,7 @@
-use crate::io::{sys, AsyncConnectStream, AsyncPeek, AsyncRecv, AsyncSend, AsyncShutdown};
+use crate::io::{AsyncConnectStream, AsyncPeek, AsyncRecv, AsyncSend, AsyncShutdown, sys};
+use crate::net::Socket;
 use crate::net::addr::FromSockAddr;
 use crate::net::new_unix_unsupported_error;
-use crate::net::Socket;
 use std::io;
 use std::io::Error;
 use std::time::Duration;

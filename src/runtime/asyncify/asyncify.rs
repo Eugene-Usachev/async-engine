@@ -103,7 +103,7 @@ mod tests {
         guard = cond_var.wait(guard).unwrap();
 
         assert!(*guard); // this executor was blocked, and
-                         // if assertion passes, other thread (from the thread pool) processed the list.
+        // if assertion passes, other thread (from the thread pool) processed the list.
         drop(guard);
     }
 }

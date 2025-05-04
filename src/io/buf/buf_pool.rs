@@ -1,8 +1,8 @@
-#[cfg(target_os = "linux")]
-use crate::io::worker::local_worker;
 use crate::io::Buffer;
 #[cfg(target_os = "linux")]
 use crate::io::FixedBuffer;
+#[cfg(target_os = "linux")]
+use crate::io::worker::local_worker;
 use crate::utils::assert_hint;
 #[cfg(target_os = "linux")]
 use libc;

@@ -1,7 +1,7 @@
+use crate::sync::AsyncSender;
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
 use crate::sync::channels::state::CallStatePtr;
 use crate::sync::channels::waiting_task::TaskInSelectBranch;
-use crate::sync::AsyncSender;
 use std::ptr::NonNull;
 
 // TODO docs and update from `TrySendInSelectErr`

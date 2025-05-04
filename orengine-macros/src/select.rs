@@ -208,7 +208,7 @@ fn maybe_can_be_simplified(
                                         if __step__ <= 6 {
                                             __step__ += 1;
                                         }
-                                    
+
                                         continue;
                                     },
                                 }
@@ -424,7 +424,8 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                     });
 
                     // TODO use mem::forget
-                    senders_fn_args.push(quote! { mut #sender_arg_name: Option<#generic_name::Data> });
+                    senders_fn_args
+                        .push(quote! { mut #sender_arg_name: Option<#generic_name::Data> });
 
                     senders_provide_fn_args.push(quote! { Some(#value) });
 

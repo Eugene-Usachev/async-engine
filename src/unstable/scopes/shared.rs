@@ -1,4 +1,4 @@
-use crate::runtime::{local_executor, Locality};
+use crate::runtime::{Locality, local_executor};
 use crate::sync::{AsyncWaitGroup, WaitGroup};
 use crate::{panic_if_local_in_future, yield_now};
 use std::future::Future;

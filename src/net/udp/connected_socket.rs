@@ -168,7 +168,7 @@ impl Drop for UdpConnectedSocket {
 
 #[cfg(test)]
 mod tests {
-    use crate::io::{get_fixed_buffer, AsyncBind, AsyncConnectDatagram};
+    use crate::io::{AsyncBind, AsyncConnectDatagram, get_fixed_buffer};
     use crate::net::udp::UdpSocket;
     use std::net::SocketAddr;
     use std::str::FromStr;

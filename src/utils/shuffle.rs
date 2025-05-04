@@ -23,7 +23,7 @@ pub fn shuffle<T>(v: &mut [T]) {
 
             let x = x.0;
             let n = i + 1;
-            let j = ((x as u64).wrapping_mul(n as u64) >> 32) as u32 as usize;
+            let j = (u64::from(x).wrapping_mul(n as u64) >> 32) as u32 as usize;
 
             v.swap(i, j);
         }

@@ -142,9 +142,9 @@ mod tests {
     use crate::sleep;
     use crate::sync::{AsyncWaitGroup, WaitGroup};
     use crate::test::sched_future_to_another_thread;
+    use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::SeqCst;
-    use std::sync::Arc;
     use std::time::Duration;
 
     #[orengine::test::test_shared]

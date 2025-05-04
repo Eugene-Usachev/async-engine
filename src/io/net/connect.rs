@@ -11,7 +11,7 @@ use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys;
 use crate::io::sys::{AsRawSocket, FromRawSocket, IntoRawSocket, RawSocket};
-use crate::io::worker::{local_worker, IoWorker};
+use crate::io::worker::{IoWorker, local_worker};
 use crate::local_executor;
 use crate::net::addr::{IntoSockAddr, ToSockAddrs};
 use crate::net::{ConnectedDatagram, Socket};

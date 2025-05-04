@@ -56,9 +56,7 @@ impl<'mutex, T: ?Sized> NaiveMutexGuard<'mutex, T> {
     /// It is safe, because only one thread can access the value at the same time.
     ///
     /// It is used to get one more reference to the value.
-    pub(crate) fn get_mut<'new_life_time>(
-        &self,
-    ) -> &'new_life_time mut T {
+    pub(crate) fn get_mut<'new_life_time>(&self) -> &'new_life_time mut T {
         unsafe { &mut *self.mutex.value.get() }
     }
 }

@@ -11,7 +11,7 @@ use crate::io::sys::{
 use crate::io::{AsyncAccept, AsyncBind, AsyncPollSocket, AsyncSocketClose};
 use crate::net::addr::ToSockAddrs;
 use crate::net::creators_of_sockets::new_unix_stream;
-use crate::net::unix::{unix_impl_socket, UnixStream};
+use crate::net::unix::{UnixStream, unix_impl_socket};
 use crate::net::{BindConfig, Listener, Socket};
 use crate::runtime::local_executor;
 use crate::utils::each_addr::each_addr;
@@ -198,10 +198,12 @@ mod tests {
             ADDR
         );
 
-        assert!(listener
-            .take_error()
-            .expect("take_error call failed")
-            .is_none());
+        assert!(
+            listener
+                .take_error()
+                .expect("take_error call failed")
+                .is_none()
+        );
     }
 
     #[orengine::test::test_local]

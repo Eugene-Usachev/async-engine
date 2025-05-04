@@ -248,13 +248,13 @@ impl<T> Drop for LocalRefMut<'_, T> {
 /// # Safety
 ///
 /// - `Local` is used in one thread;
-/// - Before every `await` operation, [`LocalRef`] and [`LocalRefMut`] need to be dropped, if
-///   other task can mutate the value and.
+/// - Before every `await operation`, [`LocalRef`] and [`LocalRefMut`] need to be dropped, if
+///   another task can mutate the value and.
 ///
-/// It is checked with `debug_assertions`. If you cannot guarantee compliance with the above rules
+/// It is checked with `debug_assertions`. If you cannot guarantee compliance with the above rules,
 /// you should use [`LocalMutex`](crate::sync::LocalMutex) or
 /// [`LocalRWLock`](crate::sync::LocalRWLock) instead. Local synchronization-primitives have
-/// almost the same performance as `Local` or `Rc<RefCell>` and can be used in single-threaded
+/// almost the same performance as `Local` or `Rc<RefCell>` and can be used in a single-threaded
 /// concurrency context.  
 ///
 /// # Shared-Nothing and [`spawn_local`](crate::Executor::spawn_local)
@@ -448,8 +448,8 @@ impl<T: Debug> Debug for Local<T> {
 impl<T: Display> Display for Local<T> {
     /// # Panics
     ///
-    /// Panics with `debug_assertions` if the value in `Local` is currently mutably borrowed or if
-    /// `Local` has been moved to another thread.
+    /// Panics with `debug_assertions` if`Local` has been moved to another thread
+    /// if the value in `Local` is currently mutably borrowed.
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         debug_check_parent_executor_id!(self);

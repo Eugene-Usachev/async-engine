@@ -7,12 +7,12 @@ use socket2::{SockAddr, SockRef};
 
 use crate::io::sys::{AsRawSocket, AsSocket, FromRawSocket, IntoRawSocket, RawSocket};
 use crate::io::{
-    sys, AsyncBind, AsyncConnectDatagram, AsyncPeekFrom, AsyncPollSocket, AsyncRecvFrom,
-    AsyncSendTo, AsyncSocketClose,
+    AsyncBind, AsyncConnectDatagram, AsyncPeekFrom, AsyncPollSocket, AsyncRecvFrom, AsyncSendTo,
+    AsyncSocketClose, sys,
 };
+use crate::net::BindConfig;
 use crate::net::creators_of_sockets::new_udp_socket;
 use crate::net::udp::connected_socket::UdpConnectedSocket;
-use crate::net::BindConfig;
 use crate::net::{Datagram, Socket};
 use crate::runtime::local_executor;
 
@@ -461,15 +461,19 @@ mod tests {
         datagram
             .set_multicast_loop_v4(false)
             .expect("Failed to set multicast_loop_v4");
-        assert!(!datagram
-            .multicast_loop_v4()
-            .expect("Failed to get multicast_loop_v4"));
+        assert!(
+            !datagram
+                .multicast_loop_v4()
+                .expect("Failed to get multicast_loop_v4")
+        );
         datagram
             .set_multicast_loop_v4(true)
             .expect("Failed to set multicast_loop_v4");
-        assert!(datagram
-            .multicast_loop_v4()
-            .expect("Failed to get multicast_loop_v4"));
+        assert!(
+            datagram
+                .multicast_loop_v4()
+                .expect("Failed to get multicast_loop_v4")
+        );
 
         datagram
             .set_multicast_ttl_v4(124)

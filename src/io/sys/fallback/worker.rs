@@ -11,7 +11,7 @@ use crate::io::sys::{
 };
 use crate::io::time_bounded_io_task::TimeBoundedIoTask;
 use crate::io::worker::IoWorker;
-use crate::io::{sys, IoWorkerConfig};
+use crate::io::{IoWorkerConfig, sys};
 use crate::local_executor;
 use crate::runtime::call::Call;
 use mio::Interest;
@@ -211,7 +211,9 @@ impl FallbackWorker {
                 Ok(ret) => Ok(ret),
 
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                    panic!("{BUG_MESSAGE}: io operation is not pollable but returns WouldBlock. Should use a handle_io_call");
+                    panic!(
+                        "{BUG_MESSAGE}: io operation is not pollable but returns WouldBlock. Should use a handle_io_call"
+                    );
                 }
 
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => {
@@ -225,7 +227,9 @@ impl FallbackWorker {
                             .raw_os_error()
                             .is_some_and(|code| code == libc::EINPROGRESS)
                         {
-                            panic!("{BUG_MESSAGE}: io operation is not pollable but returns InProgress. Should use a handle_io_call");
+                            panic!(
+                                "{BUG_MESSAGE}: io operation is not pollable but returns InProgress. Should use a handle_io_call"
+                            );
                         } else {
                             Err(err)
                         }

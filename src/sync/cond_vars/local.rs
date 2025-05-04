@@ -1,7 +1,7 @@
-use crate::runtime::{local_executor, IsLocal, Task};
+use crate::runtime::{IsLocal, Task, local_executor};
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncCondVar, AsyncMutex, AsyncMutexGuard, LocalMutex};
-use crate::utils::{acquire_task_vec_from_pool, TaskVecFromPool};
+use crate::utils::{TaskVecFromPool, acquire_task_vec_from_pool};
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::marker::PhantomData;

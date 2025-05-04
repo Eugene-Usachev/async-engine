@@ -6,10 +6,10 @@ use crate::io::sys::{
 };
 use crate::io::time_bounded_io_task::TimeBoundedIoTask;
 use crate::io::worker::IoWorker;
-use crate::io::{sys, IoWorkerConfig};
+use crate::io::{IoWorkerConfig, sys};
 use crate::local_executor;
-use crate::runtime::call::Call;
 use crate::runtime::Task;
+use crate::runtime::call::Call;
 use mio::Interest;
 use socket2::{Domain, Protocol, Type};
 use std::cell::UnsafeCell;

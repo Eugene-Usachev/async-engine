@@ -6,9 +6,9 @@ use std::task::{Context, Poll};
 
 use crate::panic_if_local_in_future;
 use crate::runtime::call::Call;
-use crate::runtime::{local_executor, IsLocal};
+use crate::runtime::{IsLocal, local_executor};
 use crate::sync::{AsyncCondVar, AsyncMutex, AsyncMutexGuard, AsyncSubscribableMutex, Mutex};
-use crate::utils::{acquire_sync_task_list_from_pool, SyncTaskListFromPool};
+use crate::utils::{SyncTaskListFromPool, acquire_sync_task_list_from_pool};
 
 /// Current state of the [`WaitCondVar`].
 enum WaitState {

@@ -7,7 +7,7 @@ or a shared-all architecture, Orengine provides you with the tools to reach maxi
 # Stage
 
 In development. This library is not ready for
-production use and its API can be changed.
+production use, and its API can be changed.
 
 Wait for `v1.0.0` and media posts.
 
@@ -34,9 +34,9 @@ Wait for `v1.0.0` and media posts.
 - __No Compromises on Performance__: Highly tuned internal code-based optimizations that prioritize performance over
   unnecessary complexity.
 
-# Task execution: local vs shared
+# Task execution: local vs. shared
 
-Orengine offers two modes of execution of tasks and `Futures`: local and shared, each suited to different
+Orengine offers two execution modes for tasks and `Futures`: local and shared, each suited to different
 architectural needs and performance optimizations.
 
 ## `Local Tasks`
@@ -50,7 +50,7 @@ architectural needs and performance optimizations.
 
 ## `Shared Tasks`
 
-- Don't rewrite the 'usual' architecture: where you use Tokio, you can use shared tasks to achieve the same result,
+- Don't rewrite the 'usual' architecture: where you use Tokio, you can use shared tasks to achieve the same result
   but with better performance.
 
 - Shared tasks and `Futures` can be moved freely between threads, allowing more dynamic distribution of workload

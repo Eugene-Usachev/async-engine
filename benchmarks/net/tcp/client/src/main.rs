@@ -102,7 +102,7 @@ fn bench_throughput() {
 
                         for _ in 0..*COUNT {
                             conn.write_all(&msg).unwrap();
-                            let _ = conn.read_exact(&mut buf).unwrap();
+                            conn.read_exact(&mut buf).unwrap();
                         }
                     }));
                 }

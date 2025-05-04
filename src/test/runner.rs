@@ -1,4 +1,4 @@
-//! This module provides a way to run tests with reusing
+//! This module provides a way to run tests by reusing
 //! the same [`Executor`] via [`run_test_and_block_on_local`]
 //! and [`run_test_and_block_on_shared`].
 //!
@@ -26,12 +26,12 @@
 //! instead of [`run_test_and_block_on_shared`]. Read [`run_test_and_block_on_local`] and
 //! [`run_test_and_block_on_shared`] for examples.
 use crate::bug_message::BUG_MESSAGE;
-use crate::runtime::executor::get_local_executor_ref;
 use crate::runtime::Config;
-use crate::{local_executor, yield_now, Executor};
+use crate::runtime::executor::get_local_executor_ref;
+use crate::{Executor, local_executor, yield_now};
 use std::future::Future;
 
-/// Prints the first test message. It contains an information about build configuration.
+/// Prints the first test message. It contains information about build configuration.
 fn print_first_test_message() {
     #[cfg(target_os = "linux")]
     {

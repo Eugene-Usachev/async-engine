@@ -119,7 +119,7 @@ mod tests {
     use super::*;
     use crate as orengine;
     use crate::runtime::Task;
-    use crate::{local_executor, Local};
+    use crate::{Local, local_executor};
 
     #[orengine::test::test_local]
     fn test_task_data() {

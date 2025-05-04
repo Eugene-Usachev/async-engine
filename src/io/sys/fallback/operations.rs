@@ -1,6 +1,6 @@
 use crate::io::sys::{
-    self, FromRawFile, FromRawSocket, IntoRawFile, IntoRawSocket, MessageRecvHeader,
-    OsMessageHeader, OsOpenOptions, OsPathPtr, RawFile, RawSocket, MSG_PEEK_FLAG,
+    self, FromRawFile, FromRawSocket, IntoRawFile, IntoRawSocket, MSG_PEEK_FLAG, MessageRecvHeader,
+    OsMessageHeader, OsOpenOptions, OsPathPtr, RawFile, RawSocket,
 };
 use positioned_io::{ReadAt, WriteAt};
 use socket2::{Domain, MaybeUninitSlice, Protocol, SockAddr, Type};

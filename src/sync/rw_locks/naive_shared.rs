@@ -429,8 +429,8 @@ mod tests {
     use super::*;
     use crate as orengine;
     use crate::local_executor;
-    use std::sync::atomic::Ordering::SeqCst;
     use std::sync::Arc;
+    use std::sync::atomic::Ordering::SeqCst;
 
     #[orengine::test::test_shared]
     fn test_naive_rw_lock() {

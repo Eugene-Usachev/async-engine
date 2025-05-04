@@ -1,5 +1,5 @@
-use crate::io::sys::RawSocket;
 use crate::io::Socket;
+use crate::io::sys::RawSocket;
 use socket2::{Domain, Protocol, Type};
 use std::net::SocketAddr;
 

@@ -1,8 +1,8 @@
-use crate::runtime::{local_executor, Config};
-use crate::{utils, Executor};
+use crate::runtime::{Config, local_executor};
+use crate::{Executor, utils};
 use std::future::Future;
 
-/// It does next steps on each core:
+/// It does the next steps on each core:
 ///
 /// 1 - Initializes the [`Executor`] with provided [`Config`];
 ///
@@ -12,7 +12,7 @@ use std::future::Future;
 ///
 /// # State
 ///
-/// It creates a new [`std::thread::Scope`] and runs provided `creator` in it.
+/// It creates a new [`std::thread::Scope`] and runs the provided `creator` in it.
 /// So, it keeps the state in each core.
 ///
 /// # Example
@@ -82,7 +82,7 @@ where
     });
 }
 
-/// It does next steps on each core:
+/// It does the next steps on each core:
 ///
 /// 1 - Initializes the [`Executor`] with provided [`Config`];
 ///
@@ -92,7 +92,7 @@ where
 ///
 /// # State
 ///
-/// It creates a new [`std::thread::Scope`] and runs provided `creator` in it.
+/// It creates a new [`std::thread::Scope`] and runs the provided `creator` in it.
 /// So, it keeps the state in each core.
 ///
 /// # Example
@@ -106,7 +106,7 @@ where
     run_local_future_on_all_cores_with_config(creator, Config::default());
 }
 
-/// It does next steps on each core:
+/// It does the next steps on each core:
 ///
 /// 1 - Initializes the [`Executor`] with provided [`Config`];
 ///
@@ -116,7 +116,7 @@ where
 ///
 /// # State
 ///
-/// It creates a new [`std::thread::Scope`] and runs provided `creator` in it.
+/// It creates a new [`std::thread::Scope`] and runs the provided `creator` in it.
 /// So, it keeps the state in each core.
 ///
 /// # Example
@@ -196,7 +196,7 @@ where
     });
 }
 
-/// It does next steps on each core:
+/// It does the next steps on each core:
 ///
 /// 1 - Initializes the [`Executor`] with provided [`Config`];
 ///
@@ -206,7 +206,7 @@ where
 ///
 /// # State
 ///
-/// It creates a new [`std::thread::Scope`] and runs provided `creator` in it.
+/// It creates a new [`std::thread::Scope`] and runs the provided `creator` in it.
 /// So, it keeps the state in each core.
 ///
 /// # Example

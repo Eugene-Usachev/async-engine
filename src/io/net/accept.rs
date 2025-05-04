@@ -1,12 +1,12 @@
 use crate as orengine;
+use crate::BUG_MESSAGE;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys;
-use crate::io::sys::{os_sockaddr, AsRawSocket, FromRawSocket, RawSocket};
-use crate::io::worker::{local_worker, IoWorker};
+use crate::io::sys::{AsRawSocket, FromRawSocket, RawSocket, os_sockaddr};
+use crate::io::worker::{IoWorker, local_worker};
 use crate::local_executor;
 use crate::net::addr::FromSockAddr;
 use crate::net::{Socket, Stream};
-use crate::BUG_MESSAGE;
 use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use socket2::SockAddr;
 use std::future::Future;

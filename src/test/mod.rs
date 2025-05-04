@@ -12,7 +12,7 @@
 //!
 //! # Examples
 //!
-//! You can find example in the [`examples`](https://github.com/orengine/orengine/tree/main/examples)
+//! You can find an example in the [`examples`](https://github.com/orengine/orengine/tree/main/examples)
 //! folder.
 //!
 //! # How to write parallel tests?

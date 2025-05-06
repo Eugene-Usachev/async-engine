@@ -1,5 +1,6 @@
 use crate::io::create_dir::CreateDir;
 use crate::io::sys::get_os_path;
+use crate::utils::unlikely;
 use smallvec::SmallVec;
 use std::io;
 use std::path::Path;
@@ -103,7 +104,7 @@ impl DirBuilder {
             offsets: &mut SmallVec<usize, STACK_CAP>,
             path: &Path,
         ) -> Result<usize, ()> {
-            let mut path_index = if offsets.is_empty() {
+            let mut path_index = if unlikely(offsets.is_empty()) {
                 path.as_os_str().len() - 1
             } else {
                 unsafe { *offsets.get_unchecked(offsets.len() - 1) - 1 }
@@ -111,7 +112,7 @@ impl DirBuilder {
 
             let bytes = path.as_os_str().as_encoded_bytes();
             loop {
-                if path_index == 1 || bytes[path_index] == b'.' || bytes[path_index] == b':' {
+                if unlikely(path_index == 1 || bytes[path_index] == b'.' || bytes[path_index] == b':') {
                     if bytes[path_index] == b'.' {
                         if path_index + 1 == bytes.len()
                             || bytes[path_index + 1] == std::path::MAIN_SEPARATOR as u8
@@ -123,7 +124,7 @@ impl DirBuilder {
                     }
                 }
 
-                if bytes[path_index] == std::path::MAIN_SEPARATOR as u8 {
+                if unlikely(bytes[path_index] == std::path::MAIN_SEPARATOR as u8) {
                     offsets.push(path_index);
                     break Ok(path_index);
                 }
@@ -132,7 +133,7 @@ impl DirBuilder {
             }
         }
 
-        if path == Path::new("") {
+        if unlikely(path == Path::new("")) {
             return Ok(());
         }
 
@@ -144,10 +145,10 @@ impl DirBuilder {
         loop {
             match CreateDir::new(get_os_path(tmp_path)?, tmp_mode).await {
                 Ok(()) => {
-                    if path_stack.is_empty() {
+                    if unlikely(path_stack.is_empty()) {
                         return Ok(());
                     }
-                    if path_stack.len() == 1 {
+                    if unlikely(path_stack.len() == 1) {
                         tmp_mode = mode;
                         tmp_path = path;
                         path_stack.clear();
@@ -199,7 +200,7 @@ impl Default for DirBuilder {
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::fs::test_helper::{TEST_DIR_PATH, create_test_dir_if_not_exist, is_exists};
+    use crate::fs::test_helper::{create_test_dir_if_not_exist, is_exists, TEST_DIR_PATH};
     use std::path::PathBuf;
 
     #[test]

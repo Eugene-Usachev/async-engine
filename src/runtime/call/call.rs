@@ -12,7 +12,7 @@ pub(crate) enum CallInner {
     /// Does nothing
     #[default]
     None,
-    /// Pushes current task to the given `AtomicTaskList`.
+    /// Pushes the current task to the given `AtomicTaskList`.
     ///
     /// # Safety
     ///

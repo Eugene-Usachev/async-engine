@@ -1,7 +1,8 @@
+use crate::utils::unlikely;
 use libc::{sa_family_t, sockaddr_storage, socklen_t};
 use socket2::SockAddr;
 use std::ffi::OsStr;
-use std::mem::{MaybeUninit, offset_of};
+use std::mem::{offset_of, MaybeUninit};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::SocketAddr;
 use std::path::Path;
@@ -21,14 +22,14 @@ pub(in crate::net) fn sockaddr_un(path: &Path) -> io::Result<(sockaddr_storage, 
 
     let bytes = path.as_os_str().as_bytes();
 
-    if memchr::memchr(0, bytes).is_some() {
+    if unlikely(memchr::memchr(0, bytes).is_some()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "paths must not contain null bytes",
         ));
     }
 
-    if bytes.len() >= unix_addr_ref.sun_path.len() {
+    if unlikely(bytes.len() >= unix_addr_ref.sun_path.len()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "path must be shorter than SUN_LEN",
@@ -289,7 +290,7 @@ impl UnixAddr {
                 unix_addr_ref.sun_family = libc::AF_UNIX as sa_family_t;
             }
 
-            if name.len() + 1 > unix_addr_ref.sun_path.len() {
+            if unlikely(name.len() + 1 > unix_addr_ref.sun_path.len()) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "abstract socket name must be shorter than SUN_LEN",
@@ -411,8 +412,8 @@ impl fmt::Debug for UnixAddr {
 
 #[cfg(test)]
 mod tests {
-    use crate::net::unix::UnixAddr;
     use crate::net::unix::addr::AddressKind;
+    use crate::net::unix::UnixAddr;
     #[cfg(any(target_os = "android", target_os = "linux"))]
     use std::os::linux::net::SocketAddrExt;
     use std::os::unix::net::SocketAddr;

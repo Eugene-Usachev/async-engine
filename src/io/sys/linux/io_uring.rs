@@ -2,15 +2,16 @@ use crate::io::config::IoWorkerConfig;
 use crate::io::io_request_data::IoRequestDataPtr;
 use crate::io::sys;
 use crate::io::sys::{
-    MessageRecvHeader, OsMessageHeader, OsPathPtr, RawFile, RawSocket, os_sockaddr,
+    os_sockaddr, MessageRecvHeader, OsMessageHeader, OsPathPtr, RawFile, RawSocket,
 };
 use crate::io::time_bounded_io_task::TimeBoundedIoTask;
 use crate::io::worker::IoWorker;
 use crate::runtime::local_executor;
-use crate::{BUG_MESSAGE, Executor};
+use crate::utils::{likely, unlikely};
+use crate::{Executor, BUG_MESSAGE};
 use io_uring::squeue::Entry;
 use io_uring::types::{OpenHow, SubmitArgs, Timespec};
-use io_uring::{IoUring, Probe, cqueue, opcode, types};
+use io_uring::{cqueue, opcode, types, IoUring, Probe};
 use libc;
 use std::cell::UnsafeCell;
 use std::collections::{BTreeSet, VecDeque};
@@ -25,16 +26,20 @@ use std::time::{Duration, Instant};
 pub(crate) struct IOUringWorker {
     /// # Why we need some cell?
     ///
-    /// We can't rewrite engine ([`Selector`] trait) to use separately `ring` field and other fields in different methods.
-    /// For example, we can't use `&mut self` in [`Scheduler::handle_coroutine_state`] function, because we are borrowing the `ring` before [`Scheduler::handle_coroutine_state`].
-    /// So we need some cell not to destroy the abstraction.
+    /// We can't rewrite the engine ([`Selector`] trait) to use separately `ring` field and other
+    /// fields in different methods.
+    /// For example, we can't use `&mut self` in [`Scheduler::handle_coroutine_state`] function,
+    /// because we are borrowing the `ring` before [`Scheduler::handle_coroutine_state`].
+    /// So we need a cell not to destroy the abstraction.
     ///
-    /// # Why we use [`UnsafeCell`]?
+    /// # Why do we use [`UnsafeCell`]?
     ///
     /// Because we can guarantee that:
     /// * only one thread can borrow the [`IOUringWorker`] at the same time
-    /// * only in the [`poll`] method we borrow the `ring` field for [`CompletionQueue`] and [`SubmissionQueue`],
-    ///   but only after the [`SubmissionQueue`] is submitted we start using the [`CompletionQueue`] that can call the [`IOUringWorker::push_sqe`]
+    /// * only in the [`poll`] method we borrow the `ring` field
+    ///   for [`CompletionQueue`] and [`SubmissionQueue`],
+    ///   but only after the [`SubmissionQueue`] is submitted we start using the [`CompletionQueue`]
+    ///   that can call the [`IOUringWorker::push_sqe`]
     ///   but it is safe, because the [`SubmissionQueue`] has already been read and submitted.
     ring: UnsafeCell<IoUring<Entry, cqueue::Entry>>,
     backlog: VecDeque<Entry>,
@@ -71,7 +76,7 @@ impl IOUringWorker {
         self.number_of_active_tasks += 1;
         let ring = unsafe { &mut *self.ring.get() };
         unsafe {
-            if ring.submission().push(&sqe).is_err() {
+            if unlikely(ring.submission().push(&sqe).is_err()) {
                 self.backlog.push_back(sqe);
             }
         }
@@ -102,7 +107,7 @@ impl IOUringWorker {
 
     /// Cancels requests that have expired.
     fn check_deadlines(&mut self, executor: &Executor) {
-        if self.time_bounded_io_task_queue.is_empty() {
+        if unlikely(self.time_bounded_io_task_queue.is_empty()) {
             return;
         }
 
@@ -141,7 +146,7 @@ impl IOUringWorker {
         let submitter = ring.submitter();
 
         loop {
-            if sq.is_full() {
+            if unlikely(sq.is_full()) {
                 match submitter.submit() {
                     Ok(_) => (),
                     Err(ref err) if err.raw_os_error() == Some(libc::EBUSY) => break,
@@ -217,7 +222,7 @@ impl IoWorker for IOUringWorker {
 
         self.number_of_active_tasks -= cq.len();
         for cqe in &mut cq {
-            if cqe.user_data() == ASYNC_CLOSE_DATA {
+            if unlikely(cqe.user_data() == ASYNC_CLOSE_DATA) {
                 continue;
             }
 
@@ -225,7 +230,7 @@ impl IoWorker for IOUringWorker {
             let io_request_ptr = IoRequestDataPtr::from_u64(cqe.user_data());
             let io_request = io_request_ptr.get_mut();
 
-            if ret >= 0 {
+            if likely(ret >= 0) {
                 #[allow(clippy::cast_sign_loss, reason = "the sing was checked above")]
                 io_request.set_ret(Ok(ret as _));
             } else if ret == -libc::ECANCELED {
@@ -300,6 +305,7 @@ impl IoWorker for IOUringWorker {
         deadline: &mut Instant,
     ) {
         self.register_time_bounded_io_task(request_ptr as _, deadline);
+
         self.accept(raw_socket, addr_ptr, addr_len, request_ptr);
     }
 
@@ -327,6 +333,7 @@ impl IoWorker for IOUringWorker {
         deadline: &mut Instant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
+
         self.connect(raw_socket, addr_ptr, addr_len, request_ptr);
     }
 
@@ -346,6 +353,7 @@ impl IoWorker for IOUringWorker {
         deadline: &mut Instant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
+
         self.poll_socket_read(raw_socket, request_ptr);
     }
 
@@ -365,6 +373,7 @@ impl IoWorker for IOUringWorker {
         deadline: &mut Instant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
+
         self.poll_socket_write(raw_socket, request_ptr);
     }
 
@@ -407,6 +416,7 @@ impl IoWorker for IOUringWorker {
         deadline: &mut Instant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
+
         self.recv(raw_socket, ptr, len, request_ptr);
     }
 
@@ -421,6 +431,7 @@ impl IoWorker for IOUringWorker {
         deadline: &mut Instant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
+
         self.recv_fixed(raw_socket, ptr, len, buf_index, request_ptr);
     }
 
@@ -450,6 +461,7 @@ impl IoWorker for IOUringWorker {
         deadline: &mut Instant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
+
         self.recv_from(raw_socket, msg_header, request_ptr);
     }
 
@@ -492,6 +504,7 @@ impl IoWorker for IOUringWorker {
         deadline: &mut Instant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
+
         self.send(raw_socket, ptr, len, request_ptr);
     }
 
@@ -531,6 +544,7 @@ impl IoWorker for IOUringWorker {
         deadline: &mut Instant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
+
         self.send_to(raw_socket, msg_header, request_ptr);
     }
 
@@ -580,6 +594,7 @@ impl IoWorker for IOUringWorker {
         deadline: &mut Instant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
+
         self.peek(raw_socket, ptr, len, request_ptr);
     }
 
@@ -594,6 +609,7 @@ impl IoWorker for IOUringWorker {
         deadline: &mut Instant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
+
         self.peek_fixed(raw_socket, ptr, len, buf_index, request_ptr);
     }
 
@@ -622,6 +638,7 @@ impl IoWorker for IOUringWorker {
         deadline: &mut Instant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
+
         self.peek_from(raw_socket, msg, request_ptr);
     }
 

@@ -3,9 +3,9 @@
 //!
 //! It allows for asynchronous read or write locking and unlocking, and provides
 //! ownership-based locking through [`LocalReadLockGuard`] and [`LocalWriteLockGuard`].
-use crate::runtime::{IsLocal, Task, local_executor};
+use crate::runtime::{local_executor, IsLocal, Task};
 use crate::sync::{AsyncRWLock, AsyncReadLockGuard, AsyncWriteLockGuard, LockStatus};
-use crate::utils::{TaskVecFromPool, acquire_task_vec_from_pool};
+use crate::utils::{acquire_task_vec_from_pool, TaskVecFromPool};
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::mem::ManuallyDrop;
@@ -350,6 +350,7 @@ impl<T: ?Sized> AsyncRWLock<T> for LocalRWLock<T> {
             debug_assert!(inner.wait_queue_read.is_empty());
 
             inner.number_of_readers = -1;
+
             return LocalWriteLockGuard::new(self);
         }
 
@@ -366,6 +367,7 @@ impl<T: ?Sized> AsyncRWLock<T> for LocalRWLock<T> {
 
         if inner.number_of_readers > -1 {
             inner.number_of_readers += 1;
+
             return LocalReadLockGuard::new(self);
         }
 

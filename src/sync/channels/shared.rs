@@ -11,8 +11,8 @@ use crate::sync::mutexes::naive_shared::NaiveMutex;
 use crate::sync::{
     AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, RecvErr, SendErr, TryRecvErr, TrySendErr,
 };
-use crate::utils::hints::unreachable_hint;
 use crate::utils::Ptr;
+use crate::utils::{unlikely, unreachable_hint};
 use std::collections::VecDeque;
 use std::future::Future;
 use std::mem::ManuallyDrop;
@@ -111,7 +111,7 @@ impl<T> Future for WaitSend<'_, T> {
         match this.call_state {
             CallState::FirstCall => {
                 let mut inner_lock = acquire_lock!(this.inner, unsafe { Task::from_context(cx) });
-                if inner_lock.is_closed {
+                if unlikely(inner_lock.is_closed) {
                     return Poll::Ready(Err(SendErr::Closed(unsafe {
                         ManuallyDrop::take(&mut this.value)
                     })));
@@ -133,7 +133,7 @@ impl<T> Future for WaitSend<'_, T> {
                 }
 
                 let len = inner_lock.storage.len();
-                if len >= inner_lock.capacity {
+                if unlikely(len >= inner_lock.capacity) {
                     inner_lock.deque.push_back_sender(WaitingTask::common(
                         unsafe { Task::from_context(cx) },
                         CallStatePtr::new(&mut this.call_state),
@@ -208,11 +208,11 @@ impl<T> Future for WaitRecv<'_, T> {
         match this.call_state {
             CallState::FirstCall => {
                 let mut inner_lock = acquire_lock!(this.inner, unsafe { Task::from_context(cx) });
-                if inner_lock.is_closed {
+                if unlikely(inner_lock.is_closed) {
                     return Poll::Ready(Err(RecvErr::Closed));
                 }
 
-                if inner_lock.storage.is_empty() {
+                if unlikely(inner_lock.storage.is_empty()) {
                     let was_written = inner_lock.deque.try_pop_front_sender_and_call(
                         |call_state, value| unsafe {
                             this.inner.unlock(); // Release the lock here to improve performance
@@ -296,7 +296,7 @@ macro_rules! generate_try_send {
         fn try_send(&self, value: T) -> Result<(), TrySendErr<T>> {
             match self.inner.try_lock() {
                 Some(mut inner_lock) => {
-                    if inner_lock.is_closed {
+                    if unlikely(inner_lock.is_closed) {
                         return Err(TrySendErr::Closed(value));
                     }
 
@@ -351,7 +351,7 @@ macro_rules! generate_send_or_subscribe {
                 }
             };
 
-            if inner_lock.is_closed {
+            if unlikely(inner_lock.is_closed) {
                 return if let Some(task) = task_in_select_branch.acquire_once() {
                     state.set_to_closed();
 
@@ -391,7 +391,7 @@ macro_rules! generate_send_or_subscribe {
 
                 PopIfAcquiredResult::NoData(task_in_select_branch) => {
                     let len = inner_lock.storage.len();
-                    if len >= inner_lock.capacity {
+                    if unlikely(len >= inner_lock.capacity) {
                         inner_lock.deque.push_back_sender(WaitingTask::in_selector(
                             task_in_select_branch,
                             state,
@@ -426,11 +426,11 @@ macro_rules! generate_try_recv_in {
         unsafe fn try_recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), TryRecvErr> {
             match self.inner.try_lock() {
                 Some(mut inner_lock) => {
-                    if inner_lock.is_closed {
+                    if unlikely(inner_lock.is_closed) {
                         return Err(TryRecvErr::Closed);
                     }
 
-                    if inner_lock.storage.len() == 0 {
+                    if unlikely(inner_lock.storage.len() == 0) {
                         let was_written = inner_lock.deque.try_pop_front_sender_and_call(
                             |call_state, value| unsafe {
                                 self.inner.unlock(); // Release the lock here to improve performance
@@ -497,7 +497,7 @@ macro_rules! generate_recv_or_subscribe {
                 }
             };
 
-            if inner_lock.is_closed {
+            if unlikely(inner_lock.is_closed) {
                 return match task_in_select_branch.acquire_once() {
                     Some(task) => {
                         state.set_to_closed();
@@ -510,7 +510,7 @@ macro_rules! generate_recv_or_subscribe {
                 };
             }
 
-            if inner_lock.storage.len() == 0 {
+            if unlikely(inner_lock.storage.len() == 0) {
                 let result = inner_lock.deque.try_pop_front_sender_and_call_if_acquired(
                     |call_state, value| unsafe {
                         self.inner.unlock(); // Release the lock here to improve performance
@@ -936,7 +936,7 @@ impl<T> Drop for Channel<T> {
     fn drop(&mut self) {
         let inner = &mut *self.inner.get_mut();
 
-        if !inner.is_closed {
+        if unlikely(!inner.is_closed) {
             close_with_lock(inner);
         }
     }

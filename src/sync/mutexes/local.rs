@@ -2,10 +2,10 @@
 //!
 //! It allows for asynchronous locking and unlocking, and provides
 //! ownership-based locking through [`LocalMutexGuard`].
-use crate::runtime::{IsLocal, Task, local_executor};
+use crate::runtime::{local_executor, IsLocal, Task};
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncMutex, AsyncMutexGuard};
-use crate::utils::{TaskVecFromPool, acquire_task_vec_from_pool};
+use crate::utils::{acquire_task_vec_from_pool, likely, unlikely, TaskVecFromPool};
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::mem::ManuallyDrop;
@@ -217,7 +217,7 @@ impl<T: ?Sized> AsyncMutex<T> for LocalMutex<T> {
         T: 'mutex,
     {
         let is_locked = unsafe { &mut *self.is_locked.get() };
-        if !*is_locked {
+        if likely(!*is_locked) {
             *is_locked = true;
 
             LocalMutexGuard::new(self)
@@ -248,7 +248,7 @@ impl<T: ?Sized> AsyncMutex<T> for LocalMutex<T> {
 
         let wait_queue = unsafe { &mut *self.wait_queue.get() };
         let next = wait_queue.pop();
-        if next.is_some() {
+        if unlikely(next.is_some()) {
             local_executor().exec_task(unsafe { next.unwrap_unchecked() });
         } else {
             let is_locked = unsafe { &mut *self.is_locked.get() };

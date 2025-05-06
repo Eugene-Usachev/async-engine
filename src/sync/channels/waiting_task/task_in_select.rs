@@ -4,13 +4,13 @@ use crate::local_executor;
 use crate::runtime::Task;
 use crate::sync::channels::state::CallStatePtr;
 use crate::utils::Backoff;
-use crate::utils::hints::unreachable_hint;
+use crate::utils::{likely, unreachable_hint};
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::ptr;
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst};
-use std::sync::atomic::{AtomicUsize, fence};
+use std::sync::atomic::{fence, AtomicUsize};
 
 const NOT_ACQUIRED: usize = 0;
 const ACQUIRED: usize = 1;
@@ -298,7 +298,7 @@ impl TaskInSelectBranch {
         let backoff = Backoff::new();
 
         'this_task: loop {
-            if is_first_try {
+            if likely(is_first_try) {
                 is_first_try = false;
             } else {
                 self.task_in_select.state.store(NOT_ACQUIRED, SeqCst);
@@ -441,7 +441,6 @@ impl TaskInSelectPool {
 
 unsafe impl Send for TaskInSelectPool {}
 
-// TODO think about it
 impl Drop for TaskInSelectPool {
     fn drop(&mut self) {
         for inner in self.vec.drain(..) {
@@ -459,6 +458,3 @@ thread_local! {
 fn task_in_select_pool() -> &'static mut TaskInSelectPool {
     unsafe { TASK_IN_SELECT_POOL.with(|pool| &mut *pool.get()) }
 }
-
-// TODO r
-// static TASK_IN_SELECT_POOL: Mutex<TaskInSelectPool> = Mutex::new(TaskInSelectPool::new());

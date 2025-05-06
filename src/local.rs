@@ -1,4 +1,4 @@
-use crate::utils::Ptr;
+use crate::utils::{unlikely, Ptr};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Deref, DerefMut};
@@ -557,7 +557,7 @@ impl<T> Drop for Local<T> {
     fn drop(&mut self) {
         debug_check_parent_executor_id!(self);
 
-        if self.dec_counter() == 0 {
+        if unlikely(self.dec_counter() == 0) {
             unsafe {
                 self.inner.drop_and_deallocate();
             }

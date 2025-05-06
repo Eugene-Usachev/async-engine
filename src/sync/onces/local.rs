@@ -1,6 +1,7 @@
 use crate::runtime::IsLocal;
 use crate::sync::OnceState;
 use crate::sync::{AsyncOnce, CallOnceResult};
+use crate::utils::likely;
 use std::cell::Cell;
 use std::future::Future;
 
@@ -59,7 +60,7 @@ impl LocalOnce {
         f: Fut,
         _: std::marker::PhantomData<*const ()>,
     ) -> CallOnceResult {
-        if self.is_completed() {
+        if likely(self.is_completed()) {
             return CallOnceResult::WasAlreadyCompleted;
         }
 
@@ -83,7 +84,7 @@ impl AsyncOnce for LocalOnce {
 
     #[inline]
     fn call_once_sync<F: FnOnce()>(&self, f: F) -> CallOnceResult {
-        if self.is_completed() {
+        if likely(self.is_completed()) {
             return CallOnceResult::WasAlreadyCompleted;
         }
 

@@ -10,6 +10,7 @@ use crate::io::sys::get_os_path;
 use crate::io::sys::{AsFile, AsRawFile, FromRawFile, IntoRawFile, RawFile};
 use crate::io::{AsyncRead, AsyncWrite};
 use crate::runtime::local_executor;
+use crate::utils::unlikely;
 use std::io::{Error, Result};
 use std::mem::ManuallyDrop;
 use std::path::Path;
@@ -71,7 +72,7 @@ impl File {
         open_options: &OpenOptions,
     ) -> Result<Self> {
         let path = as_path.as_ref();
-        if path == Path::new("") {
+        if unlikely(path == Path::new("")) {
             return Err(Error::new(io::ErrorKind::InvalidInput, "path is empty"));
         }
         let os_path = get_os_path(path)?;
@@ -281,8 +282,8 @@ impl Drop for File {
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::fs::test_helper::{TEST_DIR_PATH, create_test_dir_if_not_exist, is_exists};
-    use crate::io::{FixedBuffer, full_buffer, get_fixed_buffer, get_full_fixed_buffer};
+    use crate::fs::test_helper::{create_test_dir_if_not_exist, is_exists, TEST_DIR_PATH};
+    use crate::io::{full_buffer, get_fixed_buffer, get_full_fixed_buffer, FixedBuffer};
     use std::fs::{create_dir, create_dir_all};
     use std::io::{Seek, SeekFrom};
     use std::path::PathBuf;

@@ -1,7 +1,8 @@
 // TODO docs
 
 use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
-use std::alloc::{Layout, alloc, dealloc};
+use crate::utils::{likely, unlikely};
+use std::alloc::{alloc, dealloc, Layout};
 use std::ptr;
 use std::ptr::NonNull;
 
@@ -104,7 +105,7 @@ impl<T> SenderReceiverQueue<T> {
     fn push_back<const DELTA: isize>(&mut self, task: WaitingTask<T>) {
         let len = self.len();
 
-        if len < self.capacity {
+        if likely(len < self.capacity) {
             unsafe { self.ptr.add(self.to_physical_idx(len)).write(task) };
             self.number_of_senders_or_receivers += DELTA;
 
@@ -197,7 +198,7 @@ impl<T> SenderReceiverQueue<T> {
         let res = unsafe { self.ptr.add(old_head).read() };
         let must_shrink = (len * 3 < self.capacity) && len > 4;
 
-        if !must_shrink {
+        if unlikely(!must_shrink) {
             return res;
         }
 

@@ -1,4 +1,4 @@
-use crate::runtime::{Task, local_executor};
+use crate::runtime::{local_executor, Task};
 use std::collections::btree_map::Entry::{Occupied, Vacant};
 use std::future::Future;
 use std::pin::Pin;
@@ -7,8 +7,10 @@ use std::time::{Duration, Instant};
 
 /// `Sleep` implements the [`Future`] trait. It waits at least until `sleep_until` and works only
 /// in `orengine` runtime.
+#[repr(C)]
 pub struct Sleep {
-    was_yielded: bool,
+    was_called: bool,
+    /// Unix time in nanoseconds.
     sleep_until: Instant,
 }
 
@@ -17,22 +19,25 @@ impl Future for Sleep {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        if this.was_yielded {
+
+        if this.was_called {
             // [`Executor`](crate::Executor) will wake this future up when it should be woken up.
             Poll::Ready(())
         } else {
-            this.was_yielded = true;
+            this.was_called = true;
+
             let task = unsafe { Task::from_context(cx) };
 
             loop {
                 let sleeping_tasks_map = local_executor().sleeping_tasks();
                 match sleeping_tasks_map.entry(this.sleep_until) {
-                    Occupied(_) => {
-                        this.sleep_until += Duration::from_nanos(1);
-                    }
                     Vacant(entry) => {
                         entry.insert(task);
+
                         break;
+                    }
+                    Occupied(_) => {
+                        this.sleep_until += Duration::from_nanos(1);
                     }
                 }
             }
@@ -58,8 +63,8 @@ impl Future for Sleep {
 #[inline]
 pub fn sleep(duration: Duration) -> Sleep {
     Sleep {
-        was_yielded: false,
-        sleep_until: local_executor().start_round_time_for_deadlines() + duration,
+        was_called: false,
+        sleep_until: Instant::now() + duration,
     }
 }
 

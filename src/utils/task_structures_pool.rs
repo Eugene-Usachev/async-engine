@@ -26,7 +26,7 @@ macro_rules! create_control_cap_wrapper {
 
         impl Drop for $name {
             fn drop(&mut self) {
-                if self.guard.capacity() < 32 {
+                if $crate::utils::likely(self.guard.capacity() < 32) {
                     // Drop guard to return the object to the pool.
                 } else {
                     // Shrink the pool.

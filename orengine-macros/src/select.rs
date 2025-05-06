@@ -318,8 +318,6 @@ fn maybe_can_be_simplified(
 }
 
 pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
-    // TODO
-
     let SelectInput { branches, default } = parse_macro_input!(input as SelectInput);
 
     let len = branches.len();

@@ -7,7 +7,7 @@ use crate::sync::channels::waiting_task::sender_receiver_deque::{
 use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
 use crate::sync::channels::waiting_task::{PopIfAcquiredResult, TaskInSelectBranch};
 use crate::utils::assert_hint;
-use crate::utils::hints::unreachable_hint;
+use crate::utils::unreachable_hint;
 use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
 use std::panic::{RefUnwindSafe, UnwindSafe};
@@ -455,7 +455,7 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
             WaitingTask::Common(task, call_state, slot) => {
                 setter_fn(call_state, slot);
 
-                local_executor().spawn_shared_task(task); // TODO does it work? or we should use exec?
+                local_executor().spawn_shared_task(task);
 
                 true
             }

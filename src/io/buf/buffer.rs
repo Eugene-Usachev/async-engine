@@ -1,9 +1,9 @@
-use crate::io::buf_pool::{BufPool, buf_pool, buffer};
+use crate::io::buf_pool::{buf_pool, buffer, BufPool};
 #[cfg(target_os = "linux")]
 use crate::io::linux::linux_buffer::LinuxBuffer;
 use crate::io::slice::{Slice, SliceMut};
 use crate::io::{FixedBuffer, FixedBufferMut};
-use crate::utils::Sealed;
+use crate::utils::{likely, Sealed};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
@@ -128,7 +128,7 @@ impl Buffer {
     /// Sets [`len`](#field.len). Returns `Err<()>` if `len` is greater than `capacity`.
     #[inline]
     pub fn set_len(&mut self, len: u32) -> Result<(), LenIsGreaterThanCapacity> {
-        if len <= self.capacity() {
+        if likely(len <= self.capacity()) {
             unsafe { self.set_len_unchecked(len) };
 
             Ok(())

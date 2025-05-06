@@ -14,7 +14,7 @@ use crate::runtime::waker::create_waker;
 #[cfg(not(feature = "disable_task_pool"))]
 use crate::runtime::TaskPool;
 use crate::runtime::{get_core_id_for_executor, CallInner, ExecutorSharedTaskList, Locality};
-use crate::utils::{assert_hint, CoreId, ProgressiveTimeout};
+use crate::utils::{assert_hint, likely, unlikely, CoreId, ProgressiveTimeout};
 use fastrand::Rng;
 use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, VecDeque};
@@ -28,7 +28,7 @@ use std::{mem, thread};
 
 macro_rules! shrink {
     ($list:expr) => {
-        if $list.capacity() > 512 && $list.len() * 3 < $list.capacity() {
+        if unlikely($list.capacity() > 512 && $list.len() * 3 < $list.capacity()) {
             let new_len = $list.len() * 2 + 1;
             $list.shrink_to(new_len);
         }
@@ -375,8 +375,8 @@ impl Executor {
     ///
     /// # Behavior on fallback OS
     ///
-    /// In fallback, we can't guarantee the 100 microseconds addition sufficiency,
-    /// therefore it is a synonymous to [`Instant::now`] there.
+    /// In fallback, we can't guarantee the 100-microsecond addition sufficiency;
+    /// therefore, it is synonymous to [`Instant::now`] there.
     pub fn start_round_time_for_deadlines(&self) -> Instant {
         #[cfg(target_os = "linux")]
         {
@@ -436,10 +436,10 @@ impl Executor {
                     list.push(task);
                     let counter = counter.as_ref();
 
-                    if counter.load(order) == 0 {
+                    if unlikely(counter.load(order) == 0) {
                         if let Some(task) = list.pop() {
                             self.exec_task(task);
-                        } // else other thread already executed the task
+                        } // else another thread already executed the task
                     }
                 }
             }
@@ -513,6 +513,7 @@ impl Executor {
         let poll_res = unsafe { Pin::new_unchecked(future) }
             .as_mut()
             .poll(&mut context);
+
         #[cfg(debug_assertions)]
         {
             unsafe {
@@ -557,7 +558,7 @@ impl Executor {
     /// For more details read [`Task::check_safety`].
     #[inline]
     pub fn exec_task(&mut self, task: Task) {
-        if self.exec_series < 63 {
+        if likely(self.exec_series < 63) {
             self.exec_task_now(task);
 
             return;
@@ -667,8 +668,8 @@ impl Executor {
         debug_assert!(!task.is_local(), "Try to spawn `local` task as `shared`!");
 
         #[allow(clippy::branches_sharing_code, reason = "It is more readable")]
-        if self.config.is_work_sharing_enabled() {
-            if self.shared_tasks.len() <= self.config.work_sharing_level {
+        if likely(self.config.is_work_sharing_enabled()) {
+            if likely(self.shared_tasks.len() <= self.config.work_sharing_level) {
                 // Fast path
 
                 if PUT_IN_THE_START_OF_QUEUE {
@@ -699,7 +700,7 @@ impl Executor {
     ///
     /// # Usage
     ///
-    /// Can be used to execute the [`task`](Task) in next round.
+    /// It can be used to execute the [`task`](Task) in next round.
     pub fn spawn_task_at_end_of_shared_tasks_queue(&mut self, task: Task) {
         debug_assert!(!task.is_local());
 
@@ -860,7 +861,7 @@ impl Executor {
         task: Task,
         executor_id: usize,
     ) -> Result<(), ExecutorIsNotRegisteredErr> {
-        if executor_id != self.id {
+        if likely(executor_id != self.id) {
             self.interactor.send_task_to_executor(task, executor_id)
         } else {
             self.spawn_task(task);
@@ -1027,7 +1028,8 @@ impl Executor {
                     }
                 } else {
                     self.local_sleeping_tasks.insert(time_to_wake, task);
-                    return Some(self.start_round_time - time_to_wake);
+
+                    return Some(time_to_wake - self.start_round_time);
                 }
             }
         }
@@ -1074,7 +1076,7 @@ impl Executor {
             if let Some(task) = self.shared_tasks.pop_back() {
                 self.exec_task(task);
             } else {
-                // Executor shared its tasks with another one.
+                // The executor shared its tasks with another one.
                 break;
             }
         }

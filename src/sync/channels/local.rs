@@ -8,8 +8,8 @@ use crate::sync::channels::{SelectReceiver, SelectSender};
 use crate::sync::{
     AsyncChannel, AsyncReceiver, AsyncSender, RecvErr, SendErr, TryRecvErr, TrySendErr,
 };
-use crate::utils::hints::unreachable_hint;
 use crate::utils::Ptr;
+use crate::utils::{unlikely, unreachable_hint};
 use crate::{local_executor, panic_if_shared_in_future};
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
@@ -76,7 +76,7 @@ impl<T> Future for WaitLocalSend<'_, T> {
 
         match this.call_state {
             CallState::FirstCall => {
-                if this.inner.is_closed {
+                if unlikely(this.inner.is_closed) {
                     return Poll::Ready(Err(SendErr::Closed(unsafe {
                         ManuallyDrop::take(&mut this.value)
                     })));
@@ -96,7 +96,7 @@ impl<T> Future for WaitLocalSend<'_, T> {
                 }
 
                 let len = this.inner.storage.len();
-                if len >= this.inner.capacity {
+                if unlikely(len >= this.inner.capacity) {
                     this.inner.deque.push_back_sender(WaitingTask::common(
                         unsafe { Task::from_context(cx) },
                         CallStatePtr::new(&mut this.call_state),
@@ -165,11 +165,11 @@ impl<T> Future for WaitLocalRecv<'_, T> {
 
         match this.call_state {
             CallState::FirstCall => {
-                if this.inner.is_closed {
+                if unlikely(this.inner.is_closed) {
                     return Poll::Ready(Err(RecvErr::Closed));
                 }
 
-                if this.inner.storage.is_empty() {
+                if unlikely(this.inner.storage.is_empty()) {
                     let was_written =
                         this.inner
                             .deque
@@ -229,7 +229,7 @@ macro_rules! generate_try_send {
     () => {
         fn try_send(&self, value: T) -> Result<(), TrySendErr<T>> {
             let inner = unsafe { &mut *self.inner.get() };
-            if inner.is_closed {
+            if unlikely(inner.is_closed) {
                 return Err(TrySendErr::Closed(value));
             }
 
@@ -267,7 +267,7 @@ macro_rules! generate_send_or_subscribe {
         ) -> SelectNonBlockingBranchResult {
             let inner = unsafe { &mut *self.inner.get() };
 
-            if inner.is_closed {
+            if unlikely(inner.is_closed) {
                 return match task_in_select_branch.acquire_once() {
                     // It all is `local`, then other thread can't acquire the task. So, in select
                     // we can definitely acquire it.
@@ -296,7 +296,7 @@ macro_rules! generate_send_or_subscribe {
             match result {
                 PopIfAcquiredResult::NoData(task_in_select_branch) => {
                     let len = inner.storage.len();
-                    if len >= inner.capacity {
+                    if unlikely(len >= inner.capacity) {
                         inner.deque.push_back_sender(WaitingTask::in_selector(
                             task_in_select_branch,
                             state,
@@ -332,10 +332,11 @@ macro_rules! generate_try_recv_in_ptr {
     () => {
         unsafe fn try_recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), TryRecvErr> {
             let inner = unsafe { &mut *self.inner.get() };
-            if inner.is_closed {
+            if unlikely(inner.is_closed) {
                 return Err(TryRecvErr::Closed);
             }
-            if inner.storage.len() == 0 {
+
+            if unlikely(inner.storage.len() == 0) {
                 let was_written = inner
                     .deque
                     .try_pop_front_sender_and_call(|call_state, value| {
@@ -376,7 +377,7 @@ macro_rules! generate_recv_or_subscribe {
             task_in_select_branch: TaskInSelectBranch,
         ) -> SelectNonBlockingBranchResult {
             let inner = unsafe { &mut *self.inner.get() };
-            if inner.is_closed {
+            if unlikely(inner.is_closed) {
                 return match task_in_select_branch.acquire_once() {
                     Some(task) => {
                         state.set_to_closed();
@@ -389,7 +390,7 @@ macro_rules! generate_recv_or_subscribe {
                 };
             }
 
-            if inner.storage.len() == 0 {
+            if unlikely(inner.storage.len() == 0) {
                 let result = inner.deque.try_pop_front_sender_and_call_if_acquired(
                     |call_state, value| {
                         unsafe {
@@ -768,7 +769,7 @@ impl<T> Drop for LocalChannel<T> {
     fn drop(&mut self) {
         let inner = unsafe { &mut *self.inner.get() };
 
-        if !inner.is_closed {
+        if unlikely(!inner.is_closed) {
             close(inner);
         }
     }

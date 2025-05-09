@@ -1,10 +1,11 @@
 // TODO docs
 
 use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
-use crate::utils::{likely, unlikely};
-use std::alloc::{alloc, dealloc, Layout};
-use std::ptr;
+use crate::utils::{assert_hint, likely, unlikely};
+use std::alloc::{Layout, alloc, dealloc};
+use std::ops::{Range, RangeBounds};
 use std::ptr::NonNull;
+use std::{ops, ptr};
 
 const RECEIVER_DELTA: isize = 1;
 const SENDER_DELTA: isize = -1;
@@ -16,6 +17,7 @@ pub(crate) struct SenderReceiverQueue<T = ()> {
     /// __0__ for none, __>0__ for receivers, __<0__ for senders
     number_of_senders_or_receivers: isize,
     head: usize,
+    number_of_special_tasks: usize,
 }
 
 #[derive(Eq, PartialEq)]
@@ -56,6 +58,7 @@ impl<T> SenderReceiverQueue<T> {
             capacity: DEFAULT_CAP,
             number_of_senders_or_receivers: 0,
             head: 0,
+            number_of_special_tasks: 0,
         }
     }
 
@@ -102,7 +105,251 @@ impl<T> SenderReceiverQueue<T> {
         }
     }
 
+    fn set_len(&mut self, len: usize) {
+        match self.option() {
+            SenderReceiverQueueOption::Sender => {
+                self.number_of_senders_or_receivers = -(len as isize);
+            }
+            SenderReceiverQueueOption::Receiver => {
+                self.number_of_senders_or_receivers = len as isize;
+            }
+            SenderReceiverQueueOption::Empty => {}
+        }
+    }
+
+    /// Returns a slice pointer into the buffer.
+    /// `range` must lie inside `0..self.capacity()`.
+    #[inline]
+    unsafe fn buffer_range(&self, range: Range<usize>) -> *mut [WaitingTask<T>] {
+        unsafe {
+            ptr::slice_from_raw_parts_mut(
+                self.ptr.add(range.start).as_ptr(),
+                range.end - range.start,
+            )
+        }
+    }
+
+    /// Given a range into the logical buffer of the deque, this function
+    /// returns two ranges into the physical buffer that correspond to
+    /// the given range. The `len` parameter should usually just be `self.len`;
+    /// the reason it's passed explicitly is that if the deque is wrapped in
+    /// a `Drain`, then `self.len` is not actually the length of the deque.
+    ///
+    /// # Safety
+    ///
+    /// This function is always safe to call. For the resulting ranges to be valid
+    /// ranges into the physical buffer, the caller must ensure that the result of
+    /// calling `slice::range(range, ..len)` represents a valid range into the
+    /// logical buffer, and that all elements in that range are initialized.
+    #[inline]
+    fn slice_ranges<R>(&self, range: R, len: usize) -> (Range<usize>, Range<usize>)
+    where
+        R: RangeBounds<usize>,
+    {
+        fn get_range<R>(range: R, bounds: ops::RangeTo<usize>) -> Range<usize>
+        where
+            R: RangeBounds<usize>,
+        {
+            let len = bounds.end;
+
+            let start = match range.start_bound() {
+                ops::Bound::Included(&start) => start,
+                ops::Bound::Excluded(start) => start.checked_add(1).unwrap_or_else(|| {
+                    panic!("attempted to index slice from after maximum usize");
+                }),
+                ops::Bound::Unbounded => 0,
+            };
+
+            let end = match range.end_bound() {
+                ops::Bound::Included(end) => end.checked_add(1).unwrap_or_else(|| {
+                    panic!("attempted to index slice up to maximum usize");
+                }),
+                ops::Bound::Excluded(&end) => end,
+                ops::Bound::Unbounded => len,
+            };
+
+            if start > end {
+                panic!("attempted to index slice from after maximum usize");
+            }
+            if end > len {
+                panic!("attempted to index slice up to maximum usize");
+            }
+
+            Range { start, end }
+        }
+
+        let Range { start, end } = get_range(range, ..len);
+        let len = end - start;
+
+        if len == 0 {
+            (0..0, 0..0)
+        } else {
+            // `slice::range` guarantees that `start <= end <= len`.
+            // because `len != 0`, we know that `start < end`, so `start < len`
+            // and the indexing is valid.
+            let wrapped_start = self.to_physical_idx(start);
+
+            // this subtraction can never overflow because `wrapped_start` is
+            // at most `self.capacity()` (and if `self.capacity != 0`, then `wrapped_start` is strictly less
+            // than `self.capacity`).
+            let head_len = self.capacity() - wrapped_start;
+
+            if head_len >= len {
+                // we know that `len + wrapped_start <= self.capacity <= usize::MAX`, so this addition can't overflow
+                (wrapped_start..wrapped_start + len, 0..0)
+            } else {
+                // can't overflow because of the if condition
+                let tail_len = len - head_len;
+                (wrapped_start..self.capacity(), 0..tail_len)
+            }
+        }
+    }
+
+    #[inline]
+    fn swap(&mut self, i: usize, j: usize) {
+        assert_hint(i < self.len(), "index out of bounds");
+        assert_hint(j < self.len(), "index out of bounds");
+
+        let ri = self.to_physical_idx(i);
+        let rj = self.to_physical_idx(j);
+        unsafe { ptr::swap(self.ptr.add(ri).as_ptr(), self.ptr.add(rj).as_ptr()) }
+    }
+
+    #[inline]
+    fn as_mut_slices(&mut self) -> (&mut [WaitingTask<T>], &mut [WaitingTask<T>]) {
+        let (a_range, b_range) = self.slice_ranges(.., self.len());
+        // SAFETY: `slice_ranges` always returns valid ranges into
+        // the physical buffer.
+        unsafe {
+            (
+                &mut *self.buffer_range(a_range),
+                &mut *self.buffer_range(b_range),
+            )
+        }
+    }
+
+    fn truncate(&mut self, len: usize) {
+        /// Runs the destructor for all items in the slice when it gets dropped (normally or
+        /// during unwinding).
+        struct Dropper<'a, T>(&'a mut [T]);
+
+        impl<T> Drop for Dropper<'_, T> {
+            fn drop(&mut self) {
+                unsafe {
+                    ptr::drop_in_place(self.0);
+                }
+            }
+        }
+
+        let new_len;
+
+        // Safe because:
+        //
+        // * Any slice passed to `drop_in_place` is valid; the second case has
+        //   `len <= front.len()` and returning on `len > self.len()` ensures
+        //   `begin <= back.len()` in the first case
+        // * The head of the VecDeque is moved before calling `drop_in_place`,
+        //   so no value is dropped twice if `drop_in_place` panics
+        unsafe {
+            if len >= self.len() {
+                return;
+            }
+
+            let (front, back) = self.as_mut_slices();
+            if len > front.len() {
+                let begin = len - front.len();
+                let drop_back = back.get_unchecked_mut(begin..) as *mut _;
+
+                new_len = len;
+
+                ptr::drop_in_place(drop_back);
+            } else {
+                let drop_back = back as *mut _;
+                let drop_front = front.get_unchecked_mut(len..) as *mut _;
+
+                new_len = len;
+
+                // Make sure the second half is dropped even when a destructor
+                // in the first one panics.
+                let _back_dropper = Dropper(&mut *drop_back);
+
+                ptr::drop_in_place(drop_front);
+            }
+        }
+
+        self.set_len(new_len);
+    }
+
+    fn retain<F: FnMut(&mut WaitingTask<T>) -> bool>(&mut self, mut f: F) {
+        // Forked from std::collections::VecDeque::retain. For detail read it.
+
+        let len = self.len();
+        let mut len_to_process = len;
+        let mut success = 0;
+        let mut failure = 0;
+        let mut idx = 0;
+        let mut cur = 0;
+
+        // Stage 1: All values are retained.
+        while cur < len_to_process {
+            if !f(unsafe { self.ptr.add(cur).as_mut() }) {
+                cur += 1;
+
+                break;
+            }
+            cur += 1;
+            idx += 1;
+
+            if (success + failure) == 32 && failure > 12 {
+                len_to_process = (len_to_process / 3).min(len);
+                success = 0;
+                failure = 0;
+            }
+        }
+        // Stage 2: Swap retained value into current idx.
+        while cur < len_to_process {
+            if !f(unsafe { self.ptr.add(cur).as_mut() }) {
+                cur += 1;
+
+                continue;
+            }
+
+            self.swap(idx, cur);
+            cur += 1;
+            idx += 1;
+        }
+        // Stage 3: Truncate all values after idx.
+        if cur != idx {
+            self.truncate(idx);
+        }
+    }
+
+    #[cold]
+    fn maybe_free_special_tasks(&mut self) {
+        let mut delta = 0;
+
+        self.retain(|task| {
+            if task.can_be_freed() {
+                delta += 1;
+
+                return false;
+            }
+
+            true
+        });
+
+        self.number_of_special_tasks -= delta;
+    }
+
     fn push_back<const DELTA: isize>(&mut self, task: WaitingTask<T>) {
+        if !matches!(&task, WaitingTask::Common(..)) {
+            self.number_of_special_tasks += 1;
+
+            if self.number_of_special_tasks.trailing_zeros() >= 10 {
+                self.maybe_free_special_tasks();
+            }
+        }
+
         let len = self.len();
 
         if likely(len < self.capacity) {
@@ -196,6 +443,10 @@ impl<T> SenderReceiverQueue<T> {
         self.number_of_senders_or_receivers -= DELTA;
 
         let res = unsafe { self.ptr.add(old_head).read() };
+        if !matches!(&res, WaitingTask::Common(..)) {
+            self.number_of_special_tasks -= 1;
+        }
+
         let must_shrink = (len * 3 < self.capacity) && len > 4;
 
         if unlikely(!must_shrink) {

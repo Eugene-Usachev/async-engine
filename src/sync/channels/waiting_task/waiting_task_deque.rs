@@ -277,10 +277,10 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
 
     generate_push_back!();
 
-    /// Pops a [`waiting task`](WaitingTask) from the deque, next calls provided function,
-    /// and after it execute the task.
+    /// Pops a [`waiting task`](WaitingTask) from the deque, next calls the provided function,
+    /// and after it executes the task.
     ///
-    /// Return `false` if next task can not be executed. Otherwise, returns `true`.
+    /// Return `false` if the next task cannot be executed. Otherwise, returns `true`.
     ///
     /// `setter_fn` is a function that must write/read data to/from receiver/sender.
     #[must_use]

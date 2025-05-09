@@ -1,4 +1,3 @@
-// TODO docs
 use crate::runtime::Task;
 use crate::sync::channels::state::CallStatePtr;
 use crate::sync::channels::waiting_task::TaskInSelectBranch;
@@ -30,5 +29,15 @@ impl<T> WaitingTask<T> {
         slot: NonNull<T>,
     ) -> Self {
         Self::InSelector(task, state, slot)
+    }
+
+    /// Returns whether the waiting task can be freed.
+    ///
+    /// For example, if [`TaskInSelectBranch`] is acquired.
+    pub(crate) fn can_be_freed(&self) -> bool {
+        match self {
+            Self::InSelector(task_in_select_branch, _, _) => task_in_select_branch.is_acquired(),
+            Self::Common(_, _, _) => false,
+        }
     }
 }

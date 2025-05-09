@@ -148,6 +148,26 @@ impl TaskInSelectBranch {
         }
     }
 
+    /// Returns `true` if the task was already acquired.
+    ///
+    /// It is used only for free acquired tasks from deques.
+    pub(crate) fn is_acquired(&self) -> bool {
+        // I want to keep this function takes a shared reference, but in `local` context
+        // it is free to get without `load` operations and without mutability.
+        #[allow(invalid_reference_casting, reason = "Read the comment above")]
+        unsafe fn get_atomic(state: &AtomicUsize) -> usize {
+            *unsafe { &mut *ptr::from_ref(state).cast_mut() }.get_mut()
+        }
+
+        if self.task_in_select.task.is_local() {
+            let state = unsafe { get_atomic(&self.task_in_select.state) };
+
+            state == ACQUIRED
+        } else {
+            self.task_in_select.state.load(Acquire) == ACQUIRED
+        }
+    }
+
     pub(crate) fn acquire_once(mut self) -> Option<Task> {
         if self.task_in_select.task.is_local() {
             let was_acquired_ref = self.task_in_select.state.get_mut();

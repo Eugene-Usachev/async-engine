@@ -10,7 +10,7 @@ use std::ops::{Deref, DerefMut};
 use std::ptr;
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst};
-use std::sync::atomic::{fence, AtomicUsize};
+use std::sync::atomic::{AtomicUsize, fence};
 
 const NOT_ACQUIRED: usize = 0;
 const ACQUIRED: usize = 1;
@@ -208,17 +208,18 @@ impl TaskInSelectBranch {
         debug_assert!(self.task_in_select.task.is_local());
         debug_assert!(other.task_in_select.task.is_local());
 
-        if *self.task_in_select.state.get_mut() == ACQUIRED {
-            return PopIfAcquiredResult::NotAcquired(other);
-        }
-
-        *self.task_in_select.state.get_mut() = ACQUIRED;
-
-        if *other.task_in_select.state.get_mut() == ACQUIRED {
-            *self.task_in_select.state.get_mut() = NOT_ACQUIRED;
-
+        let other_state = other.task_in_select.state.get_mut();
+        if *other_state == ACQUIRED {
             return PopIfAcquiredResult::NoData(self);
         }
+
+        let this_state = self.task_in_select.state.get_mut();
+        if *this_state == ACQUIRED {
+            return PopIfAcquiredResult::AlreadyAcquired;
+        }
+
+        *other_state = ACQUIRED;
+        *this_state = ACQUIRED;
 
         // Two tasks are acquired
         self.task_in_select
@@ -252,7 +253,7 @@ impl TaskInSelectBranch {
     ///
     /// * It is called in select;
     ///
-    /// * If returns `false` then the other task must be not lost (saved into queue again).
+    /// * If returns `false `, then the other task must be not lost (saved into queue again).
     #[must_use]
     pub(crate) unsafe fn try_acquire_two_shared_tasks_in_select<T, SetterFn>(
         self,

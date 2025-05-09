@@ -144,7 +144,7 @@ pub struct Executor {
     rng: Rng,
     progressive_timeout: ProgressiveTimeout<64, 131_072>,
 
-    exec_series: usize,
+    future_call_stack_depth: usize,
     current_call: Call,
     // TODO rewrite to quanta when https://github.com/metrics-rs/quanta/pull/112 was merged
     start_round_time: Instant,
@@ -248,7 +248,7 @@ impl Executor {
                 rng: Rng::new(),
                 progressive_timeout: ProgressiveTimeout::new(),
 
-                exec_series: 0,
+                future_call_stack_depth: 0,
                 start_round_time: Instant::now(),
                 #[cfg(target_os = "linux")]
                 start_round_time_for_deadlines: Instant::now() + Duration::from_micros(100),
@@ -498,7 +498,7 @@ impl Executor {
     /// If the provided [`Task`] can't be executed.
     /// For more details read [`Task::check_safety`].
     pub fn exec_task_now(&mut self, mut task: Task) {
-        self.exec_series += 1;
+        self.future_call_stack_depth += 1;
 
         let future = unsafe { &mut *task.future_ptr() };
         #[cfg(debug_assertions)]
@@ -543,6 +543,8 @@ impl Executor {
             }
         }
 
+        self.future_call_stack_depth -= 1;
+
         // Orengine's Waker::drop does nothing, but virtual call is not free.
         mem::forget(waker);
     }
@@ -559,13 +561,12 @@ impl Executor {
     /// For more details read [`Task::check_safety`].
     #[inline]
     pub fn exec_task(&mut self, task: Task) {
-        if likely(self.exec_series < 63) {
+        if likely(self.future_call_stack_depth < 8) {
             self.exec_task_now(task);
 
             return;
         }
 
-        self.exec_series = 0;
         if task.is_local() {
             self.spawn_local_task(task);
         } else {
@@ -1040,7 +1041,6 @@ impl Executor {
 
     /// Prepares the executor for the next round.
     fn prepare_to_new_round(&mut self) {
-        self.exec_series = 0;
         self.start_round_time = Instant::now();
         #[cfg(target_os = "linux")]
         {

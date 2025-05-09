@@ -1,27 +1,27 @@
 use crate::bug_message::BUG_MESSAGE;
 use crate::io::sys::WorkerSys;
-use crate::io::worker::{get_local_worker_ref, init_local_worker, IoWorker};
+use crate::io::worker::{IoWorker, get_local_worker_ref, init_local_worker};
 use crate::io::{init_local_buf_pool, uninit_local_buf_pool};
+#[cfg(not(feature = "disable_task_pool"))]
+use crate::runtime::TaskPool;
 use crate::runtime::call::Call;
 use crate::runtime::config::{Config, ValidConfig};
 use crate::runtime::executor::end_local_thread_and_write_into_ptr::EndLocalThreadAndWriteIntoPtr;
-use crate::runtime::global_state::{register_local_executor, SubscribedState};
+use crate::runtime::global_state::{SubscribedState, register_local_executor};
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::runtime::interaction_between_executors::{ExecutorIsNotRegisteredErr, Interactor};
 use crate::runtime::local_thread_pool::LocalThreadWorkerPool;
 use crate::runtime::task::Task;
 use crate::runtime::waker::create_waker;
-#[cfg(not(feature = "disable_task_pool"))]
-use crate::runtime::TaskPool;
-use crate::runtime::{get_core_id_for_executor, CallInner, ExecutorSharedTaskList, Locality};
-use crate::utils::{assert_hint, likely, unlikely, CoreId, ProgressiveTimeout};
+use crate::runtime::{CallInner, ExecutorSharedTaskList, Locality, get_core_id_for_executor};
+use crate::utils::{CoreId, ProgressiveTimeout, assert_hint, likely, unlikely};
 use fastrand::Rng;
 use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use std::{mem, thread};
@@ -146,6 +146,7 @@ pub struct Executor {
 
     exec_series: usize,
     current_call: Call,
+    // TODO rewrite to quanta when https://github.com/metrics-rs/quanta/pull/112 was merged
     start_round_time: Instant,
     /// `start_round_time` + 100 microseconds
     #[cfg(target_os = "linux")]

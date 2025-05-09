@@ -65,7 +65,7 @@ pub(crate) enum CallInner {
     ///
     /// * calling task must be shared (else you don't need any [`Calls`](Call))
     PushFnToThreadPool(NonNull<dyn Fn()>),
-    /// Changes current task locality and wakes up current task.
+    /// Changes the current task locality and wakes up the current task.
     ///
     /// # Example
     ///

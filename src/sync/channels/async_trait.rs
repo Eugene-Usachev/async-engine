@@ -401,7 +401,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     async fn recv(&self) -> Result<T, RecvErr> {
         let mut slot = MaybeUninit::uninit();
         unsafe {
-            match self.recv_in_ptr(Ptr::from(slot.assume_init_mut())).await {
+            match self.recv_in_ptr(Ptr::from(slot.as_mut_ptr())).await {
                 Ok(()) => Ok(slot.assume_init()),
                 Err(_) => Err(RecvErr::Closed),
             }
@@ -455,7 +455,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     fn try_recv(&self) -> Result<T, TryRecvErr> {
         let mut slot = MaybeUninit::uninit();
         unsafe {
-            match self.try_recv_in_ptr(Ptr::from(slot.assume_init_mut())) {
+            match self.try_recv_in_ptr(Ptr::from(slot.as_mut_ptr())) {
                 Ok(()) => Ok(slot.assume_init()),
                 Err(e) => Err(e),
             }
@@ -602,7 +602,10 @@ pub trait AsyncChannel<T>: AsyncSender<T> + AsyncReceiver<T> {
 }
 
 impl<T, G: AsyncSender<T>, H: Deref<Target = G> + IsLocal> AsyncSender<T> for H {
-    #[allow(clippy::future_not_send, reason = "It is not Send when T or H is not Send, it is fine")]
+    #[allow(
+        clippy::future_not_send,
+        reason = "It is not Send when T or H is not Send, it is fine"
+    )]
     async fn send(&self, value: T) -> Result<(), SendErr<T>> {
         (**self).send(value).await
     }
@@ -611,14 +614,20 @@ impl<T, G: AsyncSender<T>, H: Deref<Target = G> + IsLocal> AsyncSender<T> for H 
         (**self).try_send(value)
     }
 
-    #[allow(clippy::future_not_send, reason = "It is not Send when T or H is not Send, it is fine")]
+    #[allow(
+        clippy::future_not_send,
+        reason = "It is not Send when T or H is not Send, it is fine"
+    )]
     async fn sender_close(&self) {
         (**self).sender_close().await;
     }
 }
 
 impl<T, G: AsyncReceiver<T>, H: Deref<Target = G> + IsLocal> AsyncReceiver<T> for H {
-    #[allow(clippy::future_not_send, reason = "It is not Send when T or H is not Send, it is fine")]
+    #[allow(
+        clippy::future_not_send,
+        reason = "It is not Send when T or H is not Send, it is fine"
+    )]
     async unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), RecvErr> {
         unsafe { (**self).recv_in_ptr(slot).await }
     }
@@ -627,7 +636,10 @@ impl<T, G: AsyncReceiver<T>, H: Deref<Target = G> + IsLocal> AsyncReceiver<T> fo
         unsafe { (**self).try_recv_in_ptr(slot) }
     }
 
-    #[allow(clippy::future_not_send, reason = "It is not Send when T or H is not Send, it is fine")]
+    #[allow(
+        clippy::future_not_send,
+        reason = "It is not Send when T or H is not Send, it is fine"
+    )]
     async fn receiver_close(&self) {
         (**self).receiver_close().await;
     }

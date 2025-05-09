@@ -15,9 +15,9 @@ use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::mem::ManuallyDrop;
-use std::ptr;
 use std::ptr::NonNull;
 use std::task::{Context, Poll};
+use std::{mem, ptr};
 
 /// This is the internal data structure for the [`local channel`](LocalChannel).
 /// It holds the actual storage for the values and manages the queue of senders and receivers.
@@ -242,6 +242,8 @@ macro_rules! generate_try_send {
                     };
                 });
             if was_written {
+                mem::forget(value); // We copied it
+
                 return Ok(());
             }
 
@@ -852,8 +854,8 @@ mod tests {
     use super::*;
     use crate as orengine;
     use crate::sync::{RecvErr, TryRecvErr};
-    use crate::utils::droppable_element::DroppableElement;
     use crate::utils::SpinLock;
+    use crate::utils::droppable_element::DroppableElement;
     use crate::yield_now;
     use std::rc::Rc;
     use std::sync::Arc;

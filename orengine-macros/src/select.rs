@@ -30,8 +30,18 @@ impl Parse for SelectInput {
         let mut default = None;
 
         while !input.is_empty() {
+            let fork = input.fork();
+            let lookahead: Option<proc_macro2::TokenTree> = fork.parse().ok();
+            let found = match lookahead {
+                Some(tt) => tt.to_string(),
+                None => "end of input".to_string(),
+            };
+
             let ident: Ident = input.parse().map_err(|_| {
-                syn::Error::new(input.span(), "expected `recv`, `send`, or `default`")
+                syn::Error::new(
+                    input.span(),
+                    format!("expected `recv`, `send`, or `default`, found {found}"),
+                )
             })?;
             if ident == "recv" {
                 let content;
@@ -73,6 +83,11 @@ impl Parse for SelectInput {
                          For example, `recv(channel) -> var => { println!(\"received {}!\", var) }`"
                     )
                 })?;
+
+                // Allow optional comma
+                if input.peek(Token![,]) {
+                    let _ = input.parse::<Token![,]>();
+                }
 
                 branches.push(Branch::Recv { channel, var, body });
             } else if ident == "send" {
@@ -124,6 +139,11 @@ impl Parse for SelectInput {
                     )
                 })?;
 
+                // Allow optional comma
+                if input.peek(Token![,]) {
+                    let _ = input.parse::<Token![,]>();
+                }
+
                 branches.push(Branch::Send {
                     channel,
                     value,
@@ -146,11 +166,16 @@ impl Parse for SelectInput {
                     )
                 })?;
 
+                // Allow optional comma
+                if input.peek(Token![,]) {
+                    let _ = input.parse::<Token![,]>();
+                }
+
                 default = Some(body);
             } else {
                 return Err(syn::Error::new(
-                    ident.span(),
-                    "expected `recv`, `send`, or `default`",
+                    input.span(),
+                    format!("expected `recv`, `send`, or `default`, found {found}"),
                 ));
             }
         }
@@ -421,11 +446,9 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                         #variant(Result<(), SendErr<#generic_name::Data>>)
                     });
 
-                    // TODO use mem::forget
-                    senders_fn_args
-                        .push(quote! { mut #sender_arg_name: Option<#generic_name::Data> });
+                    senders_fn_args.push(quote! { #sender_arg_name: #generic_name::Data });
 
-                    senders_provide_fn_args.push(quote! { Some(#value) });
+                    senders_provide_fn_args.push(quote! { #value });
 
                     match_arms.push(quote! {
                         #enum_variant(#var) => { #body }
@@ -433,14 +456,29 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
 
                     channels_enum_handle.push(quote! {
                         __Channels__::#sender_enum_name(sender) => {
-                            match sender.try_send(#sender_arg_name.take().unwrap_unchecked()) {
-                                Ok(()) => { return #enum_variant(Ok(())); },
-                                Err(TrySendErr::Full(_)) => {},
-                                Err(TrySendErr::Locked(v)) => {
-                                    channels.push_back(__Channels__::#sender_enum_name(sender));
-                                    #sender_arg_name = Some(v);
+                            match sender.try_send(std::ptr::read(&#sender_arg_name)) {
+                                Ok(()) => {
+                                    //we copied it above
+                                    std::mem::forget(#sender_arg_name);
+
+                                    return #enum_variant(Ok(()));
                                 },
-                                Err(TrySendErr::Closed(v)) => { return #enum_variant(Err(SendErr::Closed(v))); },
+                                Err(TrySendErr::Full(v)) => {
+                                    //we copied it above
+                                    std::mem::forget(v);
+                                },
+                                Err(TrySendErr::Locked(v)) => {
+                                    //we copied it above
+                                    std::mem::forget(v);
+
+                                    channels.push_back(__Channels__::#sender_enum_name(sender));
+                                },
+                                Err(TrySendErr::Closed(v)) => {
+                                    //we copied it above
+                                    std::mem::forget(#sender_arg_name);
+
+                                    return #enum_variant(Err(SendErr::Closed(v)));
+                                },
                             }
                         }
                     });
@@ -565,8 +603,8 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
 
                     match_arms.push(quote! {
                         #idx => {
-                            let #var = if !general_state.is_closed() {
-                                unsafe { Ok(std::mem::ManuallyDrop::take(&mut recv_slot.#variant)) }
+                            let #var = if !__general_state.is_closed() {
+                                unsafe { Ok(std::mem::ManuallyDrop::take(&mut __recv_slot.#variant)) }
                             } else {
                                 Err(RecvErr::Closed)
                             };
@@ -588,7 +626,7 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                                     return;
                                 }
                                 SelectNonBlockingBranchResult::NotReady => {
-                                    // Go on, the receiver have been subscribed
+                                    // Go on, the receiver has been subscribed
                                 }
                                 SelectNonBlockingBranchResult::AlreadyAcquired => {
                                     // Another thread already acquired the lock and wake the task up.
@@ -649,7 +687,9 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
 
                     match_arms.push(quote! {
                         #idx => {
-                            let #var = if !general_state.is_closed() {
+                            let #var = if !__general_state.is_closed() {
+                                std::mem::forget(#var_name);
+
                                 Ok(())
                             } else {
                                 Err(SendErr::Closed(#var_name))
@@ -662,7 +702,7 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                     channels_enum_handle.push(quote! {
                         __Channels__::#sender_enum_name(sender) => {
                             match sender.send_or_subscribe(
-                                unsafe { NonNull::new_unchecked(#var_name.cast_mut()) },
+                                NonNull::new_unchecked(#var_name.cast_mut()),
                                 general_state,
                                 task_in_select_branch,
                             ) {
@@ -672,7 +712,7 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                                     return;
                                 }
                                 SelectNonBlockingBranchResult::NotReady => {
-                                    // Go on, the receiver have been subscribed
+                                    // Go on, the receiver has been subscribed
                                 }
                                 SelectNonBlockingBranchResult::AlreadyAcquired => {
                                     // Another thread already acquired the lock and wake the task up.
@@ -777,22 +817,22 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                     // The task is subscribed for all branches. Some of them will wake it up.
                 }
 
-                #(#send_vars);*
+                #(#send_vars)*
 
-                let mut recv_slot = __RecvSlot__ { uninit: () };
-                let mut resolved_branch_id = usize::MAX;
-                // Protected by lock in task in select.
-                let mut general_state = orengine::sync::channels::CallState::FirstCall;
-                let general_state_ptr = orengine::sync::channels::CallStatePtr::new(&mut general_state);
+                let mut __recv_slot = __RecvSlot__ { uninit: () };
+                let mut __resolved_branch_id = usize::MAX;
+                // Protected by lock in the task in select.
+                let mut __general_state = orengine::sync::channels::CallState::FirstCall;
+                let __general_state_ptr = orengine::sync::channels::CallStatePtr::new(&mut __general_state);
 
-                let recv_slot_ptr = SendableNonNull::from(&mut recv_slot);
-                let resolved_branch_id_ptr = SendableNonNull::from(&mut resolved_branch_id);
+                let __recv_slot_ptr = SendableNonNull::from(&mut __recv_slot);
+                let __resolved_branch_id_ptr = SendableNonNull::from(&mut __resolved_branch_id);
 
                 let mut select_closure = |task| {
                     __select__(
-                        recv_slot_ptr,
-                        resolved_branch_id_ptr,
-                        general_state_ptr,
+                        __recv_slot_ptr,
+                        __resolved_branch_id_ptr,
+                        __general_state_ptr,
                         task,
                         [#(#create_channel_variants),*],
                         #(#senders_provide_fn_args),*
@@ -814,7 +854,7 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
 
                 // Task is unparked here. So, we can read the result
 
-                let __res = match resolved_branch_id {
+                let __res = match __resolved_branch_id {
                     #(#match_arms),*
                     _ => orengine::utils::hints::unreachable_hint()
                 };

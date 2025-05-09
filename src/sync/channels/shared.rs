@@ -1,6 +1,6 @@
 use crate::panic_if_local_in_future;
 use crate::runtime::call::Call;
-use crate::runtime::{local_executor, IsLocal, Task};
+use crate::runtime::{IsLocal, Task, local_executor};
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
 use crate::sync::channels::state::{CallState, CallStatePtr};
 use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
@@ -17,7 +17,7 @@ use std::collections::VecDeque;
 use std::future::Future;
 use std::mem::ManuallyDrop;
 use std::panic::{RefUnwindSafe, UnwindSafe};
-use std::ptr::{copy_nonoverlapping, NonNull};
+use std::ptr::{NonNull, copy_nonoverlapping};
 use std::task::{Context, Poll};
 use std::{mem, ptr};
 
@@ -310,6 +310,7 @@ macro_rules! generate_try_send {
                     );
                     if was_written {
                         mem::forget(inner_lock); // Was released above
+                        mem::forget(value); // We copied it
 
                         return Ok(());
                     }

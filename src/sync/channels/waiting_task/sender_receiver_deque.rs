@@ -345,7 +345,7 @@ impl<T> SenderReceiverQueue<T> {
         if !matches!(&task, WaitingTask::Common(..)) {
             self.number_of_special_tasks += 1;
 
-            if self.number_of_special_tasks.trailing_zeros() >= 10 {
+            if unlikely(self.number_of_special_tasks.trailing_zeros() >= 10) {
                 self.maybe_free_special_tasks();
             }
         }

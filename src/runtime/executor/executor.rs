@@ -13,7 +13,7 @@ use crate::runtime::interaction_between_executors::{ExecutorIsNotRegisteredErr, 
 use crate::runtime::local_thread_pool::LocalThreadWorkerPool;
 use crate::runtime::task::Task;
 use crate::runtime::waker::create_waker;
-use crate::runtime::{CallInner, ExecutorSharedTaskList, Locality, get_core_id_for_executor};
+use crate::runtime::{ExecutorSharedTaskList, Locality, get_core_id_for_executor};
 use crate::utils::{CoreId, ProgressiveTimeout, assert_hint, likely, unlikely};
 use fastrand::Rng;
 use std::cell::UnsafeCell;
@@ -428,10 +428,10 @@ impl Executor {
     /// to allow the compiler to decide whether to inline this function.
     #[inline(never)]
     fn handle_call(&mut self, mut task: Task) {
-        match CallInner::from(mem::take(&mut self.current_call)) {
-            CallInner::None => {}
-            CallInner::PushCurrentTaskTo(task_list) => unsafe { task_list.as_ref().push(task) },
-            CallInner::PushCurrentTaskToAndRemoveItIfCounterIsZero(task_list, counter, order) => {
+        match mem::take(&mut self.current_call) {
+            Call::None => {}
+            Call::PushCurrentTaskTo(task_list) => unsafe { task_list.as_ref().push(task) },
+            Call::PushCurrentTaskToAndRemoveItIfCounterIsZero(task_list, counter, order) => {
                 unsafe {
                     let list = task_list.as_ref();
                     list.push(task);
@@ -444,11 +444,11 @@ impl Executor {
                     }
                 }
             }
-            CallInner::ReleaseAtomicBool(atomic_ptr) => {
+            Call::ReleaseAtomicBool(atomic_ptr) => {
                 let atomic_ref = unsafe { atomic_ptr.as_ref() };
                 atomic_ref.store(false, Ordering::Release);
             }
-            CallInner::PushFnToThreadPool(mut f) => {
+            Call::PushFnToThreadPool(mut f) => {
                 debug_assert_ne!(
                     self.config.number_of_thread_workers, 0,
                     "try to use thread pool with 0 workers"
@@ -456,7 +456,7 @@ impl Executor {
 
                 self.thread_pool.push(task, unsafe { f.as_mut() });
             }
-            CallInner::ChangeCurrentTaskLocality(locality) => {
+            Call::ChangeCurrentTaskLocality(locality) => {
                 task.data.set_locality(locality);
                 assert_eq!(
                     task.is_local(),
@@ -473,7 +473,7 @@ impl Executor {
                     self.spawn_shared_task(task);
                 }
             }
-            CallInner::CallFn(func) => unsafe { (*func)(task) },
+            Call::CallFn(func) => unsafe { (*func)(task) },
         }
     }
 
@@ -524,20 +524,16 @@ impl Executor {
 
         match poll_res {
             Poll::Ready(()) => {
-                if cfg!(debug_assertions) {
-                    match *self.current_call.inner() {
-                        CallInner::None => {}
-                        _ => {
-                            panic!("Call is not None, but the task is ready.")
-                        }
-                    }
-                }
+                assert!(
+                    !(cfg!(debug_assertions) && !self.current_call.is_none()),
+                    "Call is not None, but the task is ready."
+                );
 
                 unsafe { task.release(self) };
             }
 
             Poll::Pending => {
-                if !matches!(*self.current_call.inner(), CallInner::None) {
+                if !self.current_call.is_none() {
                     self.handle_call(task);
                 }
             }
@@ -550,6 +546,7 @@ impl Executor {
     }
 
     /// Executes a provided [`task`](Task) in the current [`executor`](Executor).
+    /// It can [`spawn`](Self::spawn_task) the provided task if the stack of calls is too large.
     ///
     /// # Attention
     ///
@@ -561,17 +558,14 @@ impl Executor {
     /// For more details read [`Task::check_safety`].
     #[inline]
     pub fn exec_task(&mut self, task: Task) {
+        // TODO maybe not 8? Maybe count the memory usage?
         if likely(self.future_call_stack_depth < 8) {
             self.exec_task_now(task);
 
             return;
         }
 
-        if task.is_local() {
-            self.spawn_local_task(task);
-        } else {
-            self.spawn_shared_task(task);
-        }
+        self.spawn_task(task);
     }
 
     /// Creates a `local` [`task`](Task) from a provided [`future`](Future)

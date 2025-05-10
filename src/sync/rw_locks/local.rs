@@ -3,9 +3,9 @@
 //!
 //! It allows for asynchronous read or write locking and unlocking, and provides
 //! ownership-based locking through [`LocalReadLockGuard`] and [`LocalWriteLockGuard`].
-use crate::runtime::{local_executor, IsLocal, Task};
+use crate::runtime::{IsLocal, Task, local_executor};
 use crate::sync::{AsyncRWLock, AsyncReadLockGuard, AsyncWriteLockGuard, LockStatus};
-use crate::utils::{acquire_task_vec_from_pool, TaskVecFromPool};
+use crate::utils::{TaskVecFromPool, acquire_task_vec_from_pool};
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::mem::ManuallyDrop;
@@ -547,6 +547,7 @@ fn test_compile_local_rw_lock() {}
 mod tests {
     use super::*;
     use crate as orengine;
+    use crate::runtime::Locality;
     use crate::sync::{AsyncWaitGroup, LocalWaitGroup};
     use crate::yield_now;
     use std::rc::Rc;
@@ -559,43 +560,67 @@ mod tests {
 
         for i in 1..=15 {
             let mutex = rw_lock.clone();
-            local_executor().exec_local_future(async move {
-                let value = mutex.read().await;
-                assert_eq!(mutex.get_inner().number_of_readers, i);
-                assert_eq!(*value, 0);
-                yield_now().await;
-                assert_eq!(mutex.get_inner().number_of_readers, 16 - i);
-                assert_eq!(*value, 0);
-            });
+            let task = unsafe {
+                Task::from_future(
+                    async move {
+                        let value = mutex.read().await;
+                        assert_eq!(mutex.get_inner().number_of_readers, i);
+                        assert_eq!(*value, 0);
+
+                        yield_now().await;
+
+                        assert_eq!(mutex.get_inner().number_of_readers, 16 - i);
+                        assert_eq!(*value, 0);
+                    },
+                    Locality::local(),
+                )
+            };
+
+            local_executor().exec_task_now(task);
         }
 
         for _ in 1..=15 {
             let wg = wg.clone();
             let read_wg = read_wg.clone();
-            wg.add(1);
             let mutex = rw_lock.clone();
-            local_executor().exec_local_future(async move {
-                assert_eq!(mutex.get_inner().number_of_readers, 15);
-                let mut value = mutex.write().await;
-                {
-                    let read_wg = read_wg.clone();
-                    let mutex = mutex.clone();
-                    read_wg.add(1);
 
-                    local_executor().exec_local_future(async move {
+            wg.add(1);
+
+            let task = unsafe {
+                Task::from_future(
+                    async move {
+                        assert_eq!(mutex.get_inner().number_of_readers, 15);
+
+                        let mut value = mutex.write().await;
+                        {
+                            let read_wg = read_wg.clone();
+                            let mutex = mutex.clone();
+                            read_wg.add(1);
+
+                            let task = Task::from_future(
+                                async move {
+                                    assert_eq!(mutex.get_inner().number_of_readers, -1);
+                                    let value = mutex.read().await;
+                                    assert_ne!(*value, 0);
+                                    assert_ne!(mutex.get_inner().number_of_readers, 0);
+                                    read_wg.done();
+                                },
+                                Locality::local(),
+                            );
+
+                            local_executor().exec_task_now(task);
+                        }
+
                         assert_eq!(mutex.get_inner().number_of_readers, -1);
-                        let value = mutex.read().await;
-                        assert_ne!(*value, 0);
-                        assert_ne!(mutex.get_inner().number_of_readers, 0);
-                        read_wg.done();
-                    });
-                }
+                        *value += 1;
 
-                assert_eq!(mutex.get_inner().number_of_readers, -1);
-                *value += 1;
+                        wg.done();
+                    },
+                    Locality::local(),
+                )
+            };
 
-                wg.done();
-            });
+            local_executor().exec_task_now(task);
         }
 
         wg.wait().await;

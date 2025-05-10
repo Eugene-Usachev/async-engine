@@ -4,30 +4,16 @@ use crate::sync::channels::state::CallStatePtr;
 use crate::sync::channels::waiting_task::TaskInSelectBranch;
 use std::ptr::NonNull;
 
-// TODO docs and update from `TryRecvErr`
+/// The `SelectReceiver` trait provides methods for [`select`](crate::select).
 pub trait SelectReceiver: AsyncReceiver<Self::Data> {
     /// The type of data stored in the `SelectReceiver`.
     type Data;
 
     /// Tries to receive a value from the `SelectReceiver`.
     ///
-    /// On success returns `Ok(())` and puts the value into `slot`.
+    /// Returns [`SelectNonBlockingBranchResult`].
     ///
-    /// Else returns `Err(`[`TryRecvErr`]`)`.
-    ///
-    /// It gets a pointer because `slot` can be uninitialized, and it is low-level API.
-    ///
-    /// # Errors meaning
-    ///
-    /// - [`TryRecvErr::Closed`]: [`select`] executes an associated branch with [`RecvErr::Closed`];
-    ///
-    /// - [`TryRecvErr::Locked`]: [`select`] retries if no other branch can be executed;
-    ///
-    /// - [`TryRecvErr::Empty`]: no data available, and the [`TaskInSelectBranch`]
-    ///   is subscribed to the `SelectReceiver`.
-    ///
-    /// [`select`]: crate::sync::channels::select::select_
-    /// [`RecvErr::Closed`]: crate::sync::channels::RecvErr::Closed
+    /// Read [`SelectNonBlockingBranchResult`] for more details.
     fn recv_or_subscribe(
         &self,
         slot: NonNull<Self::Data>,

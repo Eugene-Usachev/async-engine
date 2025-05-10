@@ -9,7 +9,7 @@ use std::ptr::NonNull;
 pub enum CallState {
     /// Default state.
     FirstCall,
-    /// Receiver writes the value associated with this task.
+    /// The receiver writes the value associated with this task.
     WokenToReturnReady,
     /// This task was enqueued, now it is woken by close.
     WokenByClose,
@@ -22,21 +22,27 @@ impl CallState {
     }
 }
 
-// TODO docs
+/// `CallStatePtr` is a wrapper on `NonNull<CallState>`.
+///
+/// It is unsafe [`Send`] and [`Sync`].
+/// The creator and callers should guarantee that the pointer is valid and [`Send`], [`Sync`].
 #[derive(Copy, Clone)]
 pub struct CallStatePtr(NonNull<CallState>);
 
 impl CallStatePtr {
+    /// Creates new `CallStatePtr`.
     pub fn new(ptr: &mut CallState) -> Self {
         Self(NonNull::from(ptr))
     }
 
+    /// Sets the provided [`CallState`] to [`CallState::WokenByClose`].
     pub fn set_to_closed(&self) {
         unsafe {
             self.0.write(CallState::WokenByClose);
         }
     }
 
+    /// Sets the provided [`CallState`] to the provided value.
     pub fn write(&self, value: CallState) {
         unsafe {
             self.0.write(value);

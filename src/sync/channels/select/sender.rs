@@ -4,29 +4,16 @@ use crate::sync::channels::state::CallStatePtr;
 use crate::sync::channels::waiting_task::TaskInSelectBranch;
 use std::ptr::NonNull;
 
-// TODO docs and update from `TrySendInSelectErr`
+/// The `SelectSender` trait provides methods for [`select`](crate::select).
 pub trait SelectSender: AsyncSender<Self::Data> {
     /// The type of data stored in the `SelectSender`.
     type Data;
 
-    /// Tries to send the provided data to the `SelectSender`.
+    /// Tries to send the provided data to `SelectSender`.
     ///
-    /// On success returns `Ok(())`.
+    /// Returns [`SelectNonBlockingBranchResult`].
     ///
-    /// Else returns `Err(`[`TrySendInSelectErr`]`)`.
-    ///
-    /// # Errors meaning
-    ///
-    /// - [`TrySendInSelectErr::Closed`]: [`select`] executes an associated
-    ///   branch with [`SendErr::Closed`];
-    ///
-    /// - [`TrySendInSelectErr::Locked`]: [`select`] retries if no other branch can be executed;
-    ///
-    /// - [`TrySendInSelectErr::Full`]: The channel is full, and the [`SelectBranchManager`]
-    ///   is subscribed to the `SelectSender`.
-    ///
-    /// [`select`]: crate::sync::channels::select::select_
-    /// [`SendErr::Closed`]: crate::sync::channels::SendErr::Closed
+    /// Read [`SelectNonBlockingBranchResult`] for more details.
     fn send_or_subscribe(
         &self,
         data: NonNull<Self::Data>,

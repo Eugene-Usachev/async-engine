@@ -1,7 +1,10 @@
 use std::ops::Deref;
 use std::ptr::NonNull;
 
-// TODO docs
+/// `SendableNonNull` is a wrapper over the [`NonNull`] which unsafe
+/// implements [`Send`] and [`Sync`].
+///
+/// The caller must ensure that the `SendableNonNull` is [`Send`] and [`Sync`].
 pub struct SendableNonNull<T> {
     ptr: NonNull<T>,
 }

@@ -1,16 +1,15 @@
-// TODO
 use crate as orengine;
 use crate::sync::{
     AsyncChannel, AsyncReceiver, AsyncSender, AsyncWaitGroup, Channel, LocalChannel,
     LocalWaitGroup, SendErr, WaitGroup,
 };
 use crate::test::sched_future_to_another_thread;
-use crate::{local_executor, sleep, yield_now, Local};
+use crate::{Local, local_executor, sleep, yield_now};
 use orengine::select;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::Arc;
 use std::time::Duration;
 
 // region `local` tests
@@ -1200,7 +1199,7 @@ async fn test_shared_select_stress(with_default: bool) {
             one_bounded_chan_creator,
             one_bounded_chan_creator,
         )
-            .await;
+        .await;
     }
 }
 

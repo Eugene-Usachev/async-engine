@@ -1,5 +1,3 @@
-// TODO docs
-
 use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
 use crate::utils::{assert_hint, likely, unlikely};
 use std::alloc::{Layout, alloc, dealloc};
@@ -7,9 +5,17 @@ use std::ops::{Range, RangeBounds};
 use std::ptr::NonNull;
 use std::{ops, ptr};
 
+/// Each receiver adds 1 to the counter of [`SenderReceiverQueue`]
 const RECEIVER_DELTA: isize = 1;
+/// Each sender subtracts 1 from the counter of [`SenderReceiverQueue`]
 const SENDER_DELTA: isize = -1;
 
+/// [`SenderReceiverQueue`] is a deque of [`WaitingTask`].
+///
+/// It is optimized to contain only receivers or only senders
+/// and to count special tasks and release them.
+///
+/// The provided type `T` doesn't matter because it uses only pointers.
 #[repr(C)]
 pub(crate) struct SenderReceiverQueue<T = ()> {
     ptr: NonNull<WaitingTask<T>>,
@@ -20,14 +26,22 @@ pub(crate) struct SenderReceiverQueue<T = ()> {
     number_of_special_tasks: usize,
 }
 
+/// Current state of [`SenderReceiverQueue`].
+///
+/// Read [`SenderReceiverQueueOption::Empty`], [`SenderReceiverQueueOption::Sender`],
+/// [`SenderReceiverQueueOption::Receiver`] for more details.
 #[derive(Eq, PartialEq)]
 pub(crate) enum SenderReceiverQueueOption {
+    /// The [`SenderReceiverQueue`] doesn't contain any waiting tasks.
     Empty,
+    /// The [`SenderReceiverQueue`] contains senders.
     Sender,
+    /// The [`SenderReceiverQueue`] contains receivers.
     Receiver,
 }
 
 impl<T> SenderReceiverQueue<T> {
+    /// Returns a [`Layout`] for the `[WaitingTask;capacity]` array.
     #[inline(always)]
     fn new_layout_for_ptr(capacity: usize) -> Layout {
         unsafe {
@@ -38,18 +52,21 @@ impl<T> SenderReceiverQueue<T> {
         }
     }
 
+    /// Returns a [`NonNull`] to the `[WaitingTask;capacity]` array.
     fn new_ptr(capacity: usize) -> NonNull<WaitingTask<T>> {
         let ptr = unsafe { alloc(Self::new_layout_for_ptr(capacity)) };
 
         unsafe { NonNull::new_unchecked(ptr.cast()) }
     }
 
+    /// Deallocates the `[WaitingTask;capacity]` array.
     fn deallocate_ptr(ptr: NonNull<WaitingTask<T>>, capacity: usize) {
         unsafe {
             dealloc(ptr.as_ptr().cast(), Self::new_layout_for_ptr(capacity));
         }
     }
 
+    /// Returns a new [`SenderReceiverQueue`].
     pub(crate) fn new() -> Self {
         const DEFAULT_CAP: usize = 2;
 
@@ -62,6 +79,9 @@ impl<T> SenderReceiverQueue<T> {
         }
     }
 
+    /// Returns the current state of [`SenderReceiverQueue`].
+    ///
+    /// Read [`SenderReceiverQueueOption`] for more details.
     #[inline]
     pub(crate) fn option(&self) -> SenderReceiverQueueOption {
         match self.number_of_senders_or_receivers.cmp(&0) {
@@ -71,26 +91,33 @@ impl<T> SenderReceiverQueue<T> {
         }
     }
 
+    /// Returns the number of senders or receivers.
+    ///
+    /// It is negative for senders and positive for receivers.
     #[inline]
     pub(crate) fn number_of_senders_or_receivers(&self) -> isize {
         self.number_of_senders_or_receivers
     }
 
+    /// Returns the capacity of [`SenderReceiverQueue`].
     #[inline]
     pub(crate) fn capacity(&self) -> usize {
         self.capacity
     }
 
+    /// Returns the length of [`SenderReceiverQueue`].
     #[inline]
     pub(crate) fn len(&self) -> usize {
         self.number_of_senders_or_receivers.unsigned_abs()
     }
 
+    /// Returns `true` if [`SenderReceiverQueue`] is empty.
     #[inline]
     pub(crate) fn is_empty(&self) -> bool {
         self.number_of_senders_or_receivers == 0
     }
 
+    /// Returns an index of the underlying array for the provided index.
     #[inline]
     fn to_physical_idx(&self, idx: usize) -> usize {
         let logical_index = self.head + idx;
@@ -105,6 +132,11 @@ impl<T> SenderReceiverQueue<T> {
         }
     }
 
+    /// Sets the len.
+    #[allow(
+        clippy::cast_possible_wrap,
+        reason = "Len is unlikely to be more than isize::MAX"
+    )]
     fn set_len(&mut self, len: usize) {
         match self.option() {
             SenderReceiverQueueOption::Sender => {
@@ -133,7 +165,7 @@ impl<T> SenderReceiverQueue<T> {
     /// returns two ranges into the physical buffer that correspond to
     /// the given range. The `len` parameter should usually just be `self.len`;
     /// the reason it's passed explicitly is that if the deque is wrapped in
-    /// a `Drain`, then `self.len` is not actually the length of the deque.
+    /// a `Drain`, then `self.len` is not the length of the deque.
     ///
     /// # Safety
     ///
@@ -205,6 +237,7 @@ impl<T> SenderReceiverQueue<T> {
         }
     }
 
+    /// Swaps two elements in the deque by the provided indexes.
     #[inline]
     fn swap(&mut self, i: usize, j: usize) {
         assert_hint(i < self.len(), "index out of bounds");
@@ -215,6 +248,9 @@ impl<T> SenderReceiverQueue<T> {
         unsafe { ptr::swap(self.ptr.add(ri).as_ptr(), self.ptr.add(rj).as_ptr()) }
     }
 
+    /// Returns the underlying array as two slices.
+    ///
+    /// Read [`Self::slice_ranges`] for more details.
     #[inline]
     fn as_mut_slices(&mut self) -> (&mut [WaitingTask<T>], &mut [WaitingTask<T>]) {
         let (a_range, b_range) = self.slice_ranges(.., self.len());
@@ -227,7 +263,11 @@ impl<T> SenderReceiverQueue<T> {
             )
         }
     }
-
+    /// Shortens the deque, keeping the first `len` elements and dropping
+    /// the rest.
+    ///
+    /// If `len` is greater or equal to the deque's current length, this has
+    /// no effect.
     fn truncate(&mut self, len: usize) {
         /// Runs the destructor for all items in the slice when it gets dropped (normally or
         /// during unwinding).
@@ -280,6 +320,7 @@ impl<T> SenderReceiverQueue<T> {
         self.set_len(new_len);
     }
 
+    /// Retains only the elements specified by the predicate.
     fn retain<F: FnMut(&mut WaitingTask<T>) -> bool>(&mut self, mut f: F) {
         // Forked from std::collections::VecDeque::retain. For detail read it.
 
@@ -324,6 +365,7 @@ impl<T> SenderReceiverQueue<T> {
         }
     }
 
+    /// Releases special tasks if it is possible.
     #[cold]
     fn maybe_free_special_tasks(&mut self) {
         let mut delta = 0;
@@ -341,7 +383,14 @@ impl<T> SenderReceiverQueue<T> {
         self.number_of_special_tasks -= delta;
     }
 
+    /// Pushes the provided task to the queue.
+    ///
+    /// It uses `DELTA` to set the number of senders/receivers.
+    ///
+    /// As `DELTA` it can accept only [`SENDER_DELTA`] or [`RECEIVER_DELTA`].
     fn push_back<const DELTA: isize>(&mut self, task: WaitingTask<T>) {
+        debug_assert!(DELTA == SENDER_DELTA || DELTA == RECEIVER_DELTA);
+
         if !matches!(&task, WaitingTask::Common(..)) {
             self.number_of_special_tasks += 1;
 
@@ -422,20 +471,29 @@ impl<T> SenderReceiverQueue<T> {
         Self::deallocate_ptr(unsafe { NonNull::new_unchecked(old_ptr) }, len);
     }
 
+    /// Pushes the provided task to the queue and stores it as a receiver.
     pub(crate) fn push_receiver(&mut self, task: WaitingTask<T>) {
         debug_assert!(self.number_of_senders_or_receivers > -1);
 
         self.push_back::<RECEIVER_DELTA>(task);
     }
 
+    /// Pushes the provided task to the queue and stores it as a sender.
     pub(crate) fn push_sender(&mut self, task: WaitingTask<T>) {
         debug_assert!(self.number_of_senders_or_receivers < 1);
 
         self.push_back::<SENDER_DELTA>(task);
     }
 
+    /// Pops a task from the queue.
+    ///
+    /// It uses `DELTA` to set the number of senders/receivers.
+    ///
+    /// As `DELTA` it can accept only [`SENDER_DELTA`] or [`RECEIVER_DELTA`].
     unsafe fn pop_front<const DELTA: isize>(&mut self) -> WaitingTask<T> {
+        debug_assert!(DELTA == SENDER_DELTA || DELTA == RECEIVER_DELTA);
         debug_assert!(!self.is_empty());
+
         let old_head = self.head;
         let len = self.len();
 
@@ -489,6 +547,7 @@ impl<T> SenderReceiverQueue<T> {
         res
     }
 
+    /// Pops the provided task to the queue only if it is associated with a receiver.
     pub(crate) fn pop_receiver(&mut self) -> Option<WaitingTask<T>> {
         if self.number_of_senders_or_receivers < 1 {
             None
@@ -497,6 +556,7 @@ impl<T> SenderReceiverQueue<T> {
         }
     }
 
+    /// Pops the provided task to the queue only if it is associated with a sender.
     pub(crate) fn pop_sender(&mut self) -> Option<WaitingTask<T>> {
         if self.number_of_senders_or_receivers > -1 {
             None

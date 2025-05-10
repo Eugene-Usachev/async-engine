@@ -1,4 +1,3 @@
-// TODO docs
 use crate::local_executor;
 use crate::sync::channels::state::CallStatePtr;
 use crate::sync::channels::waiting_task::sender_receiver_deque::{
@@ -13,8 +12,11 @@ use std::mem::ManuallyDrop;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::ptr::NonNull;
 
+/// Contains `size_of::<WaitingTask<()>>()`.
 const WAITING_TASKS_SIZE: usize = size_of::<WaitingTask<()>>();
 
+/// `WaitingTaskDequePool` is used to reuse [`WaitingTaskLocalDequeGuard`]
+/// and [`WaitingTaskSharedDequeGuard`].
 struct WaitingTaskDequePool<T = ()> {
     queues: Vec<SenderReceiverQueue<T>>,
     /// All queues with its capacity in bytes.
@@ -22,6 +24,7 @@ struct WaitingTaskDequePool<T = ()> {
 }
 
 impl<T> WaitingTaskDequePool<T> {
+    /// Creates [`WaitingTaskDequePool`].
     const fn new() -> Self {
         Self {
             queues: Vec::new(),
@@ -29,10 +32,11 @@ impl<T> WaitingTaskDequePool<T> {
         }
     }
 
+    /// Shrinks the pool if it is necessary.
     fn maybe_shrink(&mut self) {
         let average = (self.bytes_allocated
             - self.queues.len() * size_of::<SenderReceiverQueue<()>>())
-            / self.queues.len(); // average is not the median, but it is too expensive to calculate the median.
+            / self.queues.len(); // the average is not the median, but it is too expensive to calculate the median.
 
         self.queues.retain(|queue| {
             if queue.capacity() < average {
@@ -71,6 +75,7 @@ impl<T> WaitingTaskDequePool<T> {
         });
     }
 
+    /// Returns a [`SenderReceiverQueue<T>`] to the pool.
     fn push(&mut self, deque: SenderReceiverQueue<T>) {
         self.bytes_allocated += deque.capacity() * WAITING_TASKS_SIZE;
         self.bytes_allocated += size_of::<ManuallyDrop<SenderReceiverQueue<()>>>();
@@ -84,6 +89,7 @@ impl<T> WaitingTaskDequePool<T> {
         self.maybe_shrink();
     }
 
+    /// Pops a [`SenderReceiverQueue<T>`] from the pool.
     fn pop(&mut self) -> Option<SenderReceiverQueue<T>> {
         if let Some(queue) = self.queues.pop() {
             self.bytes_allocated -= queue.capacity() * WAITING_TASKS_SIZE;
@@ -131,6 +137,7 @@ macro_rules! generate_struct {
         }
 
         impl<T> $name<T> {
+            /// Return a number of senders or receivers of the underlying queue.
             pub(crate) fn number_of_senders_or_receivers(&self) -> isize {
                 self.queue.number_of_senders_or_receivers()
             }
@@ -140,6 +147,7 @@ macro_rules! generate_struct {
 
 macro_rules! generate_new {
     () => {
+        /// Creates new object from the [`SenderReceiverQueue`].
         pub(crate) fn new() -> Self {
             Self {
                 queue: ManuallyDrop::new(acquire_waiting_task_deque_from_pool()),
@@ -433,9 +441,9 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
     generate_push_back!();
 
     /// Pops a [`waiting task`](WaitingTask) from the deque, next calls provided function,
-    /// and after it execute the task.
+    /// and after it executes the task.
     ///
-    /// Return `false` if next task can not be executed. Otherwise, returns `true`.
+    /// Return `false` if a next task can not be executed. Otherwise, returns `true`.
     ///
     /// * `setter_fn` is a function that must write/read data to/from receiver/sender.
     #[must_use]
@@ -472,7 +480,7 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
     }
 
     /// Pops a [`waiting task`](WaitingTask) from the deque if [`TaskInSelectBranch`] was acquired,
-    /// next calls provided function, and after it execute the task.
+    /// next calls provided function, and after it executes the task.
     #[must_use]
     fn try_pop_and_call_if_acquired<const IS_RECEIVER_POP: bool, SetterFn>(
         &mut self,

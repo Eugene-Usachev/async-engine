@@ -525,7 +525,7 @@ impl Executor {
         match poll_res {
             Poll::Ready(()) => {
                 assert!(
-                    !(cfg!(debug_assertions) && !self.current_call.is_none()),
+                    !cfg!(debug_assertions) || self.current_call.is_none(),
                     "Call is not None, but the task is ready."
                 );
 

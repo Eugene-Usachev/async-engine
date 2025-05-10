@@ -1,11 +1,10 @@
-// TODO docs
-
 use crate::utils::assert_hint;
 use std::mem;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::ptr::drop_in_place;
 
+/// `ArrayDeque` is a deque, but it uses an array on stack and can't be resized.
 pub struct ArrayDeque<T, const N: usize> {
     stack: ManuallyDrop<[T; N]>,
     len: usize,
@@ -13,6 +12,7 @@ pub struct ArrayDeque<T, const N: usize> {
 }
 
 impl<T, const N: usize> ArrayDeque<T, N> {
+    /// Creates new `ArrayDeque`.
     pub fn new() -> Self {
         #[allow(
             clippy::uninit_assumed_init,
@@ -27,14 +27,17 @@ impl<T, const N: usize> ArrayDeque<T, N> {
         }
     }
 
+    /// Returns the number of elements in the deque.
     pub fn len(&self) -> usize {
         self.len
     }
 
+    /// Returns `true` if the deque is empty.
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
+    /// Returns an index of the underlying array for the provided index.
     #[inline]
     fn to_physical_idx(&self, idx: usize) -> usize {
         let logical_index = self.head + idx;
@@ -47,6 +50,8 @@ impl<T, const N: usize> ArrayDeque<T, N> {
         }
     }
 
+    /// Appends an element to the back of the deque.
+    ///
     /// # Safety
     ///
     /// The caller must ensure that the stack is not full.
@@ -59,6 +64,7 @@ impl<T, const N: usize> ArrayDeque<T, N> {
         self.len += 1;
     }
 
+    /// Removes the first element and returns it, or None if the deque is empty
     pub fn pop_front(&mut self) -> Option<T> {
         if !self.is_empty() {
             self.len -= 1;
@@ -77,6 +83,7 @@ impl<T, const N: usize> ArrayDeque<T, N> {
         }
     }
 
+    /// Drops all elements in the deque and set the length to 0.
     pub fn clear(&mut self) {
         if mem::needs_drop::<T>() {
             for i in 0..self.len() {

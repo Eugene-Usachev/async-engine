@@ -7,6 +7,7 @@ use crate::io::worker::{IoWorker, local_worker};
 use crate::local_executor;
 use crate::net::addr::FromSockAddr;
 use crate::net::{Socket, Stream};
+use crate::utils::unwrap_or_bug_hint;
 use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use socket2::SockAddr;
 use std::future::Future;
@@ -213,7 +214,7 @@ pub trait AsyncAccept<S: Stream>: Socket {
 
         Ok((
             stream,
-            S::Addr::from_sock_addr(sock_addr).expect(BUG_MESSAGE), // TODO hint
+            unwrap_or_bug_hint(S::Addr::from_sock_addr(sock_addr)),
         ))
     }
 

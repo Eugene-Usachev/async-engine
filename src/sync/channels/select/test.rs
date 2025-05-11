@@ -45,19 +45,19 @@ fn test_local_select_with_default() {
         let ch1 = LocalChannel::<u32>::bounded(1);
         let ch2 = LocalChannel::<u32>::bounded(1);
 
-        ch2.send(31).await.expect("failed to send");
+        ch2.try_send(31).expect("failed to send");
 
         let a = select! {
-            recv(&ch1) -> var => var.unwrap()
-            recv(&ch2) -> var => var.unwrap()
-            send(&ch2, 20) -> _var => 1
+            recv(&ch1) -> var => var.unwrap(),
+            recv(&ch2) -> var => var.unwrap(),
+            send(&ch2, 20) -> _var => 1,
             default => 4
         };
 
         assert_eq!(a, RES, "non-blocking recv assertion failed");
     }
 
-    // non-blocking send success
+    // non-blocking `send` success
     {
         const RES: u32 = 23;
         const SENT: u32 = 61;
@@ -245,6 +245,7 @@ fn test_local_select_without_default_blocking() {
 
         local_executor().spawn_local(async move {
             sleep(Duration::from_micros(100)).await;
+
             ch2_clone.send(RES).await.expect("failed to send");
         });
 

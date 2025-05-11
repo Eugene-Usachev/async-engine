@@ -53,7 +53,6 @@ use std::ops::Deref;
 /// assert!(is_local_of(&local_struct));
 /// assert!(!is_local_of(&shared_struct));
 /// ```
-// TODO remove
 pub trait IsLocal {
     /// Signifies whether the struct is `local` or `shared`.
     const IS_LOCAL: bool;

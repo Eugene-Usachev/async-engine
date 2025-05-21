@@ -7,7 +7,7 @@ use crate::io::worker::{IoWorker, local_worker};
 use crate::local_executor;
 use crate::net::addr::FromSockAddr;
 use crate::net::{Socket, Stream};
-use crate::utils::unwrap_or_bug_hint;
+use crate::utils::{OrengineInstant, unwrap_or_bug_hint};
 use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use socket2::SockAddr;
 use std::future::Future;
@@ -16,7 +16,7 @@ use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// The same as [`SockAddr`] but in this crate we can use private fields.
 struct SockAddrRaw {
@@ -105,13 +105,13 @@ pub struct AcceptWithDeadline<S: FromRawSocket> {
     addr: SockAddrRaw,
     raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
-    deadline: Instant,
+    deadline: OrengineInstant,
     pin: PhantomData<S>,
 }
 
 impl<S: FromRawSocket> AcceptWithDeadline<S> {
     /// Creates a new `accept` io operation with deadline.
-    pub fn new(raw_socket: RawSocket, deadline: Instant) -> Self {
+    pub fn new(raw_socket: RawSocket, deadline: OrengineInstant) -> Self {
         Self {
             raw_socket,
             #[allow(
@@ -222,7 +222,7 @@ pub trait AsyncAccept<S: Stream>: Socket {
     ///
     /// This method works similarly to [`accept`](Self::accept),
     /// but it will time out if the connection is not accepted by
-    /// the specified `deadline` (using [`Instant`]).
+    /// the specified `deadline`.
     ///
     /// If the deadline is exceeded, the method will return an error with
     /// kind [`ErrorKind::TimedOut`](std::io::ErrorKind::TimedOut).
@@ -247,9 +247,12 @@ pub trait AsyncAccept<S: Stream>: Socket {
     /// # }
     /// ```
     #[inline]
-    async fn accept_with_deadline(&mut self, deadline: Instant) -> Result<(S, S::Addr)> {
+    async fn accept_with_deadline(
+        &mut self,
+        deadline: impl Into<OrengineInstant>,
+    ) -> Result<(S, S::Addr)> {
         let (stream, sock_addr) =
-            AcceptWithDeadline::<S>::new(AsRawSocket::as_raw_socket(self), deadline).await?;
+            AcceptWithDeadline::<S>::new(AsRawSocket::as_raw_socket(self), deadline.into()).await?;
         Ok((
             stream,
             S::Addr::from_sock_addr(sock_addr).expect(BUG_MESSAGE),

@@ -1,10 +1,11 @@
+use crate::local_executor;
 use crate::runtime::IsLocal;
 use crate::sync::channels::{RecvErr, SendErr, TryRecvErr, TrySendErr};
-use crate::utils::Ptr;
+use crate::sync::{RecvTimeoutErr, SendTimeoutErr};
+use crate::utils::OrengineInstant;
 use std::future::Future;
-use std::mem::MaybeUninit;
 use std::ops::Deref;
-use std::ptr::drop_in_place;
+use std::time::Duration;
 
 /// The `AsyncSender` allows sending values into the [`channel`](AsyncChannel).
 ///
@@ -33,7 +34,7 @@ pub trait AsyncSender<T>: IsLocal {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```no_run
     /// use std::time::Duration;
     /// use orengine::{local_executor, sleep};
     /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
@@ -58,13 +59,84 @@ pub trait AsyncSender<T>: IsLocal {
     /// ```
     fn send(&self, value: T) -> impl Future<Output = Result<(), SendErr<T>>>;
 
+    /// Sends a value into the [`channel`](AsyncChannel).
+    ///
+    /// Wait until the [`channel`](AsyncChannel) is available or
+    /// the [`channel`](AsyncChannel) is closed or the provided deadline is reached.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use orengine::{local_executor, sleep};
+    /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender, SendTimeoutErr};
+    ///
+    /// # async fn foo() {
+    /// let channel = orengine::sync::Channel::bounded(1);
+    /// channel.send_deadline(
+    ///     0,
+    ///     local_executor().start_round_time_for_deadlines() + Duration::from_millis(100)
+    /// ).await.unwrap();
+    ///
+    /// let res: Result<(), SendTimeoutErr<usize>> = channel.send_deadline(
+    ///     1,
+    ///     local_executor().start_round_time_for_deadlines() + Duration::from_millis(100)
+    /// ).await;
+    ///
+    /// assert!(matches!(res, Err(SendTimeoutErr::Timeout(1))));
+    /// # }
+    /// ```
+    fn send_deadline(
+        &self,
+        value: T,
+        deadline: impl Into<OrengineInstant>,
+    ) -> impl Future<Output = Result<(), SendTimeoutErr<T>>>;
+
+    /// Sends a value into the [`channel`](AsyncChannel).
+    ///
+    /// Wait until the [`channel`](AsyncChannel) is available or
+    /// the [`channel`](AsyncChannel) is closed or the provided deadline is reached.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use orengine::{local_executor, sleep};
+    /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender, SendTimeoutErr};
+    ///
+    /// # async fn foo() {
+    /// let channel = orengine::sync::Channel::bounded(1);
+    /// channel.send_timeout(
+    ///     0,
+    ///     Duration::from_millis(100)
+    /// ).await.unwrap();
+    ///
+    /// let res: Result<(), SendTimeoutErr<usize>> = channel.send_timeout(
+    ///     1,
+    ///     Duration::from_millis(100)
+    /// ).await;
+    ///
+    /// assert!(matches!(res, Err(SendTimeoutErr::Timeout(1))));
+    /// # }
+    /// ```
+    fn send_timeout(
+        &self,
+        value: T,
+        timeout: Duration,
+    ) -> impl Future<Output = Result<(), SendTimeoutErr<T>>> {
+        self.send_deadline(
+            value,
+            local_executor().start_round_time_for_deadlines() + timeout,
+        )
+    }
+
     /// Tries to send a value into the [`channel`](AsyncChannel).
     ///
     /// If the [`channel`](AsyncChannel) is full, returns [`TrySendErr::Full`].
     ///
-    /// If the [`channel`](AsyncChannel) is locked, returns [`TrySendErr::Locked`].
+    /// If the [`channel`](AsyncChannel) is locked, it returns [`TrySendErr::Locked`].
     ///
-    /// If the [`channel`](AsyncChannel) is closed, returns [`TrySendErr::Closed`].
+    /// If the [`channel`](AsyncChannel) is closed, it returns [`TrySendErr::Closed`].
     ///
     /// Else, the value is immediately sent.
     ///
@@ -75,15 +147,15 @@ pub trait AsyncSender<T>: IsLocal {
     /// ```rust
     /// use orengine::sync::{AsyncChannel, AsyncSender, TrySendErr};
     ///
-    /// async fn foo() {
-    ///     let channel = orengine::sync::Channel::bounded(1);
-    ///     let (sender, receiver) = channel.split();
+    /// # async fn foo() {
+    /// let channel = orengine::sync::Channel::bounded(1);
+    /// let (sender, receiver) = channel.split();
     ///
-    ///     assert!(sender.try_send(1).is_ok());
-    ///     assert!(matches!(sender.try_send(2).unwrap_err(), TrySendErr::Full(_)));
-    ///     channel.close().await;
-    ///     assert!(matches!(sender.try_send(3).unwrap_err(), TrySendErr::Closed(_)));
-    /// }
+    /// assert!(sender.try_send(1).is_ok());
+    /// assert!(matches!(sender.try_send(2).unwrap_err(), TrySendErr::Full(_)));
+    /// channel.close().await;
+    /// assert!(matches!(sender.try_send(3).unwrap_err(), TrySendErr::Closed(_)));
+    /// # }
     /// ```
     fn try_send(&self, value: T) -> Result<(), TrySendErr<T>>;
 
@@ -111,7 +183,7 @@ pub trait AsyncSender<T>: IsLocal {
 /// }
 /// ```
 pub trait AsyncReceiver<T>: IsLocal {
-    /// Asynchronously receives a value from the [`channel`](AsyncChannel) to the provided `slot`.
+    /// Asynchronously receives a value from the [`channel`](AsyncChannel).
     ///
     /// If the [`channel`](AsyncChannel) is empty, the receiver waits until a value
     /// is available or the [`channel`](AsyncChannel) is closed.
@@ -120,134 +192,11 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///
     /// # On close
     ///
-    /// Returns `Err(`[`RecvErr::Closed`]`)` if the [`channel`](AsyncChannel) is closed.
-    ///
-    /// # Attention
-    ///
-    /// __Doesn't drop__ the previous value in the `slot`.
-    ///
-    /// # Safety
-    ///
-    /// - Provided pointer is valid and aligned;
-    ///
-    /// - Previous value is dropped.
+    /// Returns [`RecvInResult::Closed`] if the [`channel`](AsyncChannel) is closed.
     ///
     /// # Example
     ///
-    /// ```rust
-    /// use std::ptr::drop_in_place;
-    /// use orengine::sync::AsyncReceiver;
-    ///
-    /// use orengine::utils::Ptr;
-    ///
-    /// type Payload = i32;
-    ///
-    /// // Must be dropped.
-    /// struct Msg { value: Box<Payload> }
-    ///
-    /// # fn process_msg(msg: &Msg) {}
-    ///
-    /// async fn handle_messages<R: AsyncReceiver<Msg>>(receiver: R) {
-    ///     let mut msg = unsafe { std::mem::MaybeUninit::uninit() };
-    ///
-    ///     loop {
-    ///         // SAFETY: previous value is dropped or absent
-    ///         match unsafe { receiver.recv_in_ptr(Ptr::from(msg.assume_init_mut())) }.await {
-    ///             Ok(()) => {
-    ///                 process_msg(unsafe { msg.assume_init_ref() });
-    ///                 // SAFETY: value exists
-    ///                 unsafe { drop_in_place(msg.as_mut_ptr()) };
-    ///             }
-    ///             Err(_) => return // closed
-    ///         }
-    ///     }
-    /// }
-    /// ```
-    unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> impl Future<Output = Result<(), RecvErr>>;
-
-    /// Tries to receive a value from the [`channel`](AsyncChannel) to the provided `slot`.
-    ///
-    /// If the [`channel`](AsyncChannel) is empty, the receiver
-    /// returns `Err(`[`TryRecvErr::Empty`]`)`.
-    ///
-    /// If the [`channel`](AsyncChannel) is locked, the receiver
-    /// returns `Err(`[`TryRecvErr::Locked`]`)`.
-    ///
-    /// If the [`channel`](AsyncChannel) is closed, the receiver
-    /// returns `Err(`[`TryRecvErr::Closed`]`)`.
-    ///
-    /// Else, the value is immediately received.
-    ///
-    /// # The difference between `try_recv_in_ptr` and `recv_in_ptr`
-    ///
-    /// `try_recv_in_ptr` doesn't block current task.
-    ///
-    /// # Attention
-    ///
-    /// __Doesn't drop__ the previous value in the `slot`.
-    ///
-    /// # Safety
-    ///
-    /// - Provided pointer is valid and aligned;
-    ///
-    /// - Previous value is dropped.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use std::ptr::drop_in_place;
-    /// use orengine::sync::{AsyncReceiver, TryRecvErr};    ///
-    /// #
-    /// use orengine::utils::Ptr;
-    ///
-    /// type Payload = i32;
-    ///
-    /// // Must be dropped.
-    /// struct Msg { value: Box<Payload> }
-    ///
-    /// # fn process_msg(msg: &Msg) {}
-    ///
-    /// fn handle_new_messages<R: AsyncReceiver<Msg>>(receiver: R) -> Result<usize, ()> {
-    ///     let mut msg = unsafe { std::mem::MaybeUninit::uninit() };
-    ///     let mut processed = 0;
-    ///
-    ///     loop {
-    ///         // SAFETY: previous value is dropped or absent
-    ///         match unsafe { receiver.try_recv_in_ptr(Ptr::from(msg.assume_init_mut())) } {
-    ///             Ok(()) => {
-    ///                 process_msg(unsafe { msg.assume_init_ref() });
-    ///                 // SAFETY: value exists
-    ///                 unsafe { drop_in_place(msg.as_mut_ptr()) };
-    ///                 processed += 1;
-    ///             }
-    ///             Err(e) => return match e {
-    ///                 TryRecvErr::Empty | TryRecvErr::Locked => Ok(processed),
-    ///                 TryRecvErr::Closed => Err(())
-    ///             }
-    ///         }
-    ///     }
-    /// }
-    /// ```
-    unsafe fn try_recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), TryRecvErr>;
-
-    /// Asynchronously receives a value from the [`channel`](AsyncChannel) to the provided `slot`.
-    ///
-    /// If the [`channel`](AsyncChannel) is empty, the receiver waits until a value
-    /// is available or the [`channel`](AsyncChannel) is closed.
-    ///
-    /// Else, the value is immediately received.
-    ///
-    /// # On close
-    ///
-    /// Returns `Err(`[`RecvErr::Closed`]`)` if the [`channel`](AsyncChannel) is closed.
-    ///
-    /// # Attention
-    ///
-    /// __Drops__ the previous value in the `slot`.
-    ///
-    /// # Example
-    ///
-    /// ```rust
+    /// ```no_run
     /// use orengine::sync::{AsyncReceiver, RecvErr};
     ///
     /// # type Payload = i32;
@@ -258,154 +207,86 @@ pub trait AsyncReceiver<T>: IsLocal {
     /// # fn process_msg(msg: &Msg) {}
     ///
     /// async fn handle_messages<R: AsyncReceiver<Msg>>(receiver: R) {
-    ///     let mut msg = match receiver.recv().await {
-    ///         Ok(msg) => {
-    ///             process_msg(&msg);
-    ///             msg
-    ///         },
-    ///         Err(_) => return // closed
-    ///     };
     ///
     ///     loop {
-    ///         match receiver.recv_in(&mut msg).await {
-    ///             Ok(()) => {
+    ///         match receiver.recv().await {
+    ///             Ok(msg) => {
     ///                 process_msg(&msg);
     ///             }
-    ///             Err(_) => return // closed
+    ///             Err(RecvErr::Closed) => return
     ///         }
     ///     }
     /// }
     /// ```
-    #[inline]
-    fn recv_in(&self, slot: &mut T) -> impl Future<Output = Result<(), RecvErr>> {
-        unsafe {
-            drop_in_place(slot);
-
-            self.recv_in_ptr(Ptr::from(slot))
-        }
-    }
-
-    /// Tries to receive a value from the [`channel`](AsyncChannel) to the provided `slot`.
-    ///
-    /// If the [`channel`](AsyncChannel) is empty,
-    /// returns `Err(`[`TryRecvErr::Empty`]`)`.
-    ///
-    /// If the [`channel`](AsyncChannel) is locked,
-    /// returns `Err(`[`TryRecvErr::Locked`]`)`.
-    ///
-    /// If the [`channel`](AsyncChannel) is closed,
-    /// returns `Err(`[`TryRecvErr::Closed`]`)`.
-    ///
-    /// Else, the value is immediately received.
-    ///
-    /// # The difference between `try_recv_in_ptr` and `recv_in_ptr`
-    ///
-    /// `try_recv_in_ptr` doesn't block current task.
-    ///
-    /// # Attention
-    ///
-    /// __Drops__ the previous value in the `slot`.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use std::ptr::drop_in_place;
-    /// use orengine::sync::{AsyncReceiver, TryRecvErr};
-    ///
-    /// # type Payload = i32;
-    ///
-    /// // Must be dropped.
-    /// struct Msg { value: Box<Payload> }
-    ///
-    /// # fn process_msg(msg: &Msg) {}
-    ///
-    /// fn handle_new_messages<R: AsyncReceiver<Msg>>(receiver: R) -> Result<usize, ()> {
-    ///     let mut msg = match receiver.try_recv() {
-    ///         Ok(msg) => {
-    ///             process_msg(&msg);
-    ///             msg
-    ///         },
-    ///         Err(e) => return match e {
-    ///             TryRecvErr::Empty | TryRecvErr::Locked => Ok(0),
-    ///             TryRecvErr::Closed => Err(())
-    ///         }
-    ///     };
-    ///     let mut processed = 1;
-    ///
-    ///     loop {
-    ///         match receiver.try_recv_in(&mut msg) {
-    ///             Ok(()) => {
-    ///                 process_msg(&msg);
-    ///                 processed += 1;
-    ///             }
-    ///             Err(e) => return match e {
-    ///                 TryRecvErr::Empty | TryRecvErr::Locked => Ok(processed),
-    ///                 TryRecvErr::Closed => Err(())
-    ///             }
-    ///         }
-    ///     }
-    /// }
-    /// ```
-    #[inline]
-    fn try_recv_in(&self, slot: &mut T) -> Result<(), TryRecvErr> {
-        unsafe {
-            drop_in_place(slot);
-
-            self.try_recv_in_ptr(Ptr::from(slot))
-        }
-    }
+    fn recv(&self) -> impl Future<Output = Result<T, RecvErr>>;
 
     /// Asynchronously receives a value from the [`channel`](AsyncChannel).
     ///
-    /// If the [`channel`](AsyncChannel) is empty,
-    /// returns `Err(`[`TryRecvErr::Empty`]`)`.
-    ///
-    /// If the [`channel`](AsyncChannel) is locked,
-    /// returns `Err(`[`TryRecvErr::Locked`]`)`.
-    ///
-    /// If the [`channel`](AsyncChannel) is closed,
-    /// returns `Err(`[`TryRecvErr::Closed`]`)`.
+    /// If the [`channel`](AsyncChannel) is empty, the receiver waits until a value
+    /// is available or the [`channel`](AsyncChannel) is closed, or the deadline is reached.
     ///
     /// Else, the value is immediately received.
     ///
+    /// # On close
+    ///
+    /// Returns [`RecvInResult::Closed`] if the [`channel`](AsyncChannel) is closed.
+    ///
     /// # Example
     ///
-    /// ```rust
-    /// use orengine::sync::{AsyncReceiver, TryRecvErr};
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use orengine::local_executor;
+    /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
     ///
-    /// # type Payload = i32;
+    /// # async fn foo() {
+    /// let channel = orengine::sync::Channel::bounded(2);
     ///
-    /// // Must be dropped.
-    /// struct Msg { value: Box<Payload> }
+    /// channel.send(1).await.unwrap();
     ///
-    /// # fn process_msg(msg: &Msg) {}
+    /// channel.recv_deadline(local_executor().start_round_time_for_deadlines() + Duration::from_secs(1)).await.unwrap();
     ///
-    /// async fn handle_messages<R: AsyncReceiver<Msg>>(receiver: R) -> Result<usize, ()> {
-    ///     let mut processed = 0;
+    /// let res = channel.recv_deadline(local_executor().start_round_time_for_deadlines() + Duration::from_secs(1)).await;
     ///
-    ///     loop {
-    ///         match receiver.try_recv() {
-    ///             Ok(msg) => {
-    ///                 process_msg(&msg);
-    ///                 processed += 1;
-    ///             },
-    ///             Err(e) => return match e {
-    ///                 TryRecvErr::Empty | TryRecvErr::Locked => Ok(processed),
-    ///                 TryRecvErr::Closed => Err(())
-    ///             }
-    ///         }
-    ///     }
-    /// }
+    /// assert!(matches!(res, Err(orengine::sync::RecvTimeoutErr::Timeout)));
+    /// # }
     /// ```
-    #[inline]
-    async fn recv(&self) -> Result<T, RecvErr> {
-        let mut slot = MaybeUninit::uninit();
-        unsafe {
-            match self.recv_in_ptr(Ptr::from(slot.as_mut_ptr())).await {
-                Ok(()) => Ok(slot.assume_init()),
-                Err(_) => Err(RecvErr::Closed),
-            }
-        }
+    fn recv_deadline(
+        &self,
+        deadline: impl Into<OrengineInstant>,
+    ) -> impl Future<Output = Result<T, RecvTimeoutErr>>;
+
+    /// Asynchronously receives a value from the [`channel`](AsyncChannel).
+    ///
+    /// If the [`channel`](AsyncChannel) is empty, the receiver waits until a value
+    /// is available or the [`channel`](AsyncChannel) is closed, or the deadline is reached.
+    ///
+    /// Else, the value is immediately received.
+    ///
+    /// # On close
+    ///
+    /// Returns [`RecvInResult::Closed`] if the [`channel`](AsyncChannel) is closed.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use orengine::local_executor;
+    /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
+    ///
+    /// # async fn foo() {
+    /// let channel = orengine::sync::Channel::bounded(2);
+    ///
+    /// channel.send(1).await.unwrap();
+    ///
+    /// channel.recv_timeout(Duration::from_secs(1)).await.unwrap();
+    ///
+    /// let res = channel.recv_timeout(Duration::from_secs(1)).await;
+    ///
+    /// assert!(matches!(res, Err(orengine::sync::RecvTimeoutErr::Timeout)));
+    /// # }
+    /// ```
+    fn recv_timeout(&self, timeout: Duration) -> impl Future<Output = Result<T, RecvTimeoutErr>> {
+        self.recv_deadline(local_executor().start_round_time_for_deadlines() + timeout)
     }
 
     /// Tries to receive a value from the [`channel`](AsyncChannel).
@@ -416,7 +297,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     /// If the [`channel`](AsyncChannel) is locked,
     /// returns `Err(`[`TryRecvErr::Locked`]`)`.
     ///
-    /// If the [`channel`](AsyncChannel) is closed,
+    /// If the [`channel`](AsyncChannel) is closed, it
     /// returns `Err(`[`TryRecvErr::Closed`]`)`.
     ///
     /// Else, the value is immediately received.
@@ -451,16 +332,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///     }
     /// }
     /// ```
-    #[inline]
-    fn try_recv(&self) -> Result<T, TryRecvErr> {
-        let mut slot = MaybeUninit::uninit();
-        unsafe {
-            match self.try_recv_in_ptr(Ptr::from(slot.as_mut_ptr())) {
-                Ok(()) => Ok(slot.assume_init()),
-                Err(e) => Err(e),
-            }
-        }
-    }
+    fn try_recv(&self) -> Result<T, TryRecvErr>;
 
     /// Closes the [`channel`](AsyncChannel) associated with this receiver.
     fn receiver_close(&self) -> impl Future<Output = ()>;
@@ -606,10 +478,25 @@ impl<T, G: AsyncSender<T>, H: Deref<Target = G> + IsLocal> AsyncSender<T> for H 
         clippy::future_not_send,
         reason = "It is not Send when T or H is not Send, it is fine"
     )]
+    #[inline]
     async fn send(&self, value: T) -> Result<(), SendErr<T>> {
         (**self).send(value).await
     }
 
+    #[allow(
+        clippy::future_not_send,
+        reason = "It is not Send when T or H is not Send, it is fine"
+    )]
+    #[inline]
+    async fn send_deadline(
+        &self,
+        value: T,
+        deadline: impl Into<OrengineInstant>,
+    ) -> Result<(), SendTimeoutErr<T>> {
+        (**self).send_deadline(value, deadline).await
+    }
+
+    #[inline]
     fn try_send(&self, value: T) -> Result<(), TrySendErr<T>> {
         (**self).try_send(value)
     }
@@ -618,6 +505,7 @@ impl<T, G: AsyncSender<T>, H: Deref<Target = G> + IsLocal> AsyncSender<T> for H 
         clippy::future_not_send,
         reason = "It is not Send when T or H is not Send, it is fine"
     )]
+    #[inline]
     async fn sender_close(&self) {
         (**self).sender_close().await;
     }
@@ -628,19 +516,94 @@ impl<T, G: AsyncReceiver<T>, H: Deref<Target = G> + IsLocal> AsyncReceiver<T> fo
         clippy::future_not_send,
         reason = "It is not Send when T or H is not Send, it is fine"
     )]
-    async unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), RecvErr> {
-        unsafe { (**self).recv_in_ptr(slot).await }
-    }
-
-    unsafe fn try_recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), TryRecvErr> {
-        unsafe { (**self).try_recv_in_ptr(slot) }
+    #[inline]
+    async fn recv(&self) -> Result<T, RecvErr> {
+        (**self).recv().await
     }
 
     #[allow(
         clippy::future_not_send,
         reason = "It is not Send when T or H is not Send, it is fine"
     )]
+    #[inline]
+    async fn recv_deadline(
+        &self,
+        deadline: impl Into<OrengineInstant>,
+    ) -> Result<T, RecvTimeoutErr> {
+        (**self).recv_deadline(deadline).await
+    }
+
+    #[inline]
+    fn try_recv(&self) -> Result<T, TryRecvErr> {
+        (**self).try_recv()
+    }
+
+    #[allow(
+        clippy::future_not_send,
+        reason = "It is not Send when T or H is not Send, it is fine"
+    )]
+    #[inline]
     async fn receiver_close(&self) {
         (**self).receiver_close().await;
     }
+}
+
+pub(crate) mod macros {
+    macro_rules! impl_recv_from_recv_in_ptr {
+        () => {
+            #[allow(
+                clippy::future_not_send,
+                reason = "It is not Send when T is not Send, it is fine"
+            )]
+            #[inline]
+            async fn recv(&self) -> Result<T, $crate::sync::RecvErr> {
+                let mut res_slot = std::mem::MaybeUninit::uninit();
+
+                unsafe { self.recv_in_ptr(Ptr::from(res_slot.as_mut_ptr())).await? };
+
+                Ok(unsafe { res_slot.assume_init() })
+            }
+        };
+    }
+
+    macro_rules! impl_recv_with_timeout_from_recv_in_ptr_with_deadline {
+        () => {
+            #[allow(
+                clippy::future_not_send,
+                reason = "It is not Send when T is not Send, it is fine"
+            )]
+            #[inline]
+            async fn recv_deadline(
+                &self,
+                deadline: impl Into<$crate::utils::OrengineInstant>,
+            ) -> Result<T, $crate::sync::RecvTimeoutErr> {
+                let mut res_slot = std::mem::MaybeUninit::uninit();
+
+                unsafe {
+                    self.recv_in_ptr_with_deadline(Ptr::from(res_slot.as_mut_ptr()), deadline)
+                        .await?
+                };
+
+                Ok(unsafe { res_slot.assume_init() })
+            }
+        };
+    }
+
+    macro_rules! impl_try_recv_from_recv_in_ptr {
+        () => {
+            #[inline]
+            fn try_recv(&self) -> Result<T, $crate::sync::TryRecvErr> {
+                let mut res_slot = std::mem::MaybeUninit::uninit();
+
+                unsafe { self.try_recv_in_ptr(Ptr::from(res_slot.as_mut_ptr()))? };
+
+                Ok(unsafe { res_slot.assume_init() })
+            }
+        };
+    }
+
+    pub(crate) use {
+        impl_recv_from_recv_in_ptr, impl_recv_with_timeout_from_recv_in_ptr_with_deadline,
+        impl_try_recv_from_recv_in_ptr,
+    };
 }

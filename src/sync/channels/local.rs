@@ -1,14 +1,15 @@
-use crate::runtime::{IsLocal, Task};
+use crate::runtime::waiting_task::WaitingTask;
+use crate::runtime::{IsLocal, Task, TaskWithDeadline};
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
 use crate::sync::channels::state::{CallState, CallStatePtr};
-use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
-use crate::sync::channels::waiting_task::waiting_task_deque::WaitingTaskLocalDequeGuard;
+use crate::sync::channels::waiting_task::waiting_select_task_deque::WaitingTaskLocalDequeGuard;
 use crate::sync::channels::waiting_task::{PopIfAcquiredResult, TaskInSelectBranch};
 use crate::sync::channels::{SelectReceiver, SelectSender};
 use crate::sync::{
-    AsyncChannel, AsyncReceiver, AsyncSender, RecvErr, SendErr, TryRecvErr, TrySendErr,
+    AsyncChannel, AsyncReceiver, AsyncSender, RecvErr, RecvTimeoutErr, SendErr, SendTimeoutErr,
+    TryRecvErr, TrySendErr,
 };
-use crate::utils::Ptr;
+use crate::utils::{OrengineInstant, Ptr};
 use crate::utils::{unlikely, unreachable_hint};
 use crate::{local_executor, panic_if_shared_in_future};
 use std::cell::UnsafeCell;
@@ -111,10 +112,126 @@ impl<T> Future for WaitLocalSend<'_, T> {
                         .storage
                         .push_back(ManuallyDrop::take(&mut this.value));
                 }
+
                 Poll::Ready(Ok(()))
             }
             CallState::WokenToReturnReady => Poll::Ready(Ok(())),
             CallState::WokenByClose => Poll::Ready(Err(SendErr::Closed(unsafe {
+                ManuallyDrop::take(&mut this.value)
+            }))),
+            CallState::WokenByDeadline => unreachable_hint(),
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+impl<T> Drop for WaitLocalSend<'_, T> {
+    fn drop(&mut self) {
+        assert!(
+            self.was_awaited,
+            "WaitLocalSend was not awaited. This will cause a memory leak."
+        );
+    }
+}
+
+/// This struct represents a future that waits for a value to be sent
+/// into the [`local channel`](LocalChannel) with a deadline.
+///
+/// When the future is polled, it either sends the value immediately (if there is capacity) or
+/// gets parked in the list of waiting senders.
+///
+/// # Panics or memory leaks
+///
+/// If [`WaitLocalSendWithDeadline::poll`] is not called.
+#[repr(C)]
+pub struct WaitLocalSendWithDeadline<'future, T> {
+    inner: &'future mut Inner<T>,
+    value: ManuallyDrop<T>,
+    call_state: CallState,
+    deadline: OrengineInstant,
+    #[cfg(debug_assertions)]
+    was_awaited: bool,
+}
+
+impl<'future, T> WaitLocalSendWithDeadline<'future, T> {
+    /// Creates a new [`WaitLocalSendWithDeadline`].
+    #[inline]
+    fn new(value: T, inner: &'future mut Inner<T>, deadline: OrengineInstant) -> Self {
+        Self {
+            inner,
+            call_state: CallState::FirstCall,
+            value: ManuallyDrop::new(value),
+            deadline,
+            #[cfg(debug_assertions)]
+            was_awaited: false,
+        }
+    }
+}
+
+impl<T> Future for WaitLocalSendWithDeadline<'_, T> {
+    type Output = Result<(), SendTimeoutErr<T>>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = unsafe { self.get_unchecked_mut() };
+        #[cfg(debug_assertions)]
+        {
+            this.was_awaited = true;
+        }
+        panic_if_shared_in_future!(cx, "LocalChannel");
+
+        match this.call_state {
+            CallState::FirstCall => {
+                if unlikely(this.inner.is_closed) {
+                    return Poll::Ready(Err(SendTimeoutErr::Closed(unsafe {
+                        ManuallyDrop::take(&mut this.value)
+                    })));
+                }
+
+                let was_written =
+                    this.inner
+                        .deque
+                        .try_pop_front_receiver_and_call(|call_state, slot| {
+                            unsafe {
+                                ptr::copy_nonoverlapping(&*this.value, slot.as_ptr(), 1);
+                                call_state.write(CallState::WokenToReturnReady);
+                            };
+                        });
+                if was_written {
+                    return Poll::Ready(Ok(()));
+                }
+
+                let len = this.inner.storage.len();
+                let call_state_ptr = CallStatePtr::new(&mut this.call_state);
+
+                if unlikely(len >= this.inner.capacity) {
+                    this.inner
+                        .deque
+                        .push_back_sender(WaitingTask::common_with_deadline(
+                            TaskWithDeadline::create_new_and_register(
+                                unsafe { Task::from_context(cx) },
+                                call_state_ptr,
+                                this.deadline,
+                            ),
+                            call_state_ptr,
+                            NonNull::from(&mut *this.value),
+                        ));
+
+                    return Poll::Pending;
+                }
+
+                unsafe {
+                    this.inner
+                        .storage
+                        .push_back(ManuallyDrop::take(&mut this.value));
+                }
+
+                Poll::Ready(Ok(()))
+            }
+            CallState::WokenToReturnReady => Poll::Ready(Ok(())),
+            CallState::WokenByDeadline => Poll::Ready(Err(SendTimeoutErr::Timeout(unsafe {
+                ManuallyDrop::take(&mut this.value)
+            }))),
+            CallState::WokenByClose => Poll::Ready(Err(SendTimeoutErr::Closed(unsafe {
                 ManuallyDrop::take(&mut this.value)
             }))),
         }
@@ -122,7 +239,7 @@ impl<T> Future for WaitLocalSend<'_, T> {
 }
 
 #[cfg(debug_assertions)]
-impl<T> Drop for WaitLocalSend<'_, T> {
+impl<T> Drop for WaitLocalSendWithDeadline<'_, T> {
     fn drop(&mut self) {
         assert!(
             self.was_awaited,
@@ -211,6 +328,104 @@ impl<T> Future for WaitLocalRecv<'_, T> {
             CallState::WokenToReturnReady => Poll::Ready(Ok(())),
 
             CallState::WokenByClose => Poll::Ready(Err(RecvErr::Closed)),
+
+            CallState::WokenByDeadline => unreachable_hint(),
+        }
+    }
+}
+
+/// This struct represents a future that waits for a value to be
+/// received from the [`local channel`](LocalChannel) with a deadline.
+///
+/// When the future is polled, it either receives the value immediately (if available) or
+/// gets parked in the list of waiting receivers.
+#[repr(C)]
+pub struct WaitLocalRecvWithDeadline<'future, T> {
+    inner: &'future mut Inner<T>,
+    slot: *mut T,
+    call_state: CallState,
+    deadline: OrengineInstant,
+}
+
+impl<'future, T> WaitLocalRecvWithDeadline<'future, T> {
+    /// Creates a new [`WaitLocalRecvWithDeadline`].
+    #[inline]
+    fn new(inner: &'future mut Inner<T>, slot: *mut T, deadline: OrengineInstant) -> Self {
+        Self {
+            inner,
+            call_state: CallState::FirstCall,
+            slot,
+            deadline,
+        }
+    }
+}
+
+impl<T> Future for WaitLocalRecvWithDeadline<'_, T> {
+    type Output = Result<(), RecvTimeoutErr>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = unsafe { self.get_unchecked_mut() };
+
+        panic_if_shared_in_future!(cx, "LocalChannel");
+
+        match this.call_state {
+            CallState::FirstCall => {
+                if unlikely(this.inner.is_closed) {
+                    return Poll::Ready(Err(RecvTimeoutErr::Closed));
+                }
+
+                if unlikely(this.inner.storage.is_empty()) {
+                    let was_written =
+                        this.inner
+                            .deque
+                            .try_pop_front_sender_and_call(|call_state, value| {
+                                unsafe {
+                                    ptr::copy_nonoverlapping(value.as_ptr(), this.slot, 1);
+                                    call_state.write(CallState::WokenToReturnReady);
+                                };
+                            });
+                    if was_written {
+                        return Poll::Ready(Ok(()));
+                    }
+
+                    let call_state_ptr = CallStatePtr::new(&mut this.call_state);
+
+                    this.inner
+                        .deque
+                        .push_back_receiver(WaitingTask::common_with_deadline(
+                            TaskWithDeadline::create_new_and_register(
+                                unsafe { Task::from_context(cx) },
+                                call_state_ptr,
+                                this.deadline,
+                            ),
+                            call_state_ptr,
+                            NonNull::from(unsafe { &mut *this.slot }),
+                        ));
+
+                    return Poll::Pending;
+                }
+
+                unsafe {
+                    this.slot
+                        .write(this.inner.storage.pop_front().unwrap_unchecked());
+                }
+
+                this.inner
+                    .deque
+                    .try_pop_front_sender_and_call(|call_state, value| unsafe {
+                        call_state.write(CallState::WokenToReturnReady);
+
+                        this.inner.storage.push_back(value.read());
+                    });
+
+                Poll::Ready(Ok(()))
+            }
+
+            CallState::WokenToReturnReady => Poll::Ready(Ok(())),
+
+            CallState::WokenByClose => Poll::Ready(Err(RecvTimeoutErr::Closed)),
+
+            CallState::WokenByDeadline => Poll::Ready(Err(RecvTimeoutErr::Timeout)),
         }
     }
 }
@@ -223,6 +438,49 @@ fn close<T>(inner: &mut Inner<T>) {
     inner.is_closed = true;
 
     inner.deque.clear();
+}
+
+macro_rules! generate_recv_in_ptr_and_recv_in_ptr_with_timeout {
+    () => {
+        /// Asynchronously receives a value from the [`channel`](AsyncChannel) to the provided `slot`.
+        ///
+        /// If the [`channel`](AsyncChannel) is empty, the receiver waits until a value
+        /// is available or the [`channel`](AsyncChannel) is closed.
+        ///
+        /// Else, the value is immediately received.
+        ///
+        /// # On close
+        ///
+        /// Returns `Err(`[`RecvErr::Closed`]`)` if the [`channel`](AsyncChannel) is closed.
+        ///
+        /// # Attention
+        ///
+        /// __Doesn't drop__ the previous value in the `slot`.
+        ///
+        /// # Safety
+        ///
+        /// - The provided pointer is valid and aligned;
+        ///
+        /// - The previous value is dropped.
+        #[allow(clippy::future_not_send, reason = "It is local.")]
+        unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> impl Future<Output = Result<(), RecvErr>> {
+            WaitLocalRecv::new(unsafe { &mut *self.inner.get() }, slot.as_ptr())
+        }
+
+        /// Same as [`recv_in_ptr`](Self::recv_in_ptr), but with a deadline.
+        #[allow(clippy::future_not_send, reason = "It is local.")]
+        unsafe fn recv_in_ptr_with_deadline(
+            &self,
+            slot: Ptr<T>,
+            deadline: impl Into<OrengineInstant>,
+        ) -> impl Future<Output = Result<(), RecvTimeoutErr>> {
+            WaitLocalRecvWithDeadline::new(
+                unsafe { &mut *self.inner.get() },
+                slot.as_ptr(),
+                deadline.into(),
+            )
+        }
+    };
 }
 
 macro_rules! generate_try_send {
@@ -332,6 +590,32 @@ macro_rules! generate_send_or_subscribe {
 
 macro_rules! generate_try_recv_in_ptr {
     () => {
+        /// Tries to receive a value from the [`channel`](AsyncChannel) to the provided `slot`.
+        ///
+        /// If the [`channel`](AsyncChannel) is empty, the receiver
+        /// returns `Err(`[`TryRecvErr::Empty`]`)`.
+        ///
+        /// If the [`channel`](AsyncChannel) is locked, the receiver
+        /// returns `Err(`[`TryRecvErr::Locked`]`)`.
+        ///
+        /// If the [`channel`](AsyncChannel) is closed, the receiver
+        /// returns `Err(`[`TryRecvErr::Closed`]`)`.
+        ///
+        /// Else, the value is immediately received.
+        ///
+        /// # The difference between `try_recv_in_ptr` and `recv_in_ptr`
+        ///
+        /// `try_recv_in_ptr` doesn't block the current task.
+        ///
+        /// # Attention
+        ///
+        /// __Doesn't drop__ the previous value in the `slot`.
+        ///
+        /// # Safety
+        ///
+        /// - The provided pointer is valid and aligned;
+        ///
+        /// - The previous value is dropped.
         unsafe fn try_recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), TryRecvErr> {
             let inner = unsafe { &mut *self.inner.get() };
             if unlikely(inner.is_closed) {
@@ -493,6 +777,15 @@ impl<T> AsyncSender<T> for LocalSender<'_, T> {
         WaitLocalSend::new(value, unsafe { &mut *self.inner.get() })
     }
 
+    #[allow(clippy::future_not_send, reason = "Because it is `local`")]
+    fn send_deadline(
+        &self,
+        value: T,
+        deadline: impl Into<OrengineInstant>,
+    ) -> impl Future<Output = Result<(), SendTimeoutErr<T>>> {
+        WaitLocalSendWithDeadline::new(value, unsafe { &mut *self.inner.get() }, deadline.into())
+    }
+
     generate_try_send!();
 
     async fn sender_close(&self) {
@@ -558,15 +851,18 @@ impl<'channel, T> LocalReceiver<'channel, T> {
             no_send_marker: std::marker::PhantomData,
         }
     }
+
+    generate_recv_in_ptr_and_recv_in_ptr_with_timeout!();
+
+    generate_try_recv_in_ptr!();
 }
 
 impl<T> AsyncReceiver<T> for LocalReceiver<'_, T> {
-    #[allow(clippy::future_not_send, reason = "Because it is `local`")]
-    unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> impl Future<Output = Result<(), RecvErr>> {
-        WaitLocalRecv::new(unsafe { &mut *self.inner.get() }, slot.as_ptr())
-    }
+    crate::sync::channels::macros::impl_recv_from_recv_in_ptr!();
 
-    generate_try_recv_in_ptr!();
+    crate::sync::channels::macros::impl_recv_with_timeout_from_recv_in_ptr_with_deadline!();
+
+    crate::sync::channels::macros::impl_try_recv_from_recv_in_ptr!();
 
     async fn receiver_close(&self) {
         let inner = unsafe { &mut *self.inner.get() };
@@ -609,7 +905,7 @@ unsafe impl<T> Sync for LocalReceiver<'_, T> {}
 /// the reception operation is waiting until a value is available or
 /// the [`local channel`](LocalChannel) is closed.
 ///
-/// When channel is not full, values are sent immediately else
+/// When a channel is not full, values are sent immediately else
 /// the sending operation is waiting until capacity is available or
 /// the [`local channel`](LocalChannel) is closed.
 ///
@@ -669,6 +965,10 @@ impl<T> LocalChannel<T> {
             (len, 0, len)
         }
     }
+
+    generate_recv_in_ptr_and_recv_in_ptr_with_timeout!();
+
+    generate_try_recv_in_ptr!();
 }
 
 impl<T> AsyncChannel<T> for LocalChannel<T> {
@@ -726,12 +1026,11 @@ impl<T> IsLocal for LocalChannel<T> {
 }
 
 impl<T> AsyncReceiver<T> for LocalChannel<T> {
-    #[allow(clippy::future_not_send, reason = "Because it is `local`")]
-    unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> impl Future<Output = Result<(), RecvErr>> {
-        WaitLocalRecv::new(unsafe { &mut *self.inner.get() }, slot.as_ptr())
-    }
+    crate::sync::channels::macros::impl_recv_from_recv_in_ptr!();
 
-    generate_try_recv_in_ptr!();
+    crate::sync::channels::macros::impl_recv_with_timeout_from_recv_in_ptr_with_deadline!();
+
+    crate::sync::channels::macros::impl_try_recv_from_recv_in_ptr!();
 
     async fn receiver_close(&self) {
         let inner = unsafe { &mut *self.inner.get() };
@@ -743,6 +1042,15 @@ impl<T> AsyncSender<T> for LocalChannel<T> {
     #[allow(clippy::future_not_send, reason = "Because it is `local`")]
     fn send(&self, value: T) -> impl Future<Output = Result<(), SendErr<T>>> {
         WaitLocalSend::new(value, unsafe { &mut *self.inner.get() })
+    }
+
+    #[allow(clippy::future_not_send, reason = "Because it is `local`")]
+    fn send_deadline(
+        &self,
+        value: T,
+        deadline: impl Into<OrengineInstant>,
+    ) -> impl Future<Output = Result<(), SendTimeoutErr<T>>> {
+        WaitLocalSendWithDeadline::new(value, unsafe { &mut *self.inner.get() }, deadline.into())
     }
 
     generate_try_send!();
@@ -859,6 +1167,7 @@ mod tests {
     use crate::yield_now;
     use std::rc::Rc;
     use std::sync::Arc;
+    use std::time::Duration;
 
     #[orengine::test::test_local]
     fn test_local_zero_capacity() {
@@ -970,10 +1279,10 @@ mod tests {
 
     const N: usize = 125;
 
-    // case 1 - send N and recv N. No wait
-    // case 2 - send N and recv (N + 1). Wait for recv
-    // case 3 - send (N + 1) and recv N. Wait for send
-    // case 4 - send (N + 1) and recv (N + 1). Wait for send and wait for recv
+    // Case 1 - send N and recv N. No wait
+    // Case 2 - send N and recv (N + 1). Wait for recv
+    // Case 3 - send (N + 1) and recv N. Wait for send
+    // Case 4 - send (N + 1) and recv (N + 1). Wait for send and wait for recv
 
     #[orengine::test::test_local]
     fn test_local_channel_case1() {
@@ -1092,7 +1401,11 @@ mod tests {
             .send(DroppableElement::new(1, dropped.clone()))
             .await;
         let mut prev_elem = DroppableElement::new(2, dropped.clone());
-        channel.recv_in(&mut prev_elem).await.unwrap();
+
+        drop(prev_elem);
+
+        prev_elem = channel.recv().await.unwrap();
+
         assert_eq!(prev_elem.value, 1);
         assert_eq!(dropped.lock().as_slice(), [2]);
 
@@ -1131,7 +1444,11 @@ mod tests {
 
         let _ = sender.send(DroppableElement::new(1, dropped.clone())).await;
         let mut prev_elem = DroppableElement::new(2, dropped.clone());
-        receiver.recv_in(&mut prev_elem).await.unwrap();
+
+        drop(prev_elem);
+
+        prev_elem = receiver.recv().await.unwrap();
+
         assert_eq!(prev_elem.value, 1);
         assert_eq!(dropped.lock().as_slice(), [2]);
 
@@ -1157,5 +1474,30 @@ mod tests {
             }
         }
         assert_eq!(dropped.lock().as_slice(), [2, 5]);
+    }
+
+    #[orengine::test::test_local]
+    fn test_local_channel_timeout() {
+        let chan = LocalChannel::bounded(1);
+
+        let failed_recv_res = chan.recv_timeout(Duration::from_micros(100)).await;
+
+        assert!(matches!(failed_recv_res, Err(RecvTimeoutErr::Timeout)));
+
+        chan.send_timeout(1, Duration::from_micros(100))
+            .await
+            .unwrap();
+
+        let recv_res = chan.recv_timeout(Duration::from_micros(100)).await;
+
+        assert!(matches!(recv_res, Ok(1)));
+
+        chan.send_timeout(2, Duration::from_micros(100))
+            .await
+            .unwrap();
+
+        let failed_send_res = chan.send_timeout(3, Duration::from_micros(100)).await;
+
+        assert!(matches!(failed_send_res, Err(SendTimeoutErr::Timeout(3))));
     }
 }

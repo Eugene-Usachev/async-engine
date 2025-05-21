@@ -1,9 +1,9 @@
-#[cfg(target_os = "linux")]
-use crate::io::worker::local_worker;
 use crate::io::Buffer;
 #[cfg(target_os = "linux")]
 use crate::io::FixedBuffer;
-use crate::utils::{assert_hint, likely, unlikely};
+#[cfg(target_os = "linux")]
+use crate::io::worker::local_worker;
+use crate::utils::{assert_hint, likely};
 #[cfg(target_os = "linux")]
 use libc;
 use std::cell::UnsafeCell;
@@ -184,7 +184,7 @@ impl BufPool {
                 buf.deallocate();
             }
 
-            if unlikely(self.pool_of_fixed_buffers.is_empty()) {
+            if crate::utils::unlikely(self.pool_of_fixed_buffers.is_empty()) {
                 return;
             }
 

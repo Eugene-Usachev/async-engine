@@ -2,7 +2,7 @@ use std::future::Future;
 use std::io::Result;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 
@@ -13,6 +13,7 @@ use crate::io::worker::{IoWorker, local_worker};
 use crate::io::{Buffer, FixedBufferMut};
 use crate::local_executor;
 use crate::net::Socket;
+use crate::utils::OrengineInstant;
 
 /// `peek` io operation.
 #[repr(C)]
@@ -113,14 +114,14 @@ unsafe impl Send for PeekFixed<'_> {}
 #[repr(C)]
 pub struct PeekBytesWithDeadline<'buf> {
     buf: &'buf mut [u8],
-    deadline: Instant,
+    deadline: OrengineInstant,
     raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
 }
 
 impl<'buf> PeekBytesWithDeadline<'buf> {
     /// Creates a new `peek` io operation.
-    pub fn new(raw_socket: RawSocket, buf: &'buf mut [u8], deadline: Instant) -> Self {
+    pub fn new(raw_socket: RawSocket, buf: &'buf mut [u8], deadline: OrengineInstant) -> Self {
         Self {
             raw_socket,
             buf,
@@ -163,8 +164,8 @@ pub struct PeekFixedWithDeadline<'buf> {
     ptr: *mut u8,
     raw_socket: RawSocket,
     len: u32,
-    deadline: Instant,
     fixed_index: u16,
+    deadline: OrengineInstant,
     io_request_data: Option<IoRequestData>,
     phantom_data: std::marker::PhantomData<&'buf Buffer>,
 }
@@ -176,7 +177,7 @@ impl PeekFixedWithDeadline<'_> {
         ptr: *mut u8,
         len: u32,
         fixed_index: u16,
-        deadline: Instant,
+        deadline: OrengineInstant,
     ) -> Self {
         Self {
             raw_socket,
@@ -347,9 +348,9 @@ pub trait AsyncPeek: Socket {
     fn peek_bytes_with_deadline(
         &mut self,
         buf: &mut [u8],
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> impl Future<Output = Result<usize>> {
-        PeekBytesWithDeadline::new(AsRawSocket::as_raw_socket(self), buf, deadline)
+        PeekBytesWithDeadline::new(AsRawSocket::as_raw_socket(self), buf, deadline.into())
     }
 
     /// Asynchronously receives into the provided byte slice the incoming data without consuming it,
@@ -385,7 +386,7 @@ pub trait AsyncPeek: Socket {
     async fn peek_with_deadline(
         &mut self,
         buf: &mut impl FixedBufferMut,
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<u32> {
         if buf.is_fixed() {
             PeekFixedWithDeadline::new(
@@ -393,7 +394,7 @@ pub trait AsyncPeek: Socket {
                 buf.as_mut_ptr(),
                 buf.len_u32(),
                 buf.fixed_index(),
-                deadline,
+                deadline.into(),
             )
             .await
         } else {
@@ -404,7 +405,7 @@ pub trait AsyncPeek: Socket {
             PeekBytesWithDeadline::new(
                 AsRawSocket::as_raw_socket(self),
                 buf.as_bytes_mut(),
-                deadline,
+                deadline.into(),
             )
             .await
             .map(|r| r as u32)
@@ -613,8 +614,9 @@ pub trait AsyncPeek: Socket {
     async fn peek_bytes_exact_with_deadline(
         &mut self,
         buf: &mut [u8],
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<()> {
+        let deadline = deadline.into();
         let mut peeked = 0;
 
         while peeked < buf.len() {
@@ -659,8 +661,10 @@ pub trait AsyncPeek: Socket {
     async fn peek_exact_with_deadline(
         &mut self,
         buf: &mut impl FixedBufferMut,
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<()> {
+        let deadline = deadline.into();
+
         if buf.is_fixed() {
             let mut peeked = 0;
 

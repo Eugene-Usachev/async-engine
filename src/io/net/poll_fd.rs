@@ -3,11 +3,12 @@ use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::{AsRawSocket, RawSocket};
 use crate::io::worker::{IoWorker, local_worker};
 use crate::local_executor;
+use crate::utils::OrengineInstant;
 use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 macro_rules! generate_poll {
     ($name:ident, $name_with_deadline:ident, $method:expr, $method_with_deadline:expr) => {
@@ -50,14 +51,14 @@ macro_rules! generate_poll {
         /// `poll_raw_socket` io operation with deadline.
         #[repr(C)]
         pub struct $name_with_deadline {
-            deadline: Instant,
+            deadline: OrengineInstant,
             raw_socket: RawSocket,
             io_request_data: Option<IoRequestData>,
         }
 
         impl $name_with_deadline {
             /// Creates a new `poll_raw_socket` io operation with deadline.
-            pub fn new(raw_socket: RawSocket, deadline: Instant) -> Self {
+            pub fn new(raw_socket: RawSocket, deadline: OrengineInstant) -> Self {
                 Self {
                     raw_socket,
                     io_request_data: None,
@@ -112,15 +113,16 @@ generate_poll!(
 /// and simple polling for both read and write readiness.
 ///
 /// This trait can be implemented for any writable and readable structs
-/// that supports the [`AsRawSocket`] trait.
+/// that support the [`AsRawSocket`] trait.
 pub trait AsyncPollSocket: AsRawSocket {
     /// Returns future that will be resolved when the file descriptor
     /// becomes readable or an error occurs.
     ///
     /// # Usage
     ///
-    /// Call this method on the stream before allocate a [`buffer`](crate::io::Buffer)
-    /// and receive from the stream. After receive release (drop) the [`buffer`](crate::io::Buffer).
+    /// Call this method on the stream before allocating a [`buffer`](crate::io::Buffer)
+    /// and receive from the stream.
+    /// After the receiving release (drop) the [`buffer`](crate::io::Buffer).
     ///
     /// Asynchronously peeks into the incoming data without consuming it, filling the buffer with
     /// available data. Returns the number of bytes peeked.
@@ -152,8 +154,9 @@ pub trait AsyncPollSocket: AsRawSocket {
     ///
     /// # Usage
     ///
-    /// Call this method on the stream before allocate a [`buffer`](crate::io::Buffer)
-    /// and receive from the stream. After receive release (drop) the [`buffer`](crate::io::Buffer).
+    /// Call this method on the stream before allocating a [`buffer`](crate::io::Buffer)
+    /// and receive from the stream.
+    /// After the receiving release (drop) the [`buffer`](crate::io::Buffer).
     ///
     /// Asynchronously peeks into the incoming data with a specified deadline.
     /// Returns the number of bytes peeked.
@@ -179,8 +182,11 @@ pub trait AsyncPollSocket: AsRawSocket {
     /// # }
     /// ```
     #[inline]
-    fn poll_recv_with_deadline(&self, deadline: Instant) -> PollRecvWithDeadline {
-        PollRecvWithDeadline::new(AsRawSocket::as_raw_socket(self), deadline)
+    fn poll_recv_with_deadline(
+        &self,
+        deadline: impl Into<OrengineInstant>,
+    ) -> PollRecvWithDeadline {
+        PollRecvWithDeadline::new(AsRawSocket::as_raw_socket(self), deadline.into())
     }
 
     /// Returns future that will be resolved when the file descriptor
@@ -191,8 +197,9 @@ pub trait AsyncPollSocket: AsRawSocket {
     ///
     /// # Usage
     ///
-    /// Call this method on the stream before allocate a [`buffer`](crate::io::Buffer)
-    /// and receive from the stream. After receive release (drop) the [`buffer`](crate::io::Buffer).
+    /// Call this method on the stream before allocating a [`buffer`](crate::io::Buffer)
+    /// and receive from the stream.
+    /// After the receiving release (drop) the [`buffer`](crate::io::Buffer).
     ///
     /// Asynchronously peeks into the incoming data with a specified timeout.
     /// Returns the number of bytes peeked.
@@ -227,9 +234,10 @@ pub trait AsyncPollSocket: AsRawSocket {
     ///
     /// # Usage
     ///
-    /// Call this method on the stream before allocate a [`buffer`](crate::io::Buffer)
-    /// and send to the stream. After send release (drop) the [`buffer`](crate::io::Buffer).
-    /// As opposed to [`poll_recv`](Self::poll_recv) it does not have a significant impact
+    /// Call this method on the stream before allocating a [`buffer`](crate::io::Buffer)
+    /// and send to the stream.
+    /// After the sending release (drop) the [`buffer`](crate::io::Buffer).
+    /// As opposed to [`poll_recv`](Self::poll_recv), it does not have a significant impact
     /// on productivity and efficiency.
     #[inline]
     fn poll_send(&self) -> PollSend {
@@ -244,13 +252,17 @@ pub trait AsyncPollSocket: AsRawSocket {
     ///
     /// # Usage
     ///
-    /// Call this method on the stream before allocate a [`buffer`](crate::io::Buffer)
-    /// and send to the stream. After send release (drop) the [`buffer`](crate::io::Buffer).
-    /// As opposed to [`poll_recv_with_deadline`](Self::poll_recv_with_deadline) it does not have a significant impact
+    /// Call this method on the stream before allocating a [`buffer`](crate::io::Buffer)
+    /// and send to the stream.
+    /// After the sending release (drop) the [`buffer`](crate::io::Buffer).
+    /// As opposed to [`poll_recv_with_deadline`](Self::poll_recv_with_deadline), it does not have a significant impact
     /// on productivity and efficiency.
     #[inline]
-    fn poll_send_with_deadline(&self, deadline: Instant) -> PollSendWithDeadline {
-        PollSendWithDeadline::new(AsRawSocket::as_raw_socket(self), deadline)
+    fn poll_send_with_deadline(
+        &self,
+        deadline: impl Into<OrengineInstant>,
+    ) -> PollSendWithDeadline {
+        PollSendWithDeadline::new(AsRawSocket::as_raw_socket(self), deadline.into())
     }
 
     /// Returns future that will be resolved when the file descriptor
@@ -261,9 +273,10 @@ pub trait AsyncPollSocket: AsRawSocket {
     ///
     /// # Usage
     ///
-    /// Call this method on the stream before allocate a [`buffer`](crate::io::Buffer)
-    /// and send to the stream. After send release (drop) the [`buffer`](crate::io::Buffer).
-    /// As opposed to [`poll_recv_with_timeout`](Self::poll_recv_with_timeout) it does not have a significant impact
+    /// Call this method on the stream before allocating a [`buffer`](crate::io::Buffer)
+    /// and send to the stream.
+    /// After the sending release (drop) the [`buffer`](crate::io::Buffer).
+    /// As opposed to [`poll_recv_with_timeout`](Self::poll_recv_with_timeout), it does not have a significant impact
     /// on productivity and efficiency.
     #[inline]
     fn poll_send_with_timeout(&self, timeout: Duration) -> PollSendWithDeadline {

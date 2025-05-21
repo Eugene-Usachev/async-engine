@@ -17,11 +17,11 @@ use crossbeam::utils::CachePadded;
 
 use crate::panic_if_local_in_future;
 use crate::runtime::call::Call;
-use crate::runtime::{local_executor, IsLocal, Task};
+use crate::runtime::{IsLocal, Task, local_executor};
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncMutex, AsyncMutexGuard};
-use crate::utils::{acquire_sync_task_list_from_pool, SyncTaskListFromPool};
-use crate::utils::{likely, Backoff};
+use crate::utils::{Backoff, likely};
+use crate::utils::{SyncTaskListFromPool, acquire_sync_task_list_from_pool};
 
 /// An RAII implementation of a "scoped lock" of a mutex. When this structure is
 /// dropped (falls out of scope), the lock will be unlocked.

@@ -112,7 +112,9 @@ impl DirBuilder {
 
             let bytes = path.as_os_str().as_encoded_bytes();
             loop {
-                if unlikely(path_index == 1 || bytes[path_index] == b'.' || bytes[path_index] == b':') {
+                if unlikely(
+                    path_index == 1 || bytes[path_index] == b'.' || bytes[path_index] == b':',
+                ) {
                     if bytes[path_index] == b'.' {
                         if path_index + 1 == bytes.len()
                             || bytes[path_index + 1] == std::path::MAIN_SEPARATOR as u8
@@ -200,7 +202,7 @@ impl Default for DirBuilder {
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::fs::test_helper::{create_test_dir_if_not_exist, is_exists, TEST_DIR_PATH};
+    use crate::fs::test_helper::{TEST_DIR_PATH, create_test_dir_if_not_exist, is_exists};
     use std::path::PathBuf;
 
     #[test]

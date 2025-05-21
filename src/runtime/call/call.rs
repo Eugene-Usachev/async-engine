@@ -36,6 +36,8 @@ pub enum Call {
     ///
     /// * calling task must be shared (else you don't need any [`Calls`](Call))
     PushCurrentTaskTo(NonNull<SyncTaskList>),
+    /// Spawns the current `global` task.
+    SpawnCurrentGlobalTask,
     /// Pushes the current task to the given `AtomicTaskList` and removes it if the given `AtomicUsize`
     /// is `0` with given `Ordering` after removing executes it.
     ///
@@ -197,6 +199,11 @@ impl Call {
         Self::PushFnToThreadPool(f)
     }
 
+    /// Spawns the current `global` task.
+    pub fn spawn_current_global_task() -> Self {
+        Self::SpawnCurrentGlobalTask
+    }
+
     /// Changes the current task locality and wakes up the current task.
     ///
     /// # Example
@@ -234,7 +241,6 @@ impl Call {
     ///     }
     /// }
     /// ```
-    // TODO rewrite it to Task, it doesn't need the Call
     pub fn change_current_task_locality(locality: Locality) -> Self {
         Self::ChangeCurrentTaskLocality(locality)
     }
@@ -258,6 +264,7 @@ impl Debug for Call {
         match self {
             Self::None => write!(f, "Call::None"),
             Self::PushCurrentTaskTo(_) => write!(f, "Call::PushCurrentTaskTo"),
+            Self::SpawnCurrentGlobalTask => write!(f, "Call::SpawnCurrentGlobalTask"),
             Self::PushCurrentTaskToAndRemoveItIfCounterIsZero(_, _, _) => {
                 write!(f, "Call::PushCurrentTaskToAndRemoveItIfCounterIsZero")
             }

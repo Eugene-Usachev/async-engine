@@ -33,7 +33,7 @@ crossbeam = "0.8.4"
 libc = "0.2.169"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = "0.59.0"
+windows-sys = "0.52.0"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 positioned-io = "0.3.3"

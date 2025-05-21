@@ -1,11 +1,12 @@
 use crate::runtime::Task;
 use crate::runtime::interaction_between_executors::SyncBatchOptimizedTaskQueue;
+use crate::utils::OrengineInstant;
 use crate::utils::vec_map::VecMap;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display};
 use std::mem;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// The error of [`send_task_to_executor`](Interactor::send_task_to_executor).
 ///
@@ -47,7 +48,7 @@ pub(crate) struct Interactor {
     shared_task_list: Arc<SyncBatchOptimizedTaskQueue>,
     all: VecMap<SharedTaskListForSendTo>,
     id_to_retry: Vec<usize>,
-    last_executed_time: Instant,
+    last_executed_time: OrengineInstant,
 }
 
 impl Interactor {
@@ -166,7 +167,7 @@ impl Interactor {
         &mut self,
         local_tasks: &mut VecDeque<Task>,
         shared_tasks: &mut VecDeque<Task>,
-        now: Instant,
+        now: OrengineInstant,
     ) {
         if now - self.last_executed_time < Duration::from_micros(64) {
             // We need to limit the number of times this method is called in a short period of time.

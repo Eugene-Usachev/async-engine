@@ -1,7 +1,7 @@
+use crate::runtime::Locality;
 use crate::runtime::call::Call;
 use crate::runtime::task::task_data::TaskData;
-use crate::runtime::Locality;
-use crate::{local_executor, Executor};
+use crate::{Executor, local_executor};
 use std::future::Future;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
@@ -36,7 +36,7 @@ use std::task::{Context, Poll};
 /// without dereferencing the pointer.
 ///
 /// `Task` locality can be changed only via unsafe
-/// [`update_current_task_locality`](update_current_task_locality).
+/// [`update_current_task_locality`].
 pub struct Task {
     pub(crate) data: TaskData,
     #[cfg(debug_assertions)]
@@ -47,7 +47,7 @@ pub struct Task {
 
 impl Task {
     /// Creates and allocates a [`Task`] with the given future.
-    pub(crate) fn allocate_new<F: Future<Output=()>>(future: F, locality: Locality) -> Self {
+    pub(crate) fn allocate_new<F: Future<Output = ()>>(future: F, locality: Locality) -> Self {
         #[allow(unused_unsafe, reason = "False positive")]
         let future_ptr: *mut F = unsafe { &raw mut *(Box::into_raw(Box::new(future))) };
 
@@ -163,12 +163,12 @@ impl Task {
     /// use orengine::runtime::{Task};
     ///
     /// # async fn manual_notifier() {
-    /// let current_task = unsafe { Task::get_current() };
+    /// let current_task = unsafe { Task::get_current().await };
     ///
     /// local_executor().spawn_local(async move { // it is safe only because of `spawning`! It guarantees that the current task will be parked before the spawned task will unpark it.
     ///     sleep(Duration::from_millis(1)).await;
     ///
-    ///     local_executor().spawn_local(current_task);
+    ///     local_executor().spawn_local_task(current_task);
     /// });
     ///
     /// println!("Start parking");
@@ -405,7 +405,7 @@ pub async unsafe fn update_current_task_locality(locality: Locality) {
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::{yield_now, Local};
+    use crate::{Local, yield_now};
     use std::ptr;
 
     #[orengine::test::test_local]

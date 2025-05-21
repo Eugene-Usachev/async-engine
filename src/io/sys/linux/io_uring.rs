@@ -2,16 +2,16 @@ use crate::io::config::IoWorkerConfig;
 use crate::io::io_request_data::IoRequestDataPtr;
 use crate::io::sys;
 use crate::io::sys::{
-    os_sockaddr, MessageRecvHeader, OsMessageHeader, OsPathPtr, RawFile, RawSocket,
+    MessageRecvHeader, OsMessageHeader, OsPathPtr, RawFile, RawSocket, os_sockaddr,
 };
 use crate::io::time_bounded_io_task::TimeBoundedIoTask;
 use crate::io::worker::IoWorker;
 use crate::runtime::local_executor;
-use crate::utils::{likely, unlikely};
-use crate::{Executor, BUG_MESSAGE};
+use crate::utils::{OrengineInstant, likely, unlikely};
+use crate::{BUG_MESSAGE, Executor};
 use io_uring::squeue::Entry;
 use io_uring::types::{OpenHow, SubmitArgs, Timespec};
-use io_uring::{cqueue, opcode, types, IoUring, Probe};
+use io_uring::{IoUring, Probe, cqueue, opcode, types};
 use libc;
 use std::cell::UnsafeCell;
 use std::collections::{BTreeSet, VecDeque};
@@ -19,7 +19,7 @@ use std::ffi::c_int;
 use std::io::{Error, ErrorKind};
 use std::net::Shutdown;
 use std::ptr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// [`IOUringWorker`] implements [`IoWorker`] using `io_uring`.
 #[repr(C)]
@@ -124,13 +124,13 @@ impl IOUringWorker {
 
     /// Registers a new time-bounded io task. It will be cancelled if the deadline is reached.
     ///
-    /// It takes `&mut Instant` as a deadline because it increments the deadline by 1 nanosecond
+    /// It takes `&mut OrengineInstant` as a deadline because it increments the deadline by 1 nanosecond
     /// if it is not unique.
     #[inline]
     fn register_time_bounded_io_task(
         &mut self,
         io_request_data: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         let mut time_bounded_io_task = TimeBoundedIoTask::new(io_request_data, *deadline);
         while !self.time_bounded_io_task_queue.insert(time_bounded_io_task) {
@@ -201,7 +201,7 @@ impl IoWorker for IOUringWorker {
     }
 
     #[inline]
-    fn deregister_time_bounded_io_task(&mut self, deadline: &Instant) {
+    fn deregister_time_bounded_io_task(&mut self, deadline: &OrengineInstant) {
         self.time_bounded_io_task_queue.remove(deadline);
     }
 
@@ -302,7 +302,7 @@ impl IoWorker for IOUringWorker {
         addr_ptr: *mut os_sockaddr,
         addr_len: *mut sys::socklen_t,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.register_time_bounded_io_task(request_ptr as _, deadline);
 
@@ -330,7 +330,7 @@ impl IoWorker for IOUringWorker {
         addr_ptr: *const os_sockaddr,
         addr_len: sys::socklen_t,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
 
@@ -350,7 +350,7 @@ impl IoWorker for IOUringWorker {
         &mut self,
         raw_socket: RawSocket,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
 
@@ -370,7 +370,7 @@ impl IoWorker for IOUringWorker {
         &mut self,
         raw_socket: RawSocket,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
 
@@ -413,7 +413,7 @@ impl IoWorker for IOUringWorker {
         ptr: *mut u8,
         len: u32,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
 
@@ -428,7 +428,7 @@ impl IoWorker for IOUringWorker {
         len: u32,
         buf_index: u16,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
 
@@ -458,7 +458,7 @@ impl IoWorker for IOUringWorker {
         raw_socket: RawSocket,
         msg_header: &mut MessageRecvHeader,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
 
@@ -501,7 +501,7 @@ impl IoWorker for IOUringWorker {
         ptr: *const u8,
         len: u32,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
 
@@ -516,7 +516,7 @@ impl IoWorker for IOUringWorker {
         len: u32,
         buf_index: u16,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
         self.send_fixed(raw_socket, ptr, len, buf_index, request_ptr);
@@ -541,7 +541,7 @@ impl IoWorker for IOUringWorker {
         raw_socket: RawSocket,
         msg_header: *const OsMessageHeader,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
 
@@ -591,7 +591,7 @@ impl IoWorker for IOUringWorker {
         ptr: *mut u8,
         len: u32,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
 
@@ -606,7 +606,7 @@ impl IoWorker for IOUringWorker {
         len: u32,
         buf_index: u16,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
 
@@ -635,7 +635,7 @@ impl IoWorker for IOUringWorker {
         raw_socket: RawSocket,
         msg: &mut MessageRecvHeader,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.register_time_bounded_io_task(request_ptr, deadline);
 

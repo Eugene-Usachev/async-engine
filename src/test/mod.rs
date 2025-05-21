@@ -1,6 +1,6 @@
 //! This module contains utilities for testing such as
 //!
-//! - [`test_shared`] and [`test_local`] macros reexports from `orengine-macros` to create tests
+//! - [`test_shared`] and [`test_local`] macros reexport from `orengine-macros` to create tests
 //!   with concise code;
 //!
 //! - [`executor_pool`] that contains utilities for parallel testing via

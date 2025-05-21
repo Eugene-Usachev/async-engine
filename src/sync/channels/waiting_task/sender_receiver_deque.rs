@@ -1,4 +1,4 @@
-use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
+use crate::runtime::waiting_task::WaitingTask;
 use crate::utils::{assert_hint, likely, unlikely};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ops::{Range, RangeBounds};
@@ -200,12 +200,10 @@ impl<T> SenderReceiverQueue<T> {
                 ops::Bound::Unbounded => len,
             };
 
-            if start > end {
-                panic!("attempted to index slice from after maximum usize");
-            }
-            if end > len {
-                panic!("attempted to index slice up to maximum usize");
-            }
+            assert!(
+                start < end,
+                "attempted to index slice from most element to less, start: {start}, end: {end}"
+            );
 
             Range { start, end }
         }

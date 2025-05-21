@@ -3,7 +3,7 @@ use crate::io::sys::{self, MessageRecvHeader, OsMessageHeader, RawSocket, os_soc
 #[cfg(feature = "fallback_thread_pool")]
 use crate::io::sys::{OsOpenOptions, OsPathPtr, RawFile};
 
-use std::time::Instant;
+use crate::utils::OrengineInstant;
 use std::{io, ptr};
 
 /// `IoCall` represents a type of I/O call and its arguments.
@@ -15,26 +15,31 @@ pub(crate) enum IoCall {
         RawSocket,
         *mut os_sockaddr,
         *mut sys::socklen_t,
-        *mut Instant,
+        *mut OrengineInstant,
     ),
     Connect(RawSocket, *const os_sockaddr, sys::socklen_t),
-    ConnectWithDeadline(RawSocket, *const os_sockaddr, sys::socklen_t, *mut Instant),
+    ConnectWithDeadline(
+        RawSocket,
+        *const os_sockaddr,
+        sys::socklen_t,
+        *mut OrengineInstant,
+    ),
     PollRecv(RawSocket),
-    PollRecvWithDeadline(RawSocket, *mut Instant),
+    PollRecvWithDeadline(RawSocket, *mut OrengineInstant),
     PollSend(RawSocket),
-    PollSendWithDeadline(RawSocket, *mut Instant),
+    PollSendWithDeadline(RawSocket, *mut OrengineInstant),
     Recv(RawSocket, *mut u8, u32),
-    RecvWithDeadline(RawSocket, *mut u8, u32, *mut Instant),
+    RecvWithDeadline(RawSocket, *mut u8, u32, *mut OrengineInstant),
     RecvFrom(RawSocket, *mut MessageRecvHeader),
-    RecvFromWithDeadline(RawSocket, *mut MessageRecvHeader, *mut Instant),
+    RecvFromWithDeadline(RawSocket, *mut MessageRecvHeader, *mut OrengineInstant),
     Send(RawSocket, *const u8, u32),
-    SendWithDeadline(RawSocket, *const u8, u32, *mut Instant),
+    SendWithDeadline(RawSocket, *const u8, u32, *mut OrengineInstant),
     SendTo(RawSocket, *const OsMessageHeader),
-    SendToWithDeadline(RawSocket, *const OsMessageHeader, *mut Instant),
+    SendToWithDeadline(RawSocket, *const OsMessageHeader, *mut OrengineInstant),
     Peek(RawSocket, *mut u8, u32),
-    PeekWithDeadline(RawSocket, *mut u8, u32, *mut Instant),
+    PeekWithDeadline(RawSocket, *mut u8, u32, *mut OrengineInstant),
     PeekFrom(RawSocket, *mut MessageRecvHeader),
-    PeekFromWithDeadline(RawSocket, *mut MessageRecvHeader, *mut Instant),
+    PeekFromWithDeadline(RawSocket, *mut MessageRecvHeader, *mut OrengineInstant),
     #[cfg(feature = "fallback_thread_pool")]
     Shutdown(RawSocket, std::net::Shutdown),
     #[cfg(feature = "fallback_thread_pool")]
@@ -240,7 +245,7 @@ impl IoCall {
     /// Returns a mutable reference to a deadline of the I/O call represented by this `IoCall`
     /// if it has one.
     #[allow(clippy::mut_from_ref, reason = "False positive.")]
-    pub(crate) const fn deadline_mut(&self) -> Option<&mut Instant> {
+    pub(crate) const fn deadline_mut(&self) -> Option<&mut OrengineInstant> {
         unsafe {
             #[allow(clippy::match_same_arms, reason = "It is more readable this way.")]
             match self {
@@ -260,7 +265,7 @@ impl IoCall {
     }
 
     /// Returns a deadline of the I/O call represented by this `IoCall` if it has one.
-    pub(crate) const fn deadline(&self) -> Option<Instant> {
+    pub(crate) const fn deadline(&self) -> Option<OrengineInstant> {
         self.deadline_mut().copied()
     }
 

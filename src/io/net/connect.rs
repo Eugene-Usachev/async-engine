@@ -2,7 +2,7 @@ use std::future::Future;
 use std::io::Result;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use socket2::SockAddr;
@@ -15,6 +15,7 @@ use crate::io::worker::{IoWorker, local_worker};
 use crate::local_executor;
 use crate::net::addr::{IntoSockAddr, ToSockAddrs};
 use crate::net::{ConnectedDatagram, Socket};
+use crate::utils::OrengineInstant;
 use crate::utils::each_addr::each_addr;
 
 /// `connect` io operation.
@@ -66,14 +67,14 @@ unsafe impl Send for Connect<'_> {}
 #[repr(C)]
 pub struct ConnectWithDeadline<'fut> {
     addr: &'fut SockAddr,
-    deadline: Instant,
+    deadline: OrengineInstant,
     raw_fd: RawSocket,
     io_request_data: Option<IoRequestData>,
 }
 
 impl<'fut> ConnectWithDeadline<'fut> {
     /// Creates a new `connect` io operation with deadline.
-    pub fn new(raw_fd: RawSocket, addr: &'fut SockAddr, deadline: Instant) -> Self {
+    pub fn new(raw_fd: RawSocket, addr: &'fut SockAddr, deadline: OrengineInstant) -> Self {
         Self {
             raw_fd,
             addr,
@@ -219,8 +220,10 @@ pub trait AsyncConnectStream: Sized + Socket {
     #[inline]
     async fn connect_with_deadline<A: ToSockAddrs<Self::Addr>>(
         addr: A,
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<Self> {
+        let deadline = deadline.into();
+
         each_addr(addr, move |addr| async move {
             let stream = Self::new_for_addr(&addr).await?;
             ConnectWithDeadline::new(
@@ -361,9 +364,11 @@ pub trait AsyncConnectDatagram<CD: ConnectedDatagram>: Socket + Sized {
     async fn connect_with_deadline<A: ToSockAddrs<CD::Addr>>(
         self,
         addr: A,
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<CD> {
         let new_datagram_socket_raw_fd = IntoRawSocket::into_raw_socket(self);
+        let deadline = deadline.into();
+
         each_addr(addr, move |addr| async move {
             ConnectWithDeadline::new(new_datagram_socket_raw_fd, &addr.into_sock_addr(), deadline)
                 .await?;

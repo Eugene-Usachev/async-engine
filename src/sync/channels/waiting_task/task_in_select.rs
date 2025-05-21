@@ -5,9 +5,9 @@
 /// struct for handling branches associated with tasks and a thread-local pool for managing
 /// [`TaskInSelect`] instances.
 use crate::local_executor;
-use crate::runtime::Task;
+use crate::runtime::{Task, TaskWithDeadline};
 use crate::sync::channels::state::CallStatePtr;
-use crate::utils::Backoff;
+use crate::utils::{Backoff, unlikely};
 use crate::utils::{likely, unreachable_hint};
 use std::cell::UnsafeCell;
 use std::ptr;
@@ -143,7 +143,7 @@ impl Drop for TaskInSelect {
 
 /// Result of attempting to pop a [`TaskInSelectBranch`] if it is acquired.
 #[repr(C)]
-pub(crate) enum PopIfAcquiredResult {
+pub(crate) enum PopIfAcquiredResult<OtherTask> {
     /// [`TaskInSelectBranch`] was successfully acquired.
     Ok,
     /// No data available (the other [`TaskInSelectBranch`] is already acquired).
@@ -154,10 +154,10 @@ pub(crate) enum PopIfAcquiredResult {
     NoData(TaskInSelectBranch),
     /// The provided [`TaskInSelectBranch`] is already acquired.
     ///
-    /// It can be returned only by methods that try to acquire two [`TaskInSelectBranch`].
+    /// It can be returned only by methods that try to acquire two tasks.
     ///
-    /// Contains another [`TaskInSelectBranch`].
-    NotAcquired(TaskInSelectBranch),
+    /// Contains another task.
+    NotAcquired(OtherTask),
     /// The [`TaskInSelectBranch`] is already acquired.
     ///
     /// It can be returned only by methods that try to acquire one task.
@@ -181,6 +181,11 @@ impl TaskInSelectBranch {
         }
     }
 
+    /// Returns whether the task is `local`.
+    pub fn is_local(&self) -> bool {
+        self.task_in_select.inner().task.is_local()
+    }
+
     /// Returns `true` if the task was already acquired.
     ///
     /// It is used only for free acquired tasks from deques.
@@ -192,7 +197,7 @@ impl TaskInSelectBranch {
             *unsafe { &mut *ptr::from_ref(state).cast_mut() }.get_mut()
         }
 
-        if self.task_in_select.inner().task.is_local() {
+        if self.is_local() {
             let state = unsafe { get_atomic(&self.task_in_select.inner().state) };
 
             state == ACQUIRED
@@ -205,7 +210,7 @@ impl TaskInSelectBranch {
     ///
     /// Returns None if it is already acquired.
     pub(crate) fn acquire_once(mut self) -> Option<Task> {
-        if self.task_in_select.inner().task.is_local() {
+        if self.is_local() {
             let was_acquired_ref = self.task_in_select.inner_mut().state.get_mut();
 
             debug_assert!(*was_acquired_ref < 2);
@@ -251,6 +256,127 @@ impl TaskInSelectBranch {
         }
     }
 
+    /// Sets the provided `local` [`TaskInSelect`] as acquired only if it is acquired by this call,
+    /// and if the provided `FnMut` returns `true`.
+    /// It doesn't call the provided `FnMut` if the provided [`TaskInSelect`] is already acquired.
+    ///
+    /// # Safety
+    ///
+    /// * It is called in select;
+    ///
+    /// * Calls with `local` tasks.
+    unsafe fn try_acquire_with_task_with_deadline_local_in_select(
+        mut self,
+        other_task: TaskWithDeadline,
+        other_task_executing_fn: &mut impl FnMut(TaskWithDeadline) -> bool,
+    ) -> PopIfAcquiredResult<TaskWithDeadline> {
+        debug_assert!(self.task_in_select.inner().task.is_local());
+
+        let this_state = self.task_in_select.inner_mut().state.get_mut();
+        if *this_state == ACQUIRED {
+            return PopIfAcquiredResult::NotAcquired(other_task);
+        }
+
+        let was_other_was_executed = other_task_executing_fn(other_task);
+        if unlikely(!was_other_was_executed) {
+            return PopIfAcquiredResult::NoData(self);
+        }
+
+        *this_state = ACQUIRED;
+
+        local_executor().exec_task(unsafe { ptr::read(&self.task_in_select.inner().task) });
+
+        PopIfAcquiredResult::Ok
+    }
+
+    /// Sets the provided `shared` [`TaskInSelect`] as acquired only if it is acquired by this call,
+    /// and if the provided `FnMut` returns `true`.
+    /// It doesn't call the provided `FnMut` if the provided [`TaskInSelect`] is already acquired.
+    ///
+    /// # Safety
+    ///
+    /// * It is called in select;
+    ///
+    /// * Calls with `shared` tasks.
+    unsafe fn try_acquire_with_task_with_deadline_shared_in_select(
+        self,
+        other_task: TaskWithDeadline,
+        other_task_executing_fn: &mut impl FnMut(TaskWithDeadline) -> bool,
+    ) -> PopIfAcquiredResult<TaskWithDeadline> {
+        debug_assert!(!self.task_in_select.inner().task.is_local());
+
+        // Set state to acquiring now.
+        let prev_ = self.task_in_select.inner().state.compare_exchange(
+            NOT_ACQUIRED,
+            ACQUIRING_NOW,
+            AcqRel,
+            Acquire,
+        );
+
+        if let Err(prev) = prev_ {
+            // Can be only `ACQUIRED`.
+            match prev {
+                ACQUIRED => PopIfAcquiredResult::NotAcquired(other_task),
+
+                // bug is occurred
+                // because it can be acquiring now only if it is in select,
+                // but we are in select and can't acquire,
+                // so select was called twice with one TaskInSelect
+                _ => unreachable_hint(),
+            }
+        } else {
+            let was_other_task_executed = other_task_executing_fn(other_task);
+            if unlikely(!was_other_task_executed) {
+                self.task_in_select
+                    .inner()
+                    .state
+                    .store(NOT_ACQUIRED, Release);
+
+                return PopIfAcquiredResult::NoData(self);
+            }
+
+            self.task_in_select.inner().state.store(ACQUIRED, Release);
+
+            self.task_in_select
+                .set_resolved_branch_id(self.associated_branch_id);
+
+            let this_task = unsafe { ptr::read(&self.task_in_select.inner().task) };
+
+            local_executor().spawn_shared_task(this_task);
+
+            PopIfAcquiredResult::Ok
+        }
+    }
+
+    /// Sets the provided [`TaskInSelect`] as acquired only if it is acquired by this call,
+    /// and if the provided `FnMut` returns `true`.
+    /// It doesn't call the provided `FnMut` if the provided [`TaskInSelect`] is already acquired.
+    ///
+    /// # Safety
+    ///
+    /// * It is called in select.
+    pub(crate) unsafe fn try_acquire_with_task_with_deadline_in_select(
+        self,
+        other_task: TaskWithDeadline,
+        other_task_executing_fn: &mut impl FnMut(TaskWithDeadline) -> bool,
+    ) -> PopIfAcquiredResult<TaskWithDeadline> {
+        if self.is_local() {
+            unsafe {
+                self.try_acquire_with_task_with_deadline_local_in_select(
+                    other_task,
+                    other_task_executing_fn,
+                )
+            }
+        } else {
+            unsafe {
+                self.try_acquire_with_task_with_deadline_shared_in_select(
+                    other_task,
+                    other_task_executing_fn,
+                )
+            }
+        }
+    }
+
     /// Attempts to acquire two `local` [`TaskInSelect`] and sets the resolved branch id on success.
     ///
     /// Read [`PopIfAcquiredResult`] for more detail.
@@ -259,14 +385,14 @@ impl TaskInSelectBranch {
     ///
     /// * It is called in select;
     ///
-    /// * If returns `false `, then the other task must be not lost (saved into queue again).
+    /// * Calls with `local` tasks.
     unsafe fn try_acquire_two_local_tasks_in_select<T, SetterFn>(
         mut self,
         mut other: Self,
         setter_fn: &mut SetterFn,
         state: CallStatePtr,
         data: NonNull<T>,
-    ) -> PopIfAcquiredResult
+    ) -> PopIfAcquiredResult<Self>
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
@@ -320,7 +446,7 @@ impl TaskInSelectBranch {
         setter_fn: &mut SetterFn,
         state: CallStatePtr,
         data: NonNull<T>,
-    ) -> PopIfAcquiredResult
+    ) -> PopIfAcquiredResult<Self>
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
@@ -344,7 +470,7 @@ impl TaskInSelectBranch {
                 backoff.reset();
             }
 
-            // Set state to acquiring now with another task. Read below for details.
+            // Set state to acquiring now.
             let prev_ = self.task_in_select.inner().state.compare_exchange(
                 NOT_ACQUIRED,
                 ACQUIRING_NOW,
@@ -442,11 +568,11 @@ impl TaskInSelectBranch {
         setter_fn: &mut SetterFn,
         state: CallStatePtr,
         data: NonNull<T>,
-    ) -> PopIfAcquiredResult
+    ) -> PopIfAcquiredResult<Self>
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
-        if self.task_in_select.inner().task.is_local() {
+        if self.is_local() {
             unsafe { self.try_acquire_two_local_tasks_in_select(other, setter_fn, state, data) }
         } else {
             unsafe { self.try_acquire_two_shared_tasks_in_select(other, setter_fn, state, data) }

@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-/// An error of an asynchronous send operation.
+/// An error of an asynchronous `send` operation.
 ///
 /// # Variants
 ///
@@ -18,7 +18,29 @@ impl<T> Debug for SendErr<T> {
     }
 }
 
-/// An error of a non-blocking send attempt.
+/// An error of a timed asynchronous `send` operation.
+///
+/// # Variants
+///
+/// - [`Closed`](SendTimeoutErr::Closed): The channel was closed before the value could be sent.
+/// - [`Timeout`](SendTimeoutErr::Timeout): The deadline was reached before the value could be sent.
+pub enum SendTimeoutErr<T> {
+    /// The channel was closed before the value could be sent.
+    Closed(T),
+    /// The deadline was reached before the value could be sent.
+    Timeout(T),
+}
+
+impl<T> Debug for SendTimeoutErr<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Closed(_) => write!(f, "SendTimeoutErr::Closed"),
+            Self::Timeout(_) => write!(f, "SendTimeoutErr::Timeout"),
+        }
+    }
+}
+
+/// An error of a non-blocking `send` attempt.
 ///
 /// Used for scenarios where the sender attempts to send a value
 /// without waiting for the channel to become available.
@@ -70,7 +92,29 @@ impl Debug for RecvErr {
     }
 }
 
-/// An error of a non-blocking receive attempt.
+/// An error of a timed asynchronous `receive` operation.
+///
+/// # Variants
+///
+/// - [`Closed`](RecvTimeoutErr::Closed): The channel is closed, and no more values can be received.
+/// - [`Timeout`](RecvTimeoutErr::Timeout): The deadline was reached before a value could be received.
+pub enum RecvTimeoutErr {
+    /// The channel is closed, and no more values can be received.
+    Closed,
+    /// The deadline was reached before a value could be received.
+    Timeout,
+}
+
+impl Debug for RecvTimeoutErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Closed => write!(f, "RecvTimeoutErr::Closed"),
+            Self::Timeout => write!(f, "RecvTimeoutErr::Timeout"),
+        }
+    }
+}
+
+/// An error of a non-blocking `receive` attempt.
 ///
 /// # Variants
 ///

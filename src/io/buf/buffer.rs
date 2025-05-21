@@ -1,9 +1,9 @@
-use crate::io::buf_pool::{buf_pool, buffer, BufPool};
+use crate::io::buf_pool::{BufPool, buf_pool, buffer};
 #[cfg(target_os = "linux")]
 use crate::io::linux::linux_buffer::LinuxBuffer;
 use crate::io::slice::{Slice, SliceMut};
 use crate::io::{FixedBuffer, FixedBufferMut};
-use crate::utils::{likely, Sealed};
+use crate::utils::{Sealed, likely};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem::ManuallyDrop;

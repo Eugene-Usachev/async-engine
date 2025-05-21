@@ -1,4 +1,4 @@
-use crate::utils::{unlikely, Ptr};
+use crate::utils::{Ptr, unlikely};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Deref, DerefMut};

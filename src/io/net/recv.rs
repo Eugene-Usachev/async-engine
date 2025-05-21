@@ -3,7 +3,7 @@ use std::io::Result;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 
@@ -14,6 +14,7 @@ use crate::io::sys::{AsRawSocket, RawSocket};
 use crate::io::worker::{IoWorker, local_worker};
 use crate::local_executor;
 use crate::net::Socket;
+use crate::utils::OrengineInstant;
 
 /// `recv` io operation.
 #[repr(C)]
@@ -114,14 +115,14 @@ unsafe impl Send for RecvFixed<'_> {}
 #[repr(C)]
 pub struct RecvBytesWithDeadline<'buf> {
     buf: &'buf mut [u8],
-    deadline: Instant,
+    deadline: OrengineInstant,
     raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
 }
 
 impl<'buf> RecvBytesWithDeadline<'buf> {
     /// Creates a new `recv` io operation with deadline.
-    pub fn new(raw_socket: RawSocket, buf: &'buf mut [u8], deadline: Instant) -> Self {
+    pub fn new(raw_socket: RawSocket, buf: &'buf mut [u8], deadline: OrengineInstant) -> Self {
         Self {
             raw_socket,
             buf,
@@ -162,7 +163,7 @@ unsafe impl Send for RecvBytesWithDeadline<'_> {}
 #[repr(C)]
 pub struct RecvFixedWithDeadline<'buf> {
     ptr: *mut u8,
-    deadline: Instant,
+    deadline: OrengineInstant,
     raw_socket: RawSocket,
     len: u32,
     fixed_index: u16,
@@ -177,7 +178,7 @@ impl RecvFixedWithDeadline<'_> {
         ptr: *mut u8,
         len: u32,
         fixed_index: u16,
-        deadline: Instant,
+        deadline: OrengineInstant,
     ) -> Self {
         Self {
             raw_socket,
@@ -350,9 +351,9 @@ pub trait AsyncRecv: Socket {
     fn recv_bytes_with_deadline(
         &mut self,
         buf: &mut [u8],
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> impl Future<Output = Result<usize>> {
-        RecvBytesWithDeadline::new(AsRawSocket::as_raw_socket(self), buf, deadline)
+        RecvBytesWithDeadline::new(AsRawSocket::as_raw_socket(self), buf, deadline.into())
     }
 
     /// Asynchronously receives into the provided byte slice the incoming data with consuming it,
@@ -388,8 +389,10 @@ pub trait AsyncRecv: Socket {
     async fn recv_with_deadline(
         &mut self,
         buf: &mut impl FixedBufferMut,
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<u32> {
+        let deadline = deadline.into();
+
         if buf.is_fixed() {
             RecvFixedWithDeadline::new(
                 AsRawSocket::as_raw_socket(self),
@@ -616,8 +619,9 @@ pub trait AsyncRecv: Socket {
     async fn recv_bytes_exact_with_deadline(
         &mut self,
         buf: &mut [u8],
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<()> {
+        let deadline = deadline.into();
         let mut received = 0;
 
         while received < buf.len() {
@@ -662,8 +666,10 @@ pub trait AsyncRecv: Socket {
     async fn recv_exact_with_deadline(
         &mut self,
         buf: &mut impl FixedBufferMut,
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<()> {
+        let deadline = deadline.into();
+
         if buf.is_fixed() {
             let mut received = 0;
 

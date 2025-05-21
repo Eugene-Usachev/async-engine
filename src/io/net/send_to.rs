@@ -6,6 +6,7 @@ use crate::io::worker::{IoWorker, local_worker};
 use crate::local_executor;
 use crate::net::Socket;
 use crate::net::addr::{FromSockAddr, IntoSockAddr, ToSockAddrs};
+use crate::utils::OrengineInstant;
 use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use socket2::SockAddr;
 use std::future::Future;
@@ -70,7 +71,7 @@ unsafe impl Send for SendTo<'_> {}
 pub struct SendToWithDeadline<'fut> {
     bufs: &'fut [IoSlice<'fut>],
     addr: &'fut SockAddr,
-    deadline: Instant,
+    deadline: OrengineInstant,
     message_header: MessageSendHeader,
     raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
@@ -83,7 +84,7 @@ impl<'fut> SendToWithDeadline<'fut> {
         raw_socket: RawSocket,
         bufs: &'fut [IoSlice<'fut>],
         addr: &'fut SockAddr,
-        deadline: Instant,
+        deadline: OrengineInstant,
     ) -> Self {
         Self {
             raw_socket,
@@ -278,7 +279,7 @@ pub trait AsyncSendTo: Socket {
         &mut self,
         buf: &[u8],
         addr: A,
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<usize> {
         let bufs_ptr = &[IoSlice::new(buf)];
 
@@ -286,7 +287,7 @@ pub trait AsyncSendTo: Socket {
             AsRawSocket::as_raw_socket(self),
             bufs_ptr,
             &sock_addr_from_to_socket_addr(&addr)?,
-            deadline,
+            deadline.into(),
         )
         .await
     }
@@ -530,8 +531,9 @@ pub trait AsyncSendTo: Socket {
         &mut self,
         buf: &[u8],
         addr: A,
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<usize> {
+        let deadline = deadline.into();
         let mut sent = 0;
         let addr = sock_addr_from_to_socket_addr(&addr)?;
 

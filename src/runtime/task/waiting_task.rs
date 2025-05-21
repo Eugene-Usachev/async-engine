@@ -1,5 +1,5 @@
-use crate::runtime::Task;
-use crate::sync::channels::state::CallStatePtr;
+use crate::runtime::{Task, TaskWithDeadline};
+use crate::sync::channels::CallStatePtr;
 use crate::sync::channels::waiting_task::TaskInSelectBranch;
 use std::ptr::NonNull;
 
@@ -14,6 +14,9 @@ pub(crate) enum WaitingTask<T> {
 
     /// A task that is participating in a `select` operation over multiple branches.
     InSelector(TaskInSelectBranch, CallStatePtr, NonNull<T>),
+
+    /// A task that is waiting on a single channel operation with a deadline.
+    CommonWithDeadline(TaskWithDeadline, CallStatePtr, NonNull<T>),
 }
 
 impl<T> WaitingTask<T> {
@@ -31,6 +34,16 @@ impl<T> WaitingTask<T> {
         Self::InSelector(task, state, slot)
     }
 
+    /// Creates a `CommonWithDeadline` waiting task, representing a task blocked
+    /// on a single channel with a deadline.
+    pub(crate) fn common_with_deadline(
+        task: TaskWithDeadline,
+        state: CallStatePtr,
+        slot: NonNull<T>,
+    ) -> Self {
+        Self::CommonWithDeadline(task, state, slot)
+    }
+
     /// Returns whether the waiting task can be freed.
     ///
     /// For example, if [`TaskInSelectBranch`] is acquired.
@@ -38,6 +51,7 @@ impl<T> WaitingTask<T> {
         match self {
             Self::InSelector(task_in_select_branch, _, _) => task_in_select_branch.is_acquired(),
             Self::Common(_, _, _) => false,
+            Self::CommonWithDeadline(task_with_deadline, _, _) => task_with_deadline.was_woken(),
         }
     }
 }

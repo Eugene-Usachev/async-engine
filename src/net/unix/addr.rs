@@ -2,7 +2,7 @@ use crate::utils::unlikely;
 use libc::{sa_family_t, sockaddr_storage, socklen_t};
 use socket2::SockAddr;
 use std::ffi::OsStr;
-use std::mem::{offset_of, MaybeUninit};
+use std::mem::{MaybeUninit, offset_of};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::SocketAddr;
 use std::path::Path;
@@ -412,8 +412,8 @@ impl fmt::Debug for UnixAddr {
 
 #[cfg(test)]
 mod tests {
-    use crate::net::unix::addr::AddressKind;
     use crate::net::unix::UnixAddr;
+    use crate::net::unix::addr::AddressKind;
     #[cfg(any(target_os = "android", target_os = "linux"))]
     use std::os::linux::net::SocketAddrExt;
     use std::os::unix::net::SocketAddr;

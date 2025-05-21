@@ -59,8 +59,11 @@ pub const fn unlikely(b: bool) -> bool {
     b
 }
 
+/// A trait that is implemented by [`Option`] and [`Result`].
 pub(crate) trait UnwrapOrPanic<T> {
+    /// Unwraps a value, panicking if it is [`None`] or [`Err`].
     fn unwrap_or_panic(self, message: &'static str) -> T;
+    /// Unwraps a value, UB if it is [`None`] or [`Err`].
     unsafe fn unwrap_unchecked(self) -> T;
     // `unwrap_or_bug_hint` is not described here not to extend the `Option` and `Result` even more
 }
@@ -89,6 +92,9 @@ impl<T, E> UnwrapOrPanic<T> for Result<T, E> {
     }
 }
 
+/// Unwraps a value, panicking if it is [`None`] or [`Err`] with `debug_assertions`.
+///
+/// Else hints to the compiler that the value is not `None` or `Err`.
 pub(crate) fn unwrap_or_bug_hint<T>(item: impl UnwrapOrPanic<T>) -> T {
     if cfg!(debug_assertions) {
         item.unwrap_or_panic(BUG_MESSAGE)

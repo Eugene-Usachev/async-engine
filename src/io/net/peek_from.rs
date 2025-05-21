@@ -14,6 +14,7 @@ use crate::io::sys::{AsRawSocket, MessageRecvHeader, RawSocket};
 use crate::io::worker::{IoWorker, local_worker};
 use crate::net::Socket;
 use crate::net::addr::FromSockAddr;
+use crate::utils::OrengineInstant;
 use crate::{BUG_MESSAGE, local_executor};
 
 /// `peek_from` io operation.
@@ -70,7 +71,7 @@ unsafe impl Send for PeekFrom<'_> {}
 #[repr(C)]
 pub struct PeekFromWithDeadline<'fut> {
     sock_addr: &'fut mut SockAddr,
-    deadline: Instant,
+    deadline: OrengineInstant,
     msg_header: MessageRecvHeader,
     raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
@@ -82,7 +83,7 @@ impl<'fut> PeekFromWithDeadline<'fut> {
         raw_socket: RawSocket,
         buf_ptr: *mut [IoSliceMut],
         addr: &'fut mut SockAddr,
-        deadline: Instant,
+        deadline: OrengineInstant,
     ) -> Self {
         Self {
             raw_socket,
@@ -243,9 +244,10 @@ pub trait AsyncPeekFrom: Socket {
     async fn peek_bytes_from_with_deadline(
         &mut self,
         buf: &mut [u8],
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<(usize, Self::Addr)> {
         let mut sock_addr = unsafe { std::mem::zeroed() };
+        let deadline = deadline.into();
         let buf_ptr = &mut [IoSliceMut::new(buf)];
 
         let n = PeekFromWithDeadline::new(

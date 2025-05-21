@@ -10,13 +10,14 @@ use crate::io::{IoWorkerConfig, sys};
 use crate::local_executor;
 use crate::runtime::Task;
 use crate::runtime::call::Call;
+use crate::utils::OrengineInstant;
 use mio::Interest;
 use socket2::{Domain, Protocol, Type};
 use std::cell::UnsafeCell;
 use std::collections::BTreeSet;
 use std::net::Shutdown;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{io, mem, thread};
 
 enum WorkerResult {
@@ -112,7 +113,7 @@ pub(crate) struct FallbackWorker {
     synced_completions: UnsafeCell<Vec<WorkerResult>>,
     poller: MioPoller,
     time_bounded_io_task_queue: BTreeSet<TimeBoundedIoTask>,
-    last_gotten_time: Instant,
+    last_gotten_time: OrengineInstant,
     polled_requests: Vec<(Result<(), ()>, IoCall, IoRequestDataPtr)>,
 }
 
@@ -132,9 +133,7 @@ macro_rules! check_deadline_and {
                 local_executor().spawn_local_task(task);
             } else {
                 // We can't spawn shared task when it is running.
-                unsafe {
-                    local_executor().invoke_call(Call::PushCurrentTaskAtTheStartOfLIFOSharedQueue)
-                }
+                unsafe { local_executor().invoke_call(Call::spawn_current_global_task()) }
             }
         }
     };
@@ -173,16 +172,16 @@ impl FallbackWorker {
     /// Registers a new [`TimeBoundedIoTask`] for a given socket.
     ///
     /// Logic of deadline:
-    /// 1. deadline can be only on socket recv / peek / send / accept / connect operations
-    /// 2. before execute the operation, the deadline will be checked
-    /// 3. if deadline is expired, the operation will be cancelled immediately
-    /// 4. else, we try to execute the operation
-    /// 5. if not would block, return the result
-    /// 6. else register deadline and register the socket to the poller
-    /// 7. when the deadline expires, the socket will be deregistered from the poller
+    /// 1. The deadline can be only on socket recv / peek / send / accept / connect operations
+    /// 2. Before executing the operation, the deadline will be checked
+    /// 3. If the deadline is expired, the operation will be canceled immediately
+    /// 4. Else, we try to execute operation
+    /// 5. If the operation wouldn't block, return the result
+    /// 6. Else register deadline and register the socket to the poller
+    /// 7. When the deadline expires, the socket will be deregistered from the poller
     ///    and `ErrorKind::TimedOut` will be returned
-    /// 8. else if the socket is ready before the deadline expires, the operation will be executed
-    ///    the result will be returned and the deadline will be deregistered
+    /// 8. Else if the socket is ready before the deadline expires, the operation will be executed,
+    ///    the result will be returned, and the deadline will be deregistered
     pub(crate) fn register_deadline(&mut self, slot_ptr: *mut (IoCall, IoRequestDataPtr)) {
         let slot = unsafe { &mut *slot_ptr };
         let deadline = slot.0.deadline_mut().unwrap();
@@ -202,7 +201,7 @@ impl FallbackWorker {
     ///
     /// Read logic in [`Self::check_deadlines`].
     pub(crate) fn check_deadlines(&mut self) {
-        self.last_gotten_time = Instant::now();
+        self.last_gotten_time = OrengineInstant::now();
 
         while let Some(time_bounded_io_task) = self.time_bounded_io_task_queue.pop_first() {
             if time_bounded_io_task.deadline() <= self.last_gotten_time {
@@ -412,13 +411,13 @@ impl IoWorker for FallbackWorker {
             synced_completions: UnsafeCell::new(Vec::new()),
             poller: MioPoller::new().expect("Failed to create mio Poll instance."),
             time_bounded_io_task_queue: BTreeSet::new(),
-            last_gotten_time: Instant::now(),
+            last_gotten_time: OrengineInstant::now(),
             polled_requests: Vec::new(),
         }
     }
 
     #[inline]
-    fn deregister_time_bounded_io_task(&mut self, deadline: &Instant) {
+    fn deregister_time_bounded_io_task(&mut self, deadline: &OrengineInstant) {
         self.time_bounded_io_task_queue.remove(deadline);
     }
 
@@ -486,7 +485,7 @@ impl IoWorker for FallbackWorker {
         addr_ptr: *mut sys::os_sockaddr,
         addr_len: *mut sys::socklen_t,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.push_to_worker_pool_with_deadline(
             IoCall::AcceptWithDeadline(raw_socket, addr_ptr, addr_len, deadline),
@@ -512,7 +511,7 @@ impl IoWorker for FallbackWorker {
         addr_ptr: *const sys::os_sockaddr,
         addr_len: sys::socklen_t,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.push_to_worker_pool_with_deadline(
             IoCall::ConnectWithDeadline(raw_socket, addr_ptr, addr_len, deadline),
@@ -534,7 +533,7 @@ impl IoWorker for FallbackWorker {
         &mut self,
         raw_socket: RawSocket,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         check_deadline_and!(self, *deadline, request_ptr, {
             self.number_of_active_tasks += 1;
@@ -563,7 +562,7 @@ impl IoWorker for FallbackWorker {
         &mut self,
         raw_socket: RawSocket,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         check_deadline_and!(self, *deadline, request_ptr, {
             self.number_of_active_tasks += 1;
@@ -608,7 +607,7 @@ impl IoWorker for FallbackWorker {
         ptr: *mut u8,
         len: u32,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.push_to_worker_pool_with_deadline(
             IoCall::RecvWithDeadline(raw_socket, ptr, len, deadline),
@@ -624,7 +623,7 @@ impl IoWorker for FallbackWorker {
         len: u32,
         _buf_index: u16,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.push_to_worker_pool_with_deadline(
             IoCall::RecvWithDeadline(raw_socket, ptr, len, deadline),
@@ -648,7 +647,7 @@ impl IoWorker for FallbackWorker {
         raw_socket: RawSocket,
         msg_header: &mut MessageRecvHeader,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.push_to_worker_pool_with_deadline(
             IoCall::RecvFromWithDeadline(raw_socket, msg_header, deadline),
@@ -686,7 +685,7 @@ impl IoWorker for FallbackWorker {
         ptr: *const u8,
         len: u32,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.push_to_worker_pool_with_deadline(
             IoCall::SendWithDeadline(raw_socket, ptr, len, deadline),
@@ -702,7 +701,7 @@ impl IoWorker for FallbackWorker {
         len: u32,
         _buf_index: u16,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.push_to_worker_pool_with_deadline(
             IoCall::SendWithDeadline(raw_socket, ptr, len, deadline),
@@ -726,7 +725,7 @@ impl IoWorker for FallbackWorker {
         raw_socket: RawSocket,
         msg_header: *const OsMessageHeader,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.push_to_worker_pool_with_deadline(
             IoCall::SendToWithDeadline(raw_socket, msg_header, deadline),
@@ -764,7 +763,7 @@ impl IoWorker for FallbackWorker {
         ptr: *mut u8,
         len: u32,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.push_to_worker_pool_with_deadline(
             IoCall::PeekWithDeadline(raw_socket, ptr, len, deadline),
@@ -780,7 +779,7 @@ impl IoWorker for FallbackWorker {
         len: u32,
         _buf_index: u16,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.push_to_worker_pool_with_deadline(
             IoCall::PeekWithDeadline(raw_socket, ptr, len, deadline),
@@ -804,7 +803,7 @@ impl IoWorker for FallbackWorker {
         raw_socket: RawSocket,
         msg: &mut MessageRecvHeader,
         request_ptr: IoRequestDataPtr,
-        deadline: &mut Instant,
+        deadline: &mut OrengineInstant,
     ) {
         self.push_to_worker_pool_with_deadline(
             IoCall::PeekFromWithDeadline(raw_socket, msg, deadline),

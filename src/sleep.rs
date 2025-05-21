@@ -1,51 +1,5 @@
-use crate::runtime::{local_executor, Task};
-use std::collections::btree_map::Entry::{Occupied, Vacant};
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
-
-/// `Sleep` implements the [`Future`] trait. It waits at least until `sleep_until` and works only
-/// in `orengine` runtime.
-#[repr(C)]
-pub struct Sleep {
-    was_called: bool,
-    /// Unix time in nanoseconds.
-    sleep_until: Instant,
-}
-
-impl Future for Sleep {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let this = &mut *self;
-
-        if this.was_called {
-            // [`Executor`](crate::Executor) will wake this future up when it should be woken up.
-            Poll::Ready(())
-        } else {
-            this.was_called = true;
-
-            let task = unsafe { Task::from_context(cx) };
-
-            loop {
-                let sleeping_tasks_map = local_executor().sleeping_tasks();
-                match sleeping_tasks_map.entry(this.sleep_until) {
-                    Vacant(entry) => {
-                        entry.insert(task);
-
-                        break;
-                    }
-                    Occupied(_) => {
-                        this.sleep_until += Duration::from_nanos(1);
-                    }
-                }
-            }
-
-            Poll::Pending
-        }
-    }
-}
+use crate::runtime::{Task, local_executor};
+use std::time::Duration;
 
 /// Sleeps at least until `Instant::now() + duration`. It works only in `orengine` runtime.
 ///
@@ -57,15 +11,20 @@ impl Future for Sleep {
 ///
 /// orengine::Executor::init().run_with_local_future(async {
 ///     sleep(Duration::from_millis(100)).await;
+///
 ///     println!("Hello after at least 100 millis!");
 /// });
 /// ```
 #[inline]
-pub fn sleep(duration: Duration) -> Sleep {
-    Sleep {
-        was_called: false,
-        sleep_until: Instant::now() + duration,
-    }
+pub async fn sleep(duration: Duration) {
+    let task = unsafe { Task::get_current().await };
+
+    local_executor().register_sleeping_task(
+        task,
+        local_executor().start_round_time_for_deadlines() + duration,
+    );
+
+    unsafe { Task::park_current_task().await }
 }
 
 #[cfg(test)]

@@ -13,6 +13,7 @@ mod select;
 
 use proc_macro::TokenStream;
 use quote::quote;
+use std::time::Duration;
 use syn::parse_macro_input;
 
 /// Generates code for [`Future::poll`](std::future::Future::poll).
@@ -122,7 +123,8 @@ pub fn poll_for_time_bounded_io_request(input: TokenStream) -> TokenStream {
 }
 
 /// Generates a test function with a provided locality.
-fn generate_test(input: TokenStream, is_local: bool) -> TokenStream {
+fn generate_test(input: TokenStream, is_local: bool, timeout: Option<Duration>) -> TokenStream {
+    // TODO timeout
     let fn_item = parse_macro_input!(input as syn::ItemFn);
     let body = &fn_item.block;
     let attrs = &fn_item.attrs;
@@ -146,9 +148,9 @@ fn generate_test(input: TokenStream, is_local: bool) -> TokenStream {
         #(#attrs)*
         fn #name() {
             println!("Test {} started!", #name_str.to_string());
-            #spawn_fn(async {
+            #spawn_fn(|| async {
                 #body
-            });
+            }, None); // TODO timeout
             println!("Test {} finished!", #name_str.to_string());
         }
     };
@@ -197,7 +199,7 @@ fn generate_test(input: TokenStream, is_local: bool) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn test_local(_: TokenStream, input: TokenStream) -> TokenStream {
-    generate_test(input, true)
+    generate_test(input, true, None) // TODO timeout
 }
 
 /// Generates a test function by running an `Executor` with a `local` task.
@@ -242,7 +244,7 @@ pub fn test_local(_: TokenStream, input: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn test_shared(_: TokenStream, input: TokenStream) -> TokenStream {
-    generate_test(input, false)
+    generate_test(input, false, None) // TODO timeout
 }
 
 ///# `select!` Macro

@@ -1,17 +1,18 @@
 use crate::panic_if_local_in_future;
 use crate::runtime::call::Call;
-use crate::runtime::{IsLocal, Task, local_executor};
+use crate::runtime::waiting_task::WaitingTask;
+use crate::runtime::{IsLocal, Task, TaskWithDeadline, local_executor};
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
 use crate::sync::channels::state::{CallState, CallStatePtr};
-use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
-use crate::sync::channels::waiting_task::waiting_task_deque::WaitingTaskSharedDequeGuard;
+use crate::sync::channels::waiting_task::waiting_select_task_deque::WaitingTaskSharedDequeGuard;
 use crate::sync::channels::waiting_task::{PopIfAcquiredResult, TaskInSelectBranch};
 use crate::sync::channels::{SelectReceiver, SelectSender};
 use crate::sync::mutexes::naive_shared::NaiveMutex;
 use crate::sync::{
-    AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, RecvErr, SendErr, TryRecvErr, TrySendErr,
+    AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, RecvErr, RecvTimeoutErr, SendErr,
+    SendTimeoutErr, TryRecvErr, TrySendErr,
 };
-use crate::utils::Ptr;
+use crate::utils::{OrengineInstant, Ptr};
 use crate::utils::{unlikely, unreachable_hint};
 use std::collections::VecDeque;
 use std::future::Future;
@@ -52,11 +53,11 @@ macro_rules! return_pending_and_release_lock {
 
 /// Returns `Poll::Pending` if the mutex is not acquired, otherwise returns lock.
 macro_rules! acquire_lock {
-    ($mutex:expr, $task:expr) => {
+    ($mutex:expr) => {
         match $mutex.try_lock() {
             Some(lock) => lock,
             None => {
-                local_executor().spawn_task_at_end_of_shared_tasks_queue($task);
+                unsafe { local_executor().invoke_call(Call::spawn_current_global_task()) };
 
                 return Poll::Pending;
             }
@@ -110,7 +111,7 @@ impl<T> Future for WaitSend<'_, T> {
 
         match this.call_state {
             CallState::FirstCall => {
-                let mut inner_lock = acquire_lock!(this.inner, unsafe { Task::from_context(cx) });
+                let mut inner_lock = acquire_lock!(this.inner);
                 if unlikely(inner_lock.is_closed) {
                     return Poll::Ready(Err(SendErr::Closed(unsafe {
                         ManuallyDrop::take(&mut this.value)
@@ -155,6 +156,7 @@ impl<T> Future for WaitSend<'_, T> {
             CallState::WokenByClose => Poll::Ready(Err(SendErr::Closed(unsafe {
                 ManuallyDrop::take(&mut this.value)
             }))),
+            CallState::WokenByDeadline => unreachable_hint(),
         }
     }
 }
@@ -165,6 +167,128 @@ impl<T: RefUnwindSafe> RefUnwindSafe for WaitSend<'_, T> {}
 
 #[cfg(debug_assertions)]
 impl<T> Drop for WaitSend<'_, T> {
+    fn drop(&mut self) {
+        assert!(
+            self.was_awaited,
+            "`WaitSend` was not awaited. This will cause a memory leak."
+        );
+    }
+}
+
+/// This struct represents a future that waits for a value to be sent
+/// into the [`channel`](Channel) with a deadline.
+///
+/// When the future is polled, it either sends the value immediately (if there is capacity) or
+/// gets parked in the list of waiting senders.
+///
+/// # Panics or memory leaks
+///
+/// If [`WaitSend::poll`] is not called.
+#[repr(C)]
+pub struct WaitSendWithDeadline<'future, T> {
+    inner: &'future NaiveMutex<Inner<T>>,
+    value: ManuallyDrop<T>,
+    call_state: CallState,
+    deadline: OrengineInstant,
+    #[cfg(debug_assertions)]
+    was_awaited: bool,
+}
+
+impl<'future, T> WaitSendWithDeadline<'future, T> {
+    /// Creates a new [`WaitSendWithDeadline`].
+    #[inline]
+    fn new(value: T, inner: &'future NaiveMutex<Inner<T>>, deadline: OrengineInstant) -> Self {
+        Self {
+            inner,
+            call_state: CallState::FirstCall,
+            value: ManuallyDrop::new(value),
+            deadline,
+            #[cfg(debug_assertions)]
+            was_awaited: false,
+        }
+    }
+}
+
+impl<T> Future for WaitSendWithDeadline<'_, T> {
+    type Output = Result<(), SendTimeoutErr<T>>;
+
+    #[inline]
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = unsafe { self.get_unchecked_mut() };
+        #[cfg(debug_assertions)]
+        {
+            this.was_awaited = true;
+        }
+        panic_if_local_in_future!(cx, "Channel");
+
+        match this.call_state {
+            CallState::FirstCall => {
+                let mut inner_lock = acquire_lock!(this.inner);
+                if unlikely(inner_lock.is_closed) {
+                    return Poll::Ready(Err(SendTimeoutErr::Closed(unsafe {
+                        ManuallyDrop::take(&mut this.value)
+                    })));
+                }
+
+                let was_written =
+                    inner_lock
+                        .deque
+                        .try_pop_front_receiver_and_call(|call_state, slot| unsafe {
+                            this.inner.unlock(); // Release the lock here to improve performance
+
+                            copy_nonoverlapping(&*this.value, slot.as_ptr(), 1);
+                            call_state.write(CallState::WokenToReturnReady);
+                        });
+                if was_written {
+                    mem::forget(inner_lock); // Was released above
+
+                    return Poll::Ready(Ok(()));
+                }
+
+                let len = inner_lock.storage.len();
+                let call_state_ptr = CallStatePtr::new(&mut this.call_state);
+
+                if unlikely(len >= inner_lock.capacity) {
+                    inner_lock
+                        .deque
+                        .push_back_sender(WaitingTask::common_with_deadline(
+                            TaskWithDeadline::create_new_and_register(
+                                unsafe { Task::from_context(cx) },
+                                call_state_ptr,
+                                this.deadline,
+                            ),
+                            call_state_ptr,
+                            NonNull::from(&mut *this.value),
+                        ));
+
+                    return_pending_and_release_lock!(local_executor(), inner_lock);
+                }
+
+                unsafe {
+                    inner_lock
+                        .storage
+                        .push_back(ManuallyDrop::take(&mut this.value));
+                }
+
+                Poll::Ready(Ok(()))
+            }
+            CallState::WokenToReturnReady => Poll::Ready(Ok(())),
+            CallState::WokenByClose => Poll::Ready(Err(SendTimeoutErr::Closed(unsafe {
+                ManuallyDrop::take(&mut this.value)
+            }))),
+            CallState::WokenByDeadline => Poll::Ready(Err(SendTimeoutErr::Timeout(unsafe {
+                ManuallyDrop::take(&mut this.value)
+            }))),
+        }
+    }
+}
+
+unsafe impl<T: Send> Send for WaitSendWithDeadline<'_, T> {}
+impl<T: UnwindSafe> UnwindSafe for WaitSendWithDeadline<'_, T> {}
+impl<T: RefUnwindSafe> RefUnwindSafe for WaitSendWithDeadline<'_, T> {}
+
+#[cfg(debug_assertions)]
+impl<T> Drop for WaitSendWithDeadline<'_, T> {
     fn drop(&mut self) {
         assert!(
             self.was_awaited,
@@ -207,7 +331,7 @@ impl<T> Future for WaitRecv<'_, T> {
 
         match this.call_state {
             CallState::FirstCall => {
-                let mut inner_lock = acquire_lock!(this.inner, unsafe { Task::from_context(cx) });
+                let mut inner_lock = acquire_lock!(this.inner);
                 if unlikely(inner_lock.is_closed) {
                     return Poll::Ready(Err(RecvErr::Closed));
                 }
@@ -263,6 +387,8 @@ impl<T> Future for WaitRecv<'_, T> {
             CallState::WokenToReturnReady => Poll::Ready(Ok(())),
 
             CallState::WokenByClose => Poll::Ready(Err(RecvErr::Closed)),
+
+            CallState::WokenByDeadline => unreachable_hint(),
         }
     }
 }
@@ -270,6 +396,116 @@ impl<T> Future for WaitRecv<'_, T> {
 unsafe impl<T: Send> Send for WaitRecv<'_, T> {}
 impl<T: UnwindSafe> UnwindSafe for WaitRecv<'_, T> {}
 impl<T: RefUnwindSafe> RefUnwindSafe for WaitRecv<'_, T> {}
+
+/// This struct represents a future that waits for a value to be
+/// received from the [`channel`](Channel) with a deadline.
+///
+/// When the future is polled, it either receives the value immediately (if available) or
+/// gets parked in the list of waiting receivers.
+#[repr(C)]
+pub struct WaitRecvWithDeadline<'future, T> {
+    inner: &'future NaiveMutex<Inner<T>>,
+    slot: *mut T,
+    call_state: CallState,
+    deadline: OrengineInstant,
+}
+
+impl<'future, T> WaitRecvWithDeadline<'future, T> {
+    /// Creates a new [`WaitRecvWithDeadline`].
+    #[inline]
+    fn new(inner: &'future NaiveMutex<Inner<T>>, slot: *mut T, deadline: OrengineInstant) -> Self {
+        Self {
+            inner,
+            call_state: CallState::FirstCall,
+            slot,
+            deadline,
+        }
+    }
+}
+
+impl<T> Future for WaitRecvWithDeadline<'_, T> {
+    type Output = Result<(), RecvTimeoutErr>;
+
+    #[inline]
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = unsafe { self.get_unchecked_mut() };
+        panic_if_local_in_future!(cx, "Channel");
+
+        match this.call_state {
+            CallState::FirstCall => {
+                let mut inner_lock = acquire_lock!(this.inner);
+                if unlikely(inner_lock.is_closed) {
+                    return Poll::Ready(Err(RecvTimeoutErr::Closed));
+                }
+
+                if unlikely(inner_lock.storage.is_empty()) {
+                    let was_written = inner_lock.deque.try_pop_front_sender_and_call(
+                        |call_state, value| unsafe {
+                            this.inner.unlock(); // Release the lock here to improve performance
+
+                            copy_nonoverlapping(value.as_ptr(), this.slot, 1);
+                            call_state.write(CallState::WokenToReturnReady);
+                        },
+                    );
+                    if was_written {
+                        mem::forget(inner_lock); // Was released above
+
+                        return Poll::Ready(Ok(()));
+                    }
+
+                    let call_state_ptr = CallStatePtr::new(&mut this.call_state);
+
+                    inner_lock
+                        .deque
+                        .push_back_receiver(WaitingTask::common_with_deadline(
+                            TaskWithDeadline::create_new_and_register(
+                                unsafe { Task::from_context(cx) },
+                                call_state_ptr,
+                                this.deadline,
+                            ),
+                            call_state_ptr,
+                            NonNull::from(unsafe { &mut *this.slot }),
+                        ));
+
+                    return_pending_and_release_lock!(local_executor(), inner_lock);
+                }
+
+                unsafe {
+                    this.slot
+                        .write(inner_lock.storage.pop_front().unwrap_unchecked());
+                }
+
+                let storage_ref = &mut inner_lock.get_mut().storage;
+
+                let was_written =
+                    inner_lock
+                        .deque
+                        .try_pop_front_sender_and_call(|call_state, value| unsafe {
+                            storage_ref.push_back(value.read());
+
+                            this.inner.unlock(); // Release the lock here to improve performance
+
+                            call_state.write(CallState::WokenToReturnReady);
+                        });
+                if was_written {
+                    mem::forget(inner_lock); // Was released above
+                }
+
+                Poll::Ready(Ok(()))
+            }
+
+            CallState::WokenToReturnReady => Poll::Ready(Ok(())),
+
+            CallState::WokenByClose => Poll::Ready(Err(RecvTimeoutErr::Closed)),
+
+            CallState::WokenByDeadline => Poll::Ready(Err(RecvTimeoutErr::Timeout)),
+        }
+    }
+}
+
+unsafe impl<T: Send> Send for WaitRecvWithDeadline<'_, T> {}
+impl<T: UnwindSafe> UnwindSafe for WaitRecvWithDeadline<'_, T> {}
+impl<T: RefUnwindSafe> RefUnwindSafe for WaitRecvWithDeadline<'_, T> {}
 
 // endregion
 
@@ -289,6 +525,43 @@ async fn close<T>(inner: &NaiveMutex<Inner<T>>) {
     let mut inner_lock = inner.lock().await;
 
     close_with_lock(&mut inner_lock);
+}
+
+macro_rules! generate_recv_in_ptr_and_recv_in_ptr_with_timeout {
+    () => {
+        /// Asynchronously receives a value from the [`channel`](AsyncChannel) to the provided `slot`.
+        ///
+        /// If the [`channel`](AsyncChannel) is empty, the receiver waits until a value
+        /// is available or the [`channel`](AsyncChannel) is closed.
+        ///
+        /// Else, the value is immediately received.
+        ///
+        /// # On close
+        ///
+        /// Returns `Err(`[`RecvErr::Closed`]`)` if the [`channel`](AsyncChannel) is closed.
+        ///
+        /// # Attention
+        ///
+        /// __Doesn't drop__ the previous value in the `slot`.
+        ///
+        /// # Safety
+        ///
+        /// - The provided pointer is valid and aligned;
+        ///
+        /// - The previous value is dropped.
+        unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> impl Future<Output = Result<(), RecvErr>> {
+            WaitRecv::new(self.inner(), slot.as_ptr())
+        }
+
+        /// Same as [`recv_in_ptr`](Self::recv_in_ptr), but with a deadline.
+        unsafe fn recv_in_ptr_with_deadline(
+            &self,
+            slot: Ptr<T>,
+            deadline: impl Into<OrengineInstant>,
+        ) -> impl Future<Output = Result<(), RecvTimeoutErr>> {
+            WaitRecvWithDeadline::new(self.inner(), slot.as_ptr(), deadline.into())
+        }
+    };
 }
 
 macro_rules! generate_try_send {
@@ -424,6 +697,32 @@ macro_rules! generate_send_or_subscribe {
 
 macro_rules! generate_try_recv_in {
     () => {
+        /// Tries to receive a value from the [`channel`](AsyncChannel) to the provided `slot`.
+        ///
+        /// If the [`channel`](AsyncChannel) is empty, the receiver
+        /// returns `Err(`[`TryRecvErr::Empty`]`)`.
+        ///
+        /// If the [`channel`](AsyncChannel) is locked, the receiver
+        /// returns `Err(`[`TryRecvErr::Locked`]`)`.
+        ///
+        /// If the [`channel`](AsyncChannel) is closed, the receiver
+        /// returns `Err(`[`TryRecvErr::Closed`]`)`.
+        ///
+        /// Else, the value is immediately received.
+        ///
+        /// # The difference between `try_recv_in_ptr` and `recv_in_ptr`
+        ///
+        /// `try_recv_in_ptr` doesn't block the current task.
+        ///
+        /// # Attention
+        ///
+        /// __Doesn't drop__ the previous value in the `slot`.
+        ///
+        /// # Safety
+        ///
+        /// - The provided pointer is valid and aligned;
+        ///
+        /// - The previous value is dropped.
         unsafe fn try_recv_in_ptr(&self, slot: Ptr<T>) -> Result<(), TryRecvErr> {
             match self.inner.try_lock() {
                 Some(mut inner_lock) => {
@@ -625,6 +924,18 @@ impl<T> AsyncSender<T> for Sender<'_, T> {
         WaitSend::new(value, self.inner)
     }
 
+    #[allow(
+        clippy::future_not_send,
+        reason = "It is not `Send` only when T is not `Send`, it is fine"
+    )]
+    fn send_deadline(
+        &self,
+        value: T,
+        deadline: impl Into<OrengineInstant>,
+    ) -> impl Future<Output = Result<(), SendTimeoutErr<T>>> {
+        WaitSendWithDeadline::new(value, self.inner, deadline.into())
+    }
+
     generate_try_send!();
 
     #[allow(
@@ -691,18 +1002,23 @@ impl<'channel, T> Receiver<'channel, T> {
     fn new(inner: &'channel NaiveMutex<Inner<T>>) -> Self {
         Self { inner }
     }
+
+    /// Returns a reference to the inner [`NaiveMutex`].
+    fn inner(&self) -> &NaiveMutex<Inner<T>> {
+        self.inner
+    }
+
+    generate_recv_in_ptr_and_recv_in_ptr_with_timeout!();
+
+    generate_try_recv_in!();
 }
 
 impl<T> AsyncReceiver<T> for Receiver<'_, T> {
-    #[allow(
-        clippy::future_not_send,
-        reason = "It is not `Send` only when T is not `Send`, it is fine"
-    )]
-    unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> impl Future<Output = Result<(), RecvErr>> {
-        WaitRecv::new(self.inner, slot.as_ptr())
-    }
+    crate::sync::channels::macros::impl_recv_from_recv_in_ptr!();
 
-    generate_try_recv_in!();
+    crate::sync::channels::macros::impl_recv_with_timeout_from_recv_in_ptr_with_deadline!();
+
+    crate::sync::channels::macros::impl_try_recv_from_recv_in_ptr!();
 
     #[allow(
         clippy::future_not_send,
@@ -743,11 +1059,11 @@ impl<T: RefUnwindSafe> RefUnwindSafe for Receiver<'_, T> {}
 /// It supports both [`bounded`](Channel::bounded) and [`unbounded`](Channel::unbounded)
 /// channels for sending and receiving values.
 ///
-/// When the [`channel`](Channel) is not empty, values are received immediately else
+/// When the [`channel`](Channel) is not empty, values are received immediately, else
 /// the reception operation is waiting until a value is available or
 /// the [`channel`](Channel) is closed.
 ///
-/// When channel is not full, values are sent immediately else
+/// When the channel is not full, values are sent immediately, else
 /// the sending operation is waiting until capacity is available or
 /// the [`channel`](Channel) is closed.
 ///
@@ -792,6 +1108,15 @@ pub struct Channel<T> {
 }
 
 impl<T> Channel<T> {
+    /// Returns a reference to the inner [`NaiveMutex`].
+    fn inner(&self) -> &NaiveMutex<Inner<T>> {
+        &self.inner
+    }
+
+    generate_recv_in_ptr_and_recv_in_ptr_with_timeout!();
+
+    generate_try_recv_in!();
+
     /// Returns current len, number of receivers and number of senders.
     ///
     /// It is async because it needs to acquire the lock.
@@ -885,6 +1210,18 @@ impl<T> AsyncSender<T> for Channel<T> {
         WaitSend::new(value, &self.inner)
     }
 
+    #[allow(
+        clippy::future_not_send,
+        reason = "It is not `Send` only when T is not `Send`, it is fine"
+    )]
+    fn send_deadline(
+        &self,
+        value: T,
+        deadline: impl Into<OrengineInstant>,
+    ) -> impl Future<Output = Result<(), SendTimeoutErr<T>>> {
+        WaitSendWithDeadline::new(value, &self.inner, deadline.into())
+    }
+
     generate_try_send!();
 
     #[allow(
@@ -897,15 +1234,11 @@ impl<T> AsyncSender<T> for Channel<T> {
 }
 
 impl<T> AsyncReceiver<T> for Channel<T> {
-    #[allow(
-        clippy::future_not_send,
-        reason = "It is not `Send` only when T is not `Send`, it is fine"
-    )]
-    unsafe fn recv_in_ptr(&self, slot: Ptr<T>) -> impl Future<Output = Result<(), RecvErr>> {
-        WaitRecv::new(&self.inner, slot.as_ptr())
-    }
+    crate::sync::channels::macros::impl_recv_from_recv_in_ptr!();
 
-    generate_try_recv_in!();
+    crate::sync::channels::macros::impl_recv_with_timeout_from_recv_in_ptr_with_deadline!();
+
+    crate::sync::channels::macros::impl_try_recv_from_recv_in_ptr!();
 
     #[allow(
         clippy::future_not_send,
@@ -1023,8 +1356,8 @@ mod tests {
     use crate as orengine;
     use crate::sleep;
     use crate::sync::{
-        AsyncChannel, AsyncReceiver, AsyncSender, AsyncWaitGroup, Channel, RecvErr, SendErr,
-        TryRecvErr, TrySendErr, WaitGroup,
+        AsyncChannel, AsyncReceiver, AsyncSender, AsyncWaitGroup, Channel, RecvErr, RecvTimeoutErr,
+        SendErr, SendTimeoutErr, TryRecvErr, TrySendErr, WaitGroup,
     };
     use crate::test::sched_future_to_another_thread;
     use crate::utils::droppable_element::DroppableElement;
@@ -1222,7 +1555,11 @@ mod tests {
             .send(DroppableElement::new(1, dropped.clone()))
             .await;
         let mut prev_elem = DroppableElement::new(2, dropped.clone());
-        channel.recv_in(&mut prev_elem).await.unwrap();
+
+        drop(prev_elem);
+
+        prev_elem = channel.recv().await.unwrap();
+
         assert_eq!(prev_elem.value, 1);
         assert_eq!(dropped.lock().as_slice(), [2]);
 
@@ -1255,7 +1592,11 @@ mod tests {
 
         let _ = sender.send(DroppableElement::new(1, dropped.clone())).await;
         let mut prev_elem = DroppableElement::new(2, dropped.clone());
-        receiver.recv_in(&mut prev_elem).await.unwrap();
+
+        drop(prev_elem);
+
+        prev_elem = receiver.recv().await.unwrap();
+
         assert_eq!(prev_elem.value, 1);
         assert_eq!(dropped.lock().as_slice(), [2]);
 
@@ -1281,5 +1622,30 @@ mod tests {
             }
         }
         assert_eq!(dropped.lock().as_slice(), [2, 5]);
+    }
+
+    #[orengine::test::test_shared]
+    fn test_shared_channel_timeout() {
+        let chan = Channel::bounded(1);
+
+        let failed_recv_res = chan.recv_timeout(Duration::from_micros(100)).await;
+
+        assert!(matches!(failed_recv_res, Err(RecvTimeoutErr::Timeout)));
+
+        chan.send_timeout(1, Duration::from_micros(100))
+            .await
+            .unwrap();
+
+        let recv_res = chan.recv_timeout(Duration::from_micros(100)).await;
+
+        assert!(matches!(recv_res, Ok(1)));
+
+        chan.send_timeout(2, Duration::from_micros(100))
+            .await
+            .unwrap();
+
+        let failed_send_res = chan.send_timeout(3, Duration::from_micros(100)).await;
+
+        assert!(matches!(failed_send_res, Err(SendTimeoutErr::Timeout(3))));
     }
 }

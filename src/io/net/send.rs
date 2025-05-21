@@ -3,7 +3,7 @@ use std::io::Result;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 
@@ -14,6 +14,7 @@ use crate::io::worker::{IoWorker, local_worker};
 use crate::io::{Buffer, FixedBuffer};
 use crate::local_executor;
 use crate::net::Socket;
+use crate::utils::OrengineInstant;
 
 /// `send` io operation.
 #[repr(C)]
@@ -114,14 +115,14 @@ unsafe impl Send for SendFixed<'_> {}
 #[repr(C)]
 pub struct SendBytesWithDeadline<'buf> {
     buf: &'buf [u8],
-    deadline: Instant,
+    deadline: OrengineInstant,
     raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
 }
 
 impl<'buf> SendBytesWithDeadline<'buf> {
     /// Creates new `send` io operation with deadline.
-    pub fn new(raw_socket: RawSocket, buf: &'buf [u8], deadline: Instant) -> Self {
+    pub fn new(raw_socket: RawSocket, buf: &'buf [u8], deadline: OrengineInstant) -> Self {
         Self {
             raw_socket,
             buf,
@@ -162,7 +163,7 @@ unsafe impl Send for SendBytesWithDeadline<'_> {}
 #[repr(C)]
 pub struct SendFixedWithDeadline<'buf> {
     ptr: *const u8,
-    deadline: Instant,
+    deadline: OrengineInstant,
     raw_socket: RawSocket,
     len: u32,
     fixed_index: u16,
@@ -177,7 +178,7 @@ impl SendFixedWithDeadline<'_> {
         ptr: *const u8,
         len: u32,
         fixed_index: u16,
-        deadline: Instant,
+        deadline: OrengineInstant,
     ) -> Self {
         Self {
             raw_socket,
@@ -344,9 +345,9 @@ pub trait AsyncSend: Socket {
     fn send_bytes_with_deadline(
         &mut self,
         buf: &[u8],
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> impl Future<Output = Result<usize>> {
-        SendBytesWithDeadline::new(AsRawSocket::as_raw_socket(self), buf, deadline)
+        SendBytesWithDeadline::new(AsRawSocket::as_raw_socket(self), buf, deadline.into())
     }
 
     /// Asynchronously sends the provided [`Buffer`] with a specified deadline.
@@ -384,8 +385,10 @@ pub trait AsyncSend: Socket {
     async fn send_with_deadline(
         &mut self,
         buf: &impl FixedBuffer,
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<u32> {
+        let deadline = deadline.into();
+
         if buf.is_fixed() {
             SendFixedWithDeadline::new(
                 AsRawSocket::as_raw_socket(self),
@@ -599,7 +602,12 @@ pub trait AsyncSend: Socket {
     /// # }
     /// ```
     #[inline]
-    async fn send_all_bytes_with_deadline(&mut self, buf: &[u8], deadline: Instant) -> Result<()> {
+    async fn send_all_bytes_with_deadline(
+        &mut self,
+        buf: &[u8],
+        deadline: impl Into<OrengineInstant>,
+    ) -> Result<()> {
+        let deadline = deadline.into();
         let mut sent = 0;
 
         while sent < buf.len() {
@@ -645,8 +653,10 @@ pub trait AsyncSend: Socket {
     async fn send_all_with_deadline(
         &mut self,
         buf: &impl FixedBuffer,
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<()> {
+        let deadline = deadline.into();
+
         if buf.is_fixed() {
             let mut sent = 0;
 

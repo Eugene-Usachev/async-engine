@@ -2,10 +2,10 @@
 //!
 //! It allows for asynchronous locking and unlocking, and provides
 //! ownership-based locking through [`LocalMutexGuard`].
-use crate::runtime::{local_executor, IsLocal, Task};
+use crate::runtime::{IsLocal, Task, local_executor};
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncMutex, AsyncMutexGuard};
-use crate::utils::{acquire_task_vec_from_pool, likely, unlikely, TaskVecFromPool};
+use crate::utils::{TaskVecFromPool, acquire_task_vec_from_pool, likely, unlikely};
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::mem::ManuallyDrop;

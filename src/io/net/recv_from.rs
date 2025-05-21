@@ -15,6 +15,7 @@ use crate::io::sys::{AsRawSocket, MessageRecvHeader, RawSocket};
 use crate::io::worker::{IoWorker, local_worker};
 use crate::net::Socket;
 use crate::net::addr::FromSockAddr;
+use crate::utils::OrengineInstant;
 use crate::{BUG_MESSAGE, local_executor};
 
 /// `recv_from` io operation.
@@ -72,7 +73,7 @@ unsafe impl Send for RecvFrom<'_> {}
 pub struct RecvFromWithDeadline<'fut> {
     sock_addr: &'fut mut SockAddr,
     msg_header: MessageRecvHeader,
-    deadline: Instant,
+    deadline: OrengineInstant,
     raw_socket: RawSocket,
     io_request_data: Option<IoRequestData>,
 }
@@ -83,7 +84,7 @@ impl<'fut> RecvFromWithDeadline<'fut> {
         raw_socket: RawSocket,
         buf_ptr: *mut [IoSliceMut],
         addr: &'fut mut SockAddr,
-        deadline: Instant,
+        deadline: OrengineInstant,
     ) -> Self {
         Self {
             raw_socket,
@@ -245,8 +246,9 @@ pub trait AsyncRecvFrom: Socket {
     async fn recv_bytes_from_with_deadline(
         &mut self,
         buf: &mut [u8],
-        deadline: Instant,
+        deadline: impl Into<OrengineInstant>,
     ) -> Result<(usize, Self::Addr)> {
+        let deadline = deadline.into();
         let mut sock_addr = unsafe { mem::zeroed() };
         let buf_ptr = &mut [IoSliceMut::new(buf)];
 

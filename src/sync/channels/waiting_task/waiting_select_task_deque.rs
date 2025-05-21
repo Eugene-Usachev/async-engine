@@ -1,9 +1,9 @@
 use crate::local_executor;
+use crate::runtime::waiting_task::WaitingTask;
 use crate::sync::channels::state::CallStatePtr;
 use crate::sync::channels::waiting_task::sender_receiver_deque::{
     SenderReceiverQueue, SenderReceiverQueueOption,
 };
-use crate::sync::channels::waiting_task::waiting_task::WaitingTask;
 use crate::sync::channels::waiting_task::{PopIfAcquiredResult, TaskInSelectBranch};
 use crate::utils::assert_hint;
 use crate::utils::unreachable_hint;
@@ -15,16 +15,16 @@ use std::ptr::NonNull;
 /// Contains `size_of::<WaitingTask<()>>()`.
 const WAITING_TASKS_SIZE: usize = size_of::<WaitingTask<()>>();
 
-/// `WaitingTaskDequePool` is used to reuse [`WaitingTaskLocalDequeGuard`]
+/// `WaitingSelectTaskDequePool` is used to reuse [`WaitingTaskLocalDequeGuard`]
 /// and [`WaitingTaskSharedDequeGuard`].
-struct WaitingTaskDequePool<T = ()> {
+struct WaitingSelectTaskDequePool<T = ()> {
     queues: Vec<SenderReceiverQueue<T>>,
     /// All queues with its capacity in bytes.
     bytes_allocated: usize,
 }
 
-impl<T> WaitingTaskDequePool<T> {
-    /// Creates [`WaitingTaskDequePool`].
+impl<T> WaitingSelectTaskDequePool<T> {
+    /// Creates [`WaitingSelectTaskDequePool`].
     const fn new() -> Self {
         Self {
             queues: Vec::new(),
@@ -104,22 +104,22 @@ impl<T> WaitingTaskDequePool<T> {
 
 thread_local! {
     /// A pool of [`waiting task`](WaitingTask) deques.
-    static WAITING_TASK_DEQUE_POOL: UnsafeCell<WaitingTaskDequePool<()>> = const { UnsafeCell::new(WaitingTaskDequePool::new()) };
+    static WAITING_TASK_DEQUE_POOL: UnsafeCell<WaitingSelectTaskDequePool<()>> = const { UnsafeCell::new(WaitingSelectTaskDequePool::new()) };
 }
 
-/// Acquires a [`WaitingTaskDeque`] from the pool.
+/// Acquires a [`WaitingSelectTaskDeque`] from the pool.
 fn acquire_waiting_task_deque_from_pool<T>() -> SenderReceiverQueue<T> {
     WAITING_TASK_DEQUE_POOL.with(|pool| {
-        unsafe { &mut *pool.get().cast::<WaitingTaskDequePool<T>>() }
+        unsafe { &mut *pool.get().cast::<WaitingSelectTaskDequePool<T>>() }
             .pop()
             .map_or_else(SenderReceiverQueue::new, |deque| deque)
     })
 }
 
-/// Puts the provided [`WaitingTaskDeque`] back into the pool.
+/// Puts the provided [`WaitingSelectTaskDeque`] back into the pool.
 fn put_waiting_task_deque_to_pool<T>(deque: SenderReceiverQueue<T>) {
     WAITING_TASK_DEQUE_POOL.with(|pool| {
-        let pool = unsafe { &mut *pool.get().cast::<WaitingTaskDequePool<T>>() };
+        let pool = unsafe { &mut *pool.get().cast::<WaitingSelectTaskDequePool<T>>() };
 
         pool.push(deque);
     });
@@ -128,10 +128,6 @@ fn put_waiting_task_deque_to_pool<T>(deque: SenderReceiverQueue<T>) {
 macro_rules! generate_struct {
     ($name:ident) => {
         /// A deque of waiting tasks.
-        ///
-        /// It expects that `State` is [`SendCallState`](CallState)
-        /// or [`CallState`](CallState)
-        /// and `T` is a type of channel data.
         pub(crate) struct $name<T> {
             queue: ManuallyDrop<SenderReceiverQueue<T>>,
         }
@@ -320,6 +316,11 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
             }
 
             WaitingTask::InSelector(task_in_select, call_state, slot) => {
+                assert_hint(
+                    task_in_select.is_local(),
+                    "task_in_select_branch must be local in WaitingTaskLocalDequeGuard::try_pop_and_call",
+                );
+
                 task_in_select.acquire_once().is_some_and(|task| {
                     setter_fn(call_state, slot);
 
@@ -327,6 +328,15 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
 
                     true
                 })
+            }
+
+            WaitingTask::CommonWithDeadline(task_with_deadline, call_state, slot) => {
+                assert_hint(
+                    task_with_deadline.is_local(),
+                    "task_with_deadline must be local in WaitingTaskLocalDequeGuard::try_pop_and_call",
+                );
+
+                task_with_deadline.try_wake_with(|| setter_fn(call_state, slot))
             }
         }
     }
@@ -340,10 +350,15 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
         &mut self,
         mut setter_fn: SetterFn,
         mut task_in_select_branch: TaskInSelectBranch,
-    ) -> PopIfAcquiredResult
+    ) -> PopIfAcquiredResult<TaskInSelectBranch>
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
+        assert_hint(
+            task_in_select_branch.is_local(),
+            "task_in_select_branch must be local in WaitingTaskLocalDequeGuard::try_pop_and_call_if_acquired",
+        );
+
         while (IS_RECEIVER_POP
             && matches!(self.queue.option(), SenderReceiverQueueOption::Receiver))
             || (!IS_RECEIVER_POP
@@ -394,6 +409,51 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
                         slot
                     );
                 }
+
+                WaitingTask::CommonWithDeadline(task_with_deadline, call_state, slot) => {
+                    task_in_select_branch = {
+                        let res = unsafe {
+                            task_in_select_branch.try_acquire_with_task_with_deadline_in_select(
+                                task_with_deadline,
+                                &mut |task_with_deadline| {
+                                    assert_hint(
+                                        task_with_deadline.is_local(),
+                                        "task_with_deadline must be local in WaitingTaskLocalDequeGuard::try_pop_and_call_if_acquired",
+                                    );
+
+                                    task_with_deadline.try_wake_with(|| setter_fn(call_state, slot))
+                                })
+                        };
+
+                        match res {
+                            PopIfAcquiredResult::NoData(this_task_in_select_branch) => {
+                                this_task_in_select_branch
+                            }
+
+                            PopIfAcquiredResult::Ok => return PopIfAcquiredResult::Ok,
+
+                            PopIfAcquiredResult::NotAcquired(task_with_deadline) => {
+                                if IS_RECEIVER_POP {
+                                    self.queue.push_receiver(WaitingTask::CommonWithDeadline(
+                                        task_with_deadline,
+                                        call_state,
+                                        slot,
+                                    ));
+                                } else {
+                                    self.queue.push_sender(WaitingTask::CommonWithDeadline(
+                                        task_with_deadline,
+                                        call_state,
+                                        slot,
+                                    ));
+                                }
+
+                                return PopIfAcquiredResult::AlreadyAcquired;
+                            }
+
+                            PopIfAcquiredResult::AlreadyAcquired => unreachable_hint(),
+                        }
+                    };
+                }
             }
         }
 
@@ -406,7 +466,7 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
         &mut self,
         mut setter_fn: SetterFn,
         task_in_select_branch: TaskInSelectBranch,
-    ) -> PopIfAcquiredResult
+    ) -> PopIfAcquiredResult<TaskInSelectBranch>
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
@@ -419,7 +479,7 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
         &mut self,
         mut setter_fn: SetterFn,
         task_in_select_branch: TaskInSelectBranch,
-    ) -> PopIfAcquiredResult
+    ) -> PopIfAcquiredResult<TaskInSelectBranch>
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
@@ -443,7 +503,7 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
     /// Pops a [`waiting task`](WaitingTask) from the deque, next calls provided function,
     /// and after it executes the task.
     ///
-    /// Return `false` if a next task can not be executed. Otherwise, returns `true`.
+    /// Return `false` if a next task cannot be executed. Otherwise, returns `true`.
     ///
     /// * `setter_fn` is a function that must write/read data to/from receiver/sender.
     #[must_use]
@@ -454,11 +514,17 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
+        assert_hint(
+            !self.queue.is_empty(),
+            "deque must not be empty in `try_pop_and_call`",
+        );
+
         let data = if IS_RECEIVER_POP {
             unsafe { self.queue.pop_receiver().unwrap_unchecked() }
         } else {
             unsafe { self.queue.pop_sender().unwrap_unchecked() }
         };
+
         match data {
             WaitingTask::Common(task, call_state, slot) => {
                 setter_fn(call_state, slot);
@@ -468,6 +534,11 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
                 true
             }
             WaitingTask::InSelector(task_in_select, call_state, slot) => {
+                assert_hint(
+                    !task_in_select.is_local(),
+                    "task_in_select_branch must be shared in WaitingTaskSharedDequeGuard::try_pop_and_call",
+                );
+
                 task_in_select.acquire_once().is_some_and(|task| {
                     setter_fn(call_state, slot);
 
@@ -475,6 +546,15 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
 
                     true
                 })
+            }
+
+            WaitingTask::CommonWithDeadline(task_with_deadline, call_state, slot) => {
+                assert_hint(
+                    !task_with_deadline.is_local(),
+                    "task_with_deadline must be shared in WaitingTaskSharedDequeGuard::try_pop_and_call",
+                );
+
+                task_with_deadline.try_wake_with(|| setter_fn(call_state, slot))
             }
         }
     }
@@ -486,7 +566,7 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
         &mut self,
         mut setter_fn: SetterFn,
         mut task_in_select_branch: TaskInSelectBranch,
-    ) -> PopIfAcquiredResult
+    ) -> PopIfAcquiredResult<TaskInSelectBranch>
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
@@ -540,6 +620,51 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
                         slot
                     );
                 }
+
+                WaitingTask::CommonWithDeadline(task_with_deadline, call_state, slot) => {
+                    task_in_select_branch = {
+                        let res = unsafe {
+                            task_in_select_branch.try_acquire_with_task_with_deadline_in_select(
+                                task_with_deadline,
+                                &mut |task_with_deadline| {
+                                    assert_hint(
+                                        !task_with_deadline.is_local(),
+                                        "task_with_deadline must be shared in WaitingTaskSharedDequeGuard::try_pop_and_call_if_acquired",
+                                    );
+
+                                    task_with_deadline.try_wake_with(|| setter_fn(call_state, slot))
+                                })
+                        };
+
+                        match res {
+                            PopIfAcquiredResult::NoData(this_task_in_select_branch) => {
+                                this_task_in_select_branch
+                            }
+
+                            PopIfAcquiredResult::Ok => return PopIfAcquiredResult::Ok,
+
+                            PopIfAcquiredResult::NotAcquired(task_with_deadline) => {
+                                if IS_RECEIVER_POP {
+                                    self.queue.push_receiver(WaitingTask::CommonWithDeadline(
+                                        task_with_deadline,
+                                        call_state,
+                                        slot,
+                                    ));
+                                } else {
+                                    self.queue.push_sender(WaitingTask::CommonWithDeadline(
+                                        task_with_deadline,
+                                        call_state,
+                                        slot,
+                                    ));
+                                }
+
+                                return PopIfAcquiredResult::AlreadyAcquired;
+                            }
+
+                            PopIfAcquiredResult::AlreadyAcquired => unreachable_hint(),
+                        }
+                    };
+                }
             }
         }
 
@@ -554,7 +679,7 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
         &mut self,
         mut setter_fn: SetterFn,
         task_in_select_branch: TaskInSelectBranch,
-    ) -> PopIfAcquiredResult
+    ) -> PopIfAcquiredResult<TaskInSelectBranch>
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {
@@ -567,7 +692,7 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
         &mut self,
         mut setter_fn: SetterFn,
         task_in_select_branch: TaskInSelectBranch,
-    ) -> PopIfAcquiredResult
+    ) -> PopIfAcquiredResult<TaskInSelectBranch>
     where
         SetterFn: FnMut(CallStatePtr, NonNull<T>),
     {

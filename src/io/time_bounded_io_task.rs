@@ -1,14 +1,14 @@
 use crate::io::io_request_data::IoRequestDataPtr;
 #[cfg(not(target_os = "linux"))]
 use crate::io::sys::fallback::io_call::IoCall;
+use crate::utils::OrengineInstant;
 use std::borrow::Borrow;
-use std::time::Instant;
 
 /// [`TimeBoundedIoTask`] contains the deadline and user data for cancelling the task.
 #[derive(Clone)]
 #[repr(C)]
 pub(crate) struct TimeBoundedIoTask {
-    deadline: Instant,
+    deadline: OrengineInstant,
     /// User data is used to cancel the task if needed.
     user_data: u64,
     #[cfg(not(target_os = "linux"))]
@@ -21,7 +21,7 @@ impl TimeBoundedIoTask {
     /// Creates a new [`TimeBoundedIoTask`]
     #[inline]
     #[cfg(target_os = "linux")]
-    pub(crate) fn new(io_request_data_ptr: IoRequestDataPtr, deadline: Instant) -> Self {
+    pub(crate) fn new(io_request_data_ptr: IoRequestDataPtr, deadline: OrengineInstant) -> Self {
         Self {
             deadline,
             user_data: io_request_data_ptr.as_u64(),
@@ -33,7 +33,7 @@ impl TimeBoundedIoTask {
     #[cfg(not(target_os = "linux"))]
     pub(crate) fn new(
         io_request_data_ptr: IoRequestDataPtr,
-        deadline: Instant,
+        deadline: OrengineInstant,
         raw_socket: crate::io::sys::RawSocket,
         slot_ptr: *mut (IoCall, IoRequestDataPtr),
     ) -> Self {
@@ -53,7 +53,7 @@ impl TimeBoundedIoTask {
 
     /// Returns the deadline.
     #[inline]
-    pub(crate) fn deadline(&self) -> Instant {
+    pub(crate) fn deadline(&self) -> OrengineInstant {
         self.deadline
     }
 
@@ -95,9 +95,9 @@ impl Ord for TimeBoundedIoTask {
     }
 }
 
-impl Borrow<Instant> for TimeBoundedIoTask {
+impl Borrow<OrengineInstant> for TimeBoundedIoTask {
     #[inline]
-    fn borrow(&self) -> &Instant {
+    fn borrow(&self) -> &OrengineInstant {
         &self.deadline
     }
 }

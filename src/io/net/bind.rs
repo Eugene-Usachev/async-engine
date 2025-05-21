@@ -2,7 +2,6 @@ use crate::io::sys::{BorrowedSocket, FromRawSocket, RawSocket};
 use crate::net::addr::to_sock_addrs::ToSockAddrs;
 use crate::net::{BindConfig, ReusePort, Socket};
 use crate::utils::each_addr::each_addr;
-use crate::utils::unlikely;
 use socket2::SockRef;
 use std::io::Result;
 
@@ -216,7 +215,7 @@ pub trait AsyncBind: Sized + Socket {
                             )
                         };
 
-                        if unlikely(res < 0) {
+                        if crate::utils::unlikely(res < 0) {
                             return Err(std::io::Error::last_os_error());
                         }
                     }

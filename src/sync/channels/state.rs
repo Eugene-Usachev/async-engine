@@ -11,6 +11,9 @@ pub enum CallState {
     FirstCall,
     /// The receiver writes the value associated with this task.
     WokenToReturnReady,
+    /// Woken by deadline.
+    /// Can be handled only with deadlines.
+    WokenByDeadline,
     /// This task was enqueued, now it is woken by close.
     WokenByClose,
 }

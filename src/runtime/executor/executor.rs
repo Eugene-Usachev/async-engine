@@ -13,17 +13,21 @@ use crate::runtime::interaction_between_executors::{ExecutorIsNotRegisteredErr, 
 use crate::runtime::local_thread_pool::LocalThreadWorkerPool;
 use crate::runtime::task::Task;
 use crate::runtime::waker::create_waker;
-use crate::runtime::{ExecutorSharedTaskList, Locality, get_core_id_for_executor};
-use crate::utils::{CoreId, ProgressiveTimeout, assert_hint, likely, unlikely};
+use crate::runtime::{
+    ExecutorSharedTaskList, Locality, TaskWithDeadline, get_core_id_for_executor,
+};
+use crate::sync::channels::CallStatePtr;
+use crate::utils::{CoreId, OrengineInstant, ProgressiveTimeout, assert_hint, likely, unlikely};
 use fastrand::Rng;
 use std::cell::UnsafeCell;
+use std::collections::btree_map::Entry::{Occupied, Vacant};
 use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{mem, thread};
 
 macro_rules! shrink {
@@ -113,6 +117,30 @@ pub fn local_executor() -> &'static mut Executor {
     }
 }
 
+/// Contains a [`Task`] to wake and its deadline.
+enum MaybeSpecialTask {
+    Common(Task),
+    WithDeadline(TaskWithDeadline),
+}
+
+impl MaybeSpecialTask {
+    /// Tries to wake [`MaybeSpecialTask`].
+    fn try_wake(self, ex: &mut Executor) {
+        match self {
+            Self::Common(task) => {
+                if task.is_local() {
+                    ex.exec_task(task);
+                } else {
+                    ex.spawn_shared_task(task);
+                }
+            }
+            Self::WithDeadline(task) => {
+                task.try_wake_by_deadline();
+            }
+        }
+    }
+}
+
 /// The executor that runs futures in the current thread.
 ///
 /// # The difference between `local` and `shared` task and futures
@@ -146,11 +174,10 @@ pub struct Executor {
 
     future_call_stack_depth: usize,
     current_call: Call,
-    // TODO rewrite to quanta when https://github.com/metrics-rs/quanta/pull/112 was merged
-    start_round_time: Instant,
+    start_round_time: OrengineInstant,
     /// `start_round_time` + 100 microseconds
     #[cfg(target_os = "linux")]
-    start_round_time_for_deadlines: Instant,
+    start_round_time_for_deadlines: OrengineInstant,
 
     local_tasks: VecDeque<Task>,
     shared_tasks: VecDeque<Task>,
@@ -161,7 +188,7 @@ pub struct Executor {
     local_worker: &'static mut Option<WorkerSys>,
     thread_pool: LocalThreadWorkerPool,
 
-    local_sleeping_tasks: BTreeMap<Instant, Task>,
+    local_sleeping_tasks: BTreeMap<OrengineInstant, MaybeSpecialTask>,
 }
 
 /// The next id of the executor. It is used to generate the unique executor id.
@@ -249,9 +276,9 @@ impl Executor {
                 progressive_timeout: ProgressiveTimeout::new(),
 
                 future_call_stack_depth: 0,
-                start_round_time: Instant::now(),
+                start_round_time: OrengineInstant::now(),
                 #[cfg(target_os = "linux")]
-                start_round_time_for_deadlines: Instant::now() + Duration::from_micros(100),
+                start_round_time_for_deadlines: OrengineInstant::now() + Duration::from_micros(100),
 
                 local_tasks: VecDeque::new(),
                 shared_tasks: VecDeque::with_capacity(shared_tasks_list_cap),
@@ -362,7 +389,7 @@ impl Executor {
     }
 
     /// Returns when the current round started.
-    pub fn start_round_time(&self) -> Instant {
+    pub fn start_round_time(&self) -> OrengineInstant {
         self.start_round_time
     }
 
@@ -372,13 +399,13 @@ impl Executor {
     /// [`start time of the current round`](Self::start_round_time).
     ///
     /// This method is supposed to be used to set deadlines,
-    /// therefore returning a future time is acceptable.
+    /// therefore, returning a future time is acceptable.
     ///
     /// # Behavior on fallback OS
     ///
     /// In fallback, we can't guarantee the 100-microsecond addition sufficiency;
-    /// therefore, it is synonymous to [`Instant::now`] there.
-    pub fn start_round_time_for_deadlines(&self) -> Instant {
+    /// therefore, it is synonymous to [`OrengineInstant::now`] there.
+    pub fn start_round_time_for_deadlines(&self) -> OrengineInstant {
         #[cfg(target_os = "linux")]
         {
             self.start_round_time_for_deadlines
@@ -386,7 +413,7 @@ impl Executor {
 
         #[cfg(not(target_os = "linux"))]
         {
-            Instant::now()
+            OrengineInstant::now()
         }
     }
 
@@ -395,15 +422,54 @@ impl Executor {
         self.shared_tasks_list.as_ref()
     }
 
-    /// Returns a reference to the `sleeping_tasks`.
-    #[inline]
-    pub(crate) fn sleeping_tasks(&mut self) -> &mut BTreeMap<Instant, Task> {
-        &mut self.local_sleeping_tasks
-    }
-
     /// Returns the number of spawned tasks (shared and local).
     pub(crate) fn number_of_spawned_tasks(&self) -> usize {
         self.shared_tasks.len() + self.local_tasks.len()
+    }
+
+    // endregion
+
+    // region register special tasks
+
+    /// Registers a [`task`] to be executed at the provided [`OrengineInstant`].
+    pub(crate) fn register_sleeping_task(&mut self, task: Task, mut sleep_until: OrengineInstant) {
+        loop {
+            match self.local_sleeping_tasks.entry(sleep_until) {
+                Vacant(entry) => {
+                    entry.insert(MaybeSpecialTask::Common(task));
+
+                    break;
+                }
+                Occupied(_) => {
+                    sleep_until += Duration::from_nanos(1);
+                }
+            }
+        }
+    }
+
+    /// Registers a [`TaskWithDeadline`] to be executed at the provided [`OrengineInstant`].
+    pub(crate) fn register_task_with_deadline(
+        &mut self,
+        task: Task,
+        result_ptr: CallStatePtr,
+        mut deadline: OrengineInstant,
+    ) -> TaskWithDeadline {
+        let task_with_deadline = TaskWithDeadline::new(task, result_ptr);
+
+        loop {
+            match self.local_sleeping_tasks.entry(deadline) {
+                Vacant(entry) => {
+                    entry.insert(MaybeSpecialTask::WithDeadline(unsafe {
+                        std::ptr::read(&task_with_deadline)
+                    }));
+
+                    break task_with_deadline;
+                }
+                Occupied(_) => {
+                    deadline += Duration::from_nanos(1);
+                }
+            }
+        }
     }
 
     // endregion
@@ -431,6 +497,9 @@ impl Executor {
         match mem::take(&mut self.current_call) {
             Call::None => {}
             Call::PushCurrentTaskTo(task_list) => unsafe { task_list.as_ref().push(task) },
+            Call::SpawnCurrentGlobalTask => {
+                self.spawn_shared_task(task);
+            }
             Call::PushCurrentTaskToAndRemoveItIfCounterIsZero(task_list, counter, order) => {
                 unsafe {
                     let list = task_list.as_ref();
@@ -606,7 +675,7 @@ impl Executor {
     ///
     /// # Attention
     ///
-    /// This function enqueues it at the end of the queue of local tasks, but it is `LIFO`.
+    /// This function enqueues it in the queue for `local` tasks, but it is `LIFO`.
     ///
     /// # The difference between shared and local tasks
     ///
@@ -624,7 +693,7 @@ impl Executor {
     ///
     /// # Usage
     ///
-    /// Can be used to execute the [`task`](Task) in next round.
+    /// Can be used to execute the [`task`](Task) in the next round.
     pub fn spawn_task_at_end_of_local_tasks_queue(&mut self, task: Task) {
         debug_assert!(task.is_local());
 
@@ -639,7 +708,7 @@ impl Executor {
     ///
     /// # Attention
     ///
-    /// This function enqueues it at the end of the queue of shared tasks, but it is `LIFO`.
+    /// This function enqueues it in the queue for `shared` tasks, but it is `LIFO`.
     ///
     /// # The difference between `shared` and `local` tasks
     ///
@@ -696,7 +765,7 @@ impl Executor {
     ///
     /// # Usage
     ///
-    /// It can be used to execute the [`task`](Task) in next round.
+    /// It can be used to execute the [`task`](Task) in the next round.
     pub fn spawn_task_at_end_of_shared_tasks_queue(&mut self, task: Task) {
         debug_assert!(!task.is_local());
 
@@ -707,7 +776,7 @@ impl Executor {
     ///
     /// # Attention
     ///
-    /// This function enqueues it at the end of the queue of `shared` tasks, but it is `LIFO`.
+    /// This function enqueues it in the queue for `shared` tasks, but it is `LIFO`.
     ///
     /// # The difference between shared and local tasks
     ///
@@ -721,7 +790,7 @@ impl Executor {
     ///
     /// # Attention
     ///
-    /// This function enqueues it at the end of the queue of local tasks, but it is `LIFO`.
+    /// This function enqueues it in the queue for `local` tasks, but it is `LIFO`.
     ///
     /// # The difference between shared and local tasks
     ///
@@ -739,7 +808,7 @@ impl Executor {
     ///
     /// # Attention
     ///
-    /// This function enqueues it at the end of the queue of shared tasks, but it is `LIFO`.
+    /// This function enqueues it in the queue for `shared` tasks, but it is `LIFO`.
     ///
     /// # The difference between shared and local tasks
     ///
@@ -773,7 +842,7 @@ impl Executor {
 
     /// Sends a [`Task`] to the executor with the given id.
     ///
-    /// It is unsafe because we can't check if the provided [`Task`] don't reference to the
+    /// It is unsafe because we can't check if the provided [`Task`] doesn't reference to the
     /// current thread non-Send data.
     ///
     /// If provided `executor_id` is equal to the current executor id, this function calls
@@ -783,9 +852,9 @@ impl Executor {
     ///
     /// - Provided [`Task`] must not reference to the current thread non-Send data;
     ///
-    /// - If it is `shared`, it valid when the [`Task`] is valid;
+    /// - If it is `shared`, it is valid when the [`Task`] is valid;
     ///
-    /// - If it is `local`, it valid only when the [`Task`] doesn't reference to the
+    /// - If it is `local`, it is valid only when the [`Task`] doesn't reference to the
     ///   current thread non-Send data. For example, it can contain [`Local`](crate::Local)
     ///   created in the current thread, or it can reference to some non-Send data
     ///   if these data are used only in the thread where provided [`Task`] will be sent.
@@ -929,7 +998,7 @@ impl Executor {
     ///
     /// Very detailed example can be found in [`send_task_to_executor`](Self::send_task_to_executor).
     ///
-    /// And more simple example can be found in
+    /// And a more simple example can be found in
     /// [`send_local_future_to_executor`](Self::send_local_future_to_executor).
     #[cfg(not(feature = "disable_send_task_to"))]
     pub fn send_shared_future_to_executor<Fut, F>(
@@ -1013,15 +1082,11 @@ impl Executor {
     #[inline]
     fn check_sleeping_tasks(&mut self) -> Option<Duration> {
         if !self.local_sleeping_tasks.is_empty() {
-            self.start_round_time = Instant::now();
+            self.start_round_time = OrengineInstant::now();
 
             while let Some((time_to_wake, task)) = self.local_sleeping_tasks.pop_first() {
                 if time_to_wake <= self.start_round_time {
-                    if task.is_local() {
-                        self.exec_task(task);
-                    } else {
-                        self.spawn_shared_task(task);
-                    }
+                    task.try_wake(self);
                 } else {
                     self.local_sleeping_tasks.insert(time_to_wake, task);
 
@@ -1035,7 +1100,7 @@ impl Executor {
 
     /// Prepares the executor for the next round.
     fn prepare_to_new_round(&mut self) {
-        self.start_round_time = Instant::now();
+        self.start_round_time = OrengineInstant::now();
         #[cfg(target_os = "linux")]
         {
             self.start_round_time_for_deadlines =
@@ -1047,7 +1112,7 @@ impl Executor {
     #[inline]
     fn exec_cpu_tasks(&mut self) {
         // A round is a number of tasks that must be completed before the next round is started.
-        // It is needed to avoid case like:
+        // It is necessary to avoid a case like:
         //   Task with yield -> repeat this task -> repeat this task -> ...
         //
         // So it works like:
@@ -1118,6 +1183,7 @@ impl Executor {
         }
 
         *get_local_executor_ref() = None;
+        *get_local_worker_ref() = None;
     }
 
     // endregion
@@ -1189,7 +1255,7 @@ impl Executor {
                             worker.must_poll(Some(max_timeout));
                         }
                     } else {
-                        // It proceeds 2 cases:
+                        // It processes 2 cases:
                         // case 3: we have cpu work, sleeping tasks and io work
                         // case 4: we have cpu work, io work, but we don't have sleeping tasks
                         self.progressive_timeout.reset();
@@ -1205,7 +1271,7 @@ impl Executor {
                         self.sleep_at_most(max_timeout);
                     }
                 } else {
-                    // It proceeds 2 cases:
+                    // It processes 2 cases:
                     // case 7: we have cpu work, sleeping tasks, but don't have io work
                     // case 8: we have cpu work, but don't have io work nor sleeping tasks
 
@@ -1214,7 +1280,7 @@ impl Executor {
                     // Continue processing cpu tasks
                 }
             } else {
-                // Here we don't have worker, therefore we need to consider only 4 cases
+                // Here we don't have a worker, therefore, we need to consider only 4 cases
 
                 let max_timeout = self.progressive_timeout.timeout();
 
@@ -1376,6 +1442,7 @@ impl Executor {
     ) -> Result<T, &'static str> {
         generate_run_and_block_on_function!(Self::spawn_shared, future, self)
     }
+
     //endregion
 }
 

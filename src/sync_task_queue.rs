@@ -51,9 +51,9 @@ impl SyncTaskList {
     ///
     /// # Safety
     ///
-    /// - Called not in [`Future::poll`](Future::poll) with the current task.
+    /// - Called not in [`Future::poll`] with the current task.
     ///
-    /// In [`Future::poll`](Future::poll) [`call`](crate::Executor::invoke_call)
+    /// In [`Future::poll`] [`call`](crate::Executor::invoke_call)
     /// [`PushCurrentTaskTo`](crate::runtime::call::Call::PushCurrentTaskTo) instead.
     pub unsafe fn push(&self, task: Task) {
         self.inner.lock().push(task);

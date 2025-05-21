@@ -1,7 +1,7 @@
 use std::ops::Deref;
 use std::ptr::NonNull;
 
-/// `SendableNonNull` is a wrapper over the [`NonNull`] which unsafe
+/// `SendableNonNull` is a wrapper around the [`NonNull`] which unsafe
 /// implements [`Send`] and [`Sync`].
 ///
 /// The caller must ensure that the `SendableNonNull` is [`Send`] and [`Sync`].

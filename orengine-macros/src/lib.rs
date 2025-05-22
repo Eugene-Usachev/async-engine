@@ -255,6 +255,9 @@ pub fn test_shared(_: TokenStream, input: TokenStream) -> TokenStream {
 ///
 /// This macro can be used for both blocking and non-blocking selections.
 ///
+/// It also supports `deadline` and `timeout` patterns.
+/// Read examples below for more information.
+///
 /// # Syntax
 ///
 /// The basic structure of the `select!` macro is as follows:
@@ -269,8 +272,14 @@ pub fn test_shared(_: TokenStream, input: TokenStream) -> TokenStream {
 ///     // Pattern 2: Sending to a channel
 ///     send(CHANNEL_EXPRESSION, SEND_EXPRESSION) -> PATTERN => EXPRESSION,
 ///
-///     // Pattern 3: Default case (optional, makes the select non-blocking)
+///     // Pattern 3: Default case (optional (can be at most one optional case), makes the select non-blocking)
 ///     default => EXPRESSION
+///
+///     // Pattern 4: Timeout case (optional (can be at most one optional case), sets a deadline for the select)
+///     deadline(Instant) => EXPRESSION
+///
+///     // Pattern 5: Timeout case (optional (can be at most one optional case), sets a deadline for the select)
+///     timeout(DURATION) => EXPRESSION
 /// }
 /// ```
 ///
@@ -374,7 +383,7 @@ pub fn test_shared(_: TokenStream, input: TokenStream) -> TokenStream {
 ///
 ///     // Spawn a task to send a message to ch2 after a short delay
 ///     local_executor().spawn_local(async move {
-///         orengine::sleep(Duration::from_micros(100)).await; // Example with tokio sleep
+///         orengine::sleep(Duration::from_micros(100)).await; // Example with sleep
 ///
 ///         ch2_clone.send(31).await.expect("failed to send to ch2_clone");
 ///
@@ -404,6 +413,42 @@ pub fn test_shared(_: TokenStream, input: TokenStream) -> TokenStream {
 ///
 ///     assert_eq!(a, 31, "blocking recv assertion failed");
 ///     println!("Blocking select result: {}", a);
+/// }
+/// ```
+///
+/// ## 3. Blocking Select with timeout
+///
+/// ```text
+/// use orengine::{local_executor, select};
+/// use orengine::sync::{LocalChannel, AsyncChannel, AsyncReceiver, AsyncSender};
+/// use std::time::{Instant, Duration};
+///
+/// async fn blocking_select_with_timeout() {
+///     let ch1 = LocalChannel::<u32>::bounded(1); // Empty, recv would block
+///     let ch2 = LocalChannel::<u32>::bounded(1); // Empty, recv would block
+///
+///     println!("Blocking select with timeout will now wait...");
+///
+///     let a = select! {
+///         // This arm would block as ch1 is empty
+///         recv(&ch1) -> var => {
+///             println!("Received from ch1 (blocking)");
+///             var.expect("ch1 recv failed (blocking)").unwrap_or_default()
+///         },
+///         // This arm would block as ch2 is empty
+///         recv(&ch2) -> var => {
+///             println!("Received from ch2 (blocking)");
+///             var.expect("ch2 recv failed (blocking)").unwrap_or_default()
+///         },
+///         // This arm will be ready after a short delay
+///         timeout(Duration::from_micros(100)) => 31,
+///
+///         // Or we could use the `deadline`
+///         // deadline(Instant::now() + Duration::from_micros(100)) => 31,
+///     };
+///
+///     assert_eq!(a, 31, "blocking recv assertion failed");
+///     println!("Blocking select with timeout result: {}", a);
 /// }
 /// ```
 ///

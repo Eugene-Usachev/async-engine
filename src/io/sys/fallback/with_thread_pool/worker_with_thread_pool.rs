@@ -132,8 +132,10 @@ macro_rules! check_deadline_and {
             if task.is_local() {
                 local_executor().spawn_local_task(task);
             } else {
-                // We can't spawn shared task when it is running.
-                unsafe { local_executor().invoke_call(Call::spawn_current_global_task()) }
+                // We can't spawn a shared task when it is running.
+                // But spawn_task_at_end_of_shared_tasks_queue never shares the provided task.
+
+                unsafe { local_executor().spawn_task_at_end_of_shared_tasks_queue(task) };
             }
         }
     };

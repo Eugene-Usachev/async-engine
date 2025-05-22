@@ -5,12 +5,19 @@ use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::{parse_macro_input, Expr, Ident, Token};
 
-pub(crate) struct SelectInput {
-    pub(crate) branches: Vec<Branch>,
-    pub(crate) default: Option<Expr>,
+struct Deadline {
+    deadline: TokenStream,
+    body: Expr,
 }
 
-pub(crate) enum Branch {
+struct SelectInput {
+    branches: Vec<Branch>,
+    default: Option<Expr>,
+    deadline: Option<Deadline>,
+    // Timeout will be transformed to `deadline`
+}
+
+enum Branch {
     Recv {
         channel: Expr,
         var: Ident,
@@ -28,6 +35,7 @@ impl Parse for SelectInput {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut branches = Vec::new();
         let mut default = None;
+        let mut deadline = None;
 
         while !input.is_empty() {
             let fork = input.fork();
@@ -43,144 +51,247 @@ impl Parse for SelectInput {
                     format!("expected `recv`, `send`, or `default`, found {found}"),
                 )
             })?;
-            if ident == "recv" {
-                let content;
-                syn::parenthesized!(content in input);
 
-                let channel: Expr = content.parse().map_err(|_| {
-                    syn::Error::new(
-                        ident.span(),
-                        "expected a channel expression after `recv`. For example, `recv(channel)",
-                    )
-                })?;
+            match ident.to_string().as_str() {
+                "recv" => {
+                    let content;
+                    syn::parenthesized!(content in input);
 
-                input.parse::<Token![->]>().map_err(|_| {
-                    syn::Error::new(
-                        channel.span(),
-                        "expected `->` after channel expression. \
+                    let channel: Expr = content.parse().map_err(|_| {
+                        syn::Error::new(
+                            ident.span(),
+                            "expected a channel expression after `recv`. For example, `recv(channel)",
+                        )
+                    })?;
+
+                    input.parse::<Token![->]>().map_err(|_| {
+                        syn::Error::new(
+                            channel.span(),
+                            "expected `->` after channel expression. \
                          For example, `recv(channel) -> var",
-                    )
-                })?;
-                let var: Ident = input.parse().map_err(|_| {
-                    syn::Error::new(
-                        channel.span(),
-                        "expected a variable name after `->`. \
+                        )
+                    })?;
+                    let var: Ident = input.parse().map_err(|_| {
+                        syn::Error::new(
+                            channel.span(),
+                            "expected a variable name after `->`. \
                          For example, `recv(channel) -> var",
-                    )
-                })?;
+                        )
+                    })?;
 
-                input.parse::<Token![=>]>().map_err(|_| {
-                    syn::Error::new(
-                        var.span(),
-                        "expected `=>` after the variable name. \
+                    input.parse::<Token![=>]>().map_err(|_| {
+                        syn::Error::new(
+                            var.span(),
+                            "expected `=>` after the variable name. \
                          For example, `recv(channel) -> var => body",
-                    )
-                })?;
-                let body: Expr = input.parse().map_err(|_| {
-                    syn::Error::new(
-                        var.span(),
-                        "expected an expression after `=>`. \
+                        )
+                    })?;
+                    let body: Expr = input.parse().map_err(|_| {
+                        syn::Error::new(
+                            var.span(),
+                            "expected an expression after `=>`. \
                          For example, `recv(channel) -> var => { println!(\"received {}!\", var) }`"
-                    )
-                })?;
+                        )
+                    })?;
 
-                // Allow optional comma
-                if input.peek(Token![,]) {
-                    let _ = input.parse::<Token![,]>();
+                    // Allow optional comma
+                    if input.peek(Token![,]) {
+                        let _ = input.parse::<Token![,]>();
+                    }
+
+                    branches.push(Branch::Recv { channel, var, body });
                 }
 
-                branches.push(Branch::Recv { channel, var, body });
-            } else if ident == "send" {
-                let content;
-                syn::parenthesized!(content in input);
+                "send" => {
+                    let content;
+                    syn::parenthesized!(content in input);
 
-                let channel: Expr = content.parse().map_err(|_| {
-                    syn::Error::new(
-                        content.span(),
-                        "expected a valid channel expression inside `send(...)`",
-                    )
-                })?;
-                content.parse::<Token![,]>()?;
-                let value: Expr = content.parse().map_err(|_| {
-                    syn::Error::new(
-                        content.span(),
-                        "expected a valid value expression inside `send(channel, ...)`",
-                    )
-                })?;
+                    let channel: Expr = content.parse().map_err(|_| {
+                        syn::Error::new(
+                            content.span(),
+                            "expected a valid channel expression inside `send(...)`",
+                        )
+                    })?;
+                    content.parse::<Token![,]>()?;
+                    let value: Expr = content.parse().map_err(|_| {
+                        syn::Error::new(
+                            content.span(),
+                            "expected a valid value expression inside `send(channel, ...)`",
+                        )
+                    })?;
 
-                input.parse::<Token![->]>().map_err(|_| {
-                    syn::Error::new(
-                        value.span(),
-                        "expected `->` after value expression. \
+                    input.parse::<Token![->]>().map_err(|_| {
+                        syn::Error::new(
+                            value.span(),
+                            "expected `->` after value expression. \
                          For example, `send(channel, value) -> result",
-                    )
-                })?;
-                let var: Ident = input.parse().map_err(|_| {
-                    syn::Error::new(
-                        value.span(),
-                        "expected a variable name after `->`. \
+                        )
+                    })?;
+                    let var: Ident = input.parse().map_err(|_| {
+                        syn::Error::new(
+                            value.span(),
+                            "expected a variable name after `->`. \
                          For example, `send(channel, value) -> result`",
-                    )
-                })?;
+                        )
+                    })?;
 
-                input.parse::<Token![=>]>().map_err(|_| {
-                    syn::Error::new(
-                        var.span(),
-                        "expected `=>` after the variable name. \
+                    input.parse::<Token![=>]>().map_err(|_| {
+                        syn::Error::new(
+                            var.span(),
+                            "expected `=>` after the variable name. \
                          For example, `send(channel, value) -> result => body",
-                    )
-                })?;
-                let body: Expr = input.parse().map_err(|_| {
-                    syn::Error::new(
-                        var.span(),
-                        "expected expression after `=>`. \
+                        )
+                    })?;
+                    let body: Expr = input.parse().map_err(|_| {
+                        syn::Error::new(
+                            var.span(),
+                            "expected expression after `=>`. \
                          For example, `send(channel, value) -> result => {\
                           if result.is_err() { println!(\"Send operation failed!\")}`",
-                    )
-                })?;
+                        )
+                    })?;
 
-                // Allow optional comma
-                if input.peek(Token![,]) {
-                    let _ = input.parse::<Token![,]>();
+                    // Allow optional comma
+                    if input.peek(Token![,]) {
+                        let _ = input.parse::<Token![,]>();
+                    }
+
+                    branches.push(Branch::Send {
+                        channel,
+                        value,
+                        var,
+                        body,
+                    });
                 }
 
-                branches.push(Branch::Send {
-                    channel,
-                    value,
-                    var,
-                    body,
-                });
-            } else if ident == "default" {
-                input.parse::<Token![=>]>().map_err(|_| {
-                    syn::Error::new(
-                        ident.span(),
-                        "expected `=>` after `default`. \
+                "deadline" => {
+                    if deadline.is_some() {
+                        return Err(syn::Error::new(
+                            ident.span(),
+                            "deadline (timeout) can only be specified once",
+                        ));
+                    }
+
+                    let deadline_expr: Expr = input.parse().map_err(|_| {
+                        syn::Error::new(
+                            ident.span(),
+                            "expected a deadline expression after `deadline`. \
+                         For example, `deadline(deadline)`",
+                        )
+                    })?;
+
+                    input.parse::<Token![=>]>().map_err(|_| {
+                        syn::Error::new(
+                            ident.span(),
+                            "expected `=>` after `deadline`. \
+                         For example, `deadline(deadline) => body`",
+                        )
+                    })?;
+
+                    let body: Expr = input.parse().map_err(|_| {
+                        syn::Error::new(
+                            ident.span(),
+                            "expected an expression after `=>`. \
+                         For example, `deadline(deadline) => { println!(\"Deadline reached!\") }",
+                        )
+                    })?;
+
+                    // Allow optional comma
+                    if input.peek(Token![,]) {
+                        let _ = input.parse::<Token![,]>();
+                    }
+
+                    deadline = Some(Deadline {
+                        deadline: quote! { #deadline_expr }.into(),
+                        body,
+                    });
+                }
+
+                "timeout" => {
+                    if deadline.is_some() {
+                        return Err(syn::Error::new(
+                            ident.span(),
+                            "deadline (timeout) can only be specified once",
+                        ));
+                    }
+
+                    let timeout_expr: Expr = input.parse().map_err(|_| {
+                        syn::Error::new(
+                            ident.span(),
+                            "expected a timeout expression after `timeout`. \
+                         For example, `timeout(Duration::from_millis(100))`",
+                        )
+                    })?;
+
+                    input.parse::<Token![=>]>().map_err(|_| {
+                        syn::Error::new(
+                            ident.span(),
+                            "expected `=>` after `timeout`. \
+                         For example, `timeout(Duration::from_millis(100)) => body`",
+                        )
+                    })?;
+
+                    let body: Expr = input.parse().map_err(|_| {
+                        syn::Error::new(
+                            ident.span(),
+                            "expected an expression after `=>`. \
+                         For example, `timeout(Duration::from_millis(100)) => { println!(\"Timeout reached!\") }",
+                        )
+                    })?;
+
+                    // Allow optional comma
+                    if input.peek(Token![,]) {
+                        let _ = input.parse::<Token![,]>();
+                    }
+
+                    deadline = Some(Deadline {
+                        deadline: quote! {
+                            orengine::local_executor().start_round_time_for_deadlines() + #timeout_expr
+                        }.into(),
+                        body,
+                    });
+                }
+
+                "default" => {
+                    input.parse::<Token![=>]>().map_err(|_| {
+                        syn::Error::new(
+                            ident.span(),
+                            "expected `=>` after `default`. \
                          For example, `default => body`",
-                    )
-                })?;
-                let body: Expr = input.parse().map_err(|_| {
-                    syn::Error::new(
-                        ident.span(),
-                        "expected an expression after `=>`. \
+                        )
+                    })?;
+                    let body: Expr = input.parse().map_err(|_| {
+                        syn::Error::new(
+                            ident.span(),
+                            "expected an expression after `=>`. \
                          For example, `default => { println!(\"Nothing ready.\")` }",
-                    )
-                })?;
+                        )
+                    })?;
 
-                // Allow optional comma
-                if input.peek(Token![,]) {
-                    let _ = input.parse::<Token![,]>();
+                    // Allow optional comma
+                    if input.peek(Token![,]) {
+                        let _ = input.parse::<Token![,]>();
+                    }
+
+                    default = Some(body);
                 }
 
-                default = Some(body);
-            } else {
-                return Err(syn::Error::new(
-                    input.span(),
-                    format!("expected `recv`, `send`, or `default`, found {found}"),
-                ));
+                _ => {
+                    return Err(syn::Error::new(
+                        input.span(),
+                        format!(
+                            "expected `recv`, `send`, timeout, deadline or `default`, found {found}"
+                        ),
+                    ));
+                }
             }
         }
 
-        Ok(SelectInput { branches, default })
+        Ok(SelectInput {
+            branches,
+            default,
+            deadline,
+        })
     }
 }
 
@@ -343,7 +454,17 @@ fn maybe_can_be_simplified(
 }
 
 pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
-    let SelectInput { branches, default } = parse_macro_input!(input as SelectInput);
+    let SelectInput {
+        branches,
+        default,
+        deadline,
+    } = parse_macro_input!(input as SelectInput);
+
+    if default.is_some() && deadline.is_some() {
+        return TokenStream::from(quote! {
+            compile_error!("Select cannot have both a default and a deadline (timeout)!");
+        });
+    }
 
     let len = branches.len();
     let branches_len = quote! { #len };
@@ -569,8 +690,29 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
         let mut channels_enum_handle = Vec::with_capacity(branches.len());
         let mut create_channel_variants = Vec::with_capacity(branches.len());
         let mut channels_enum_index_impls = Vec::with_capacity(branches.len());
+        let mut idx = 0usize;
 
-        for (idx, branch) in branches.iter().enumerate() {
+        let mut set_deadline_block = quote! {};
+
+        if let Some(deadline) = deadline {
+            let deadline_expr = proc_macro2::TokenStream::from(deadline.deadline);
+            let deadline_body = deadline.body;
+
+            set_deadline_block = quote! {
+                local_executor().register_task_in_select_with_deadline(
+                    TaskInSelectBranch::new(task_in_select, 0),
+                    #deadline_expr
+                );
+            };
+
+            match_arms.push(quote! {
+                #idx => { #deadline_body }
+            });
+
+            idx += 1;
+        }
+
+        for branch in branches.iter() {
             match branch {
                 Branch::Recv { channel, var, body } => {
                     let variant = format_ident!("variant{idx}");
@@ -629,7 +771,7 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                                     // Go on, the receiver has been subscribed
                                 }
                                 SelectNonBlockingBranchResult::AlreadyAcquired => {
-                                    // Another thread already acquired the lock and wake the task up.
+                                    // Another thread already acquired the lock and waked the task up.
                                     return;
                                 }
                             }
@@ -715,7 +857,7 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                                     // Go on, the receiver has been subscribed
                                 }
                                 SelectNonBlockingBranchResult::AlreadyAcquired => {
-                                    // Another thread already acquired the lock and wake the task up.
+                                    // Another thread already acquired the lock and waked the task up.
                                     return;
                                 }
                             }
@@ -737,13 +879,14 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                     });
                 }
             }
+
+            idx += 1;
         }
 
         quote! {
             {
                 use std::ptr::NonNull;
                 use orengine::local_executor;
-                use orengine::utils::ArrayDeque;
                 use orengine::utils::SendableNonNull;
                 use orengine::sync::channels::waiting_task::{TaskInSelect, TaskInSelectBranch};
                 use orengine::sync::channels::select::SelectNonBlockingBranchResult;
@@ -797,7 +940,7 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                     let task_in_select = TaskInSelect::acquire_for_task(task, *resolved_branch_id);
 
                     unsafe {
-                        for i in 0..#branches_len - 1 {
+                        for i in 0..#branches_len {
                             let chan_ref = channels.get_unchecked_mut(i);
                             let task_in_select_branch = TaskInSelectBranch::new(task_in_select.clone(), chan_ref.index());
 
@@ -805,14 +948,9 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                                 #(#channels_enum_handle),*
                             }
                         }
-
-                        let chan_ref = channels.get_unchecked_mut(#branches_len - 1);
-                        let task_in_select_branch = TaskInSelectBranch::new(task_in_select, chan_ref.index());
-
-                        match chan_ref {
-                            #(#channels_enum_handle),*
-                        }
                     };
+
+                    #set_deadline_block
 
                     // The task is subscribed for all branches. Some of them will wake it up.
                 }

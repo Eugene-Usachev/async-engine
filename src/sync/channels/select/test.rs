@@ -4,7 +4,7 @@ use crate::{local_executor, sleep};
 use orengine::select;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // region `local` not stress tests
 
@@ -749,6 +749,68 @@ fn test_select_one_channel_try_send() {
         send(&chan, 1) -> _res => 3
         default => 1
     };
+
+    assert_eq!(res, 3);
+}
+
+#[orengine::test::test_local]
+fn test_select_timeout() {
+    let chan1 = Rc::new(LocalChannel::bounded(0));
+    let chan2 = Rc::new(LocalChannel::bounded(0));
+    let chan2_clone = chan2.clone();
+
+    local_executor().spawn_local(async move {
+        sleep(Duration::from_micros(10)).await;
+
+        chan2_clone.send(1).await.expect("failed to send");
+    });
+
+    let res: i32 = select! {
+        recv(&chan1) -> res => res
+        recv(&chan2) -> res => res
+        timeout(Duration::from_secs(5)) => panic!("timeout assertion failed")
+    }
+    .expect("failed to recv with timeout 1");
+
+    assert_eq!(res, 1);
+
+    let res = select! {
+        recv(&chan1) -> res => res
+        recv(&chan2) -> res => res
+        timeout(Duration::from_millis(5)) => Ok(3)
+    }
+    .expect("failed to recv with timeout 2");
+
+    assert_eq!(res, 3);
+}
+
+#[orengine::test::test_local]
+fn test_select_timeout_deadline() {
+    let chan1 = Rc::new(LocalChannel::bounded(0));
+    let chan2 = Rc::new(LocalChannel::bounded(0));
+    let chan2_clone = chan2.clone();
+
+    local_executor().spawn_local(async move {
+        sleep(Duration::from_micros(10)).await;
+
+        chan2_clone.send(1).await.expect("failed to send");
+    });
+
+    let res: i32 = select! {
+        recv(&chan1) -> res => res
+        recv(&chan2) -> res => res
+        deadline(Instant::now() + Duration::from_secs(5)) => panic!("deadline assertion failed")
+    }
+    .expect("failed to recv with deadline 1");
+
+    assert_eq!(res, 1);
+
+    let res = select! {
+        recv(&chan1) -> res => res
+        recv(&chan2) -> res => res
+        deadline(Instant::now() + Duration::from_millis(5)) => Ok(3)
+    }
+    .expect("failed to recv with deadline 2");
 
     assert_eq!(res, 3);
 }

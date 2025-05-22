@@ -53,11 +53,11 @@ macro_rules! return_pending_and_release_lock {
 
 /// Returns `Poll::Pending` if the mutex is not acquired, otherwise returns lock.
 macro_rules! acquire_lock {
-    ($mutex:expr) => {
+    ($mutex:expr, $task:expr) => {
         match $mutex.try_lock() {
             Some(lock) => lock,
             None => {
-                unsafe { local_executor().invoke_call(Call::spawn_current_global_task()) };
+                unsafe { local_executor().spawn_task_at_end_of_shared_tasks_queue($task) };
 
                 return Poll::Pending;
             }
@@ -111,7 +111,7 @@ impl<T> Future for WaitSend<'_, T> {
 
         match this.call_state {
             CallState::FirstCall => {
-                let mut inner_lock = acquire_lock!(this.inner);
+                let mut inner_lock = acquire_lock!(this.inner, Task::from_context(cx));
                 if unlikely(inner_lock.is_closed) {
                     return Poll::Ready(Err(SendErr::Closed(unsafe {
                         ManuallyDrop::take(&mut this.value)
@@ -223,7 +223,7 @@ impl<T> Future for WaitSendWithDeadline<'_, T> {
 
         match this.call_state {
             CallState::FirstCall => {
-                let mut inner_lock = acquire_lock!(this.inner);
+                let mut inner_lock = acquire_lock!(this.inner, Task::from_context(cx));
                 if unlikely(inner_lock.is_closed) {
                     return Poll::Ready(Err(SendTimeoutErr::Closed(unsafe {
                         ManuallyDrop::take(&mut this.value)
@@ -331,7 +331,7 @@ impl<T> Future for WaitRecv<'_, T> {
 
         match this.call_state {
             CallState::FirstCall => {
-                let mut inner_lock = acquire_lock!(this.inner);
+                let mut inner_lock = acquire_lock!(this.inner, Task::from_context(cx));
                 if unlikely(inner_lock.is_closed) {
                     return Poll::Ready(Err(RecvErr::Closed));
                 }
@@ -433,7 +433,7 @@ impl<T> Future for WaitRecvWithDeadline<'_, T> {
 
         match this.call_state {
             CallState::FirstCall => {
-                let mut inner_lock = acquire_lock!(this.inner);
+                let mut inner_lock = acquire_lock!(this.inner, Task::from_context(cx));
                 if unlikely(inner_lock.is_closed) {
                     return Poll::Ready(Err(RecvTimeoutErr::Closed));
                 }

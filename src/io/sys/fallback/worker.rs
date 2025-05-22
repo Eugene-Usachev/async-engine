@@ -47,8 +47,9 @@ macro_rules! check_deadline_and {
                 local_executor().spawn_local_task(task);
             } else {
                 // We can't spawn shared task when it is running.
-                local_executor().spawn_shared_task(task);
-                unsafe { local_executor().invoke_call(Call::spawn_current_global_task()) };
+                // But spawn_task_at_end_of_shared_tasks_queue never shares the provided task.
+
+                unsafe { local_executor().spawn_task_at_end_of_shared_tasks_queue(task) };
             }
         }
     };
@@ -251,7 +252,9 @@ impl FallbackWorker {
                 local_executor().spawn_local_task(task);
             } else {
                 // We can't spawn a shared task when it is running.
-                unsafe { local_executor().invoke_call(Call::spawn_current_global_task()) };
+                // But spawn_task_at_end_of_shared_tasks_queue never shares the provided task.
+
+                unsafe { local_executor().spawn_task_at_end_of_shared_tasks_queue(task) };
             }
 
             break;
@@ -347,7 +350,9 @@ impl FallbackWorker {
                 local_executor().spawn_local_task(task);
             } else {
                 // We can't spawn a shared task when it is running.
-                unsafe { local_executor().invoke_call(Call::spawn_current_global_task()) };
+                // But spawn_task_at_end_of_shared_tasks_queue never shares the provided task.
+
+                unsafe { local_executor().spawn_task_at_end_of_shared_tasks_queue(task) };
             }
 
             break;

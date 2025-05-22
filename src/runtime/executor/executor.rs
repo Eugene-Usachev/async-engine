@@ -7,6 +7,7 @@ use crate::runtime::TaskPool;
 use crate::runtime::call::Call;
 use crate::runtime::config::{Config, ValidConfig};
 use crate::runtime::executor::end_local_thread_and_write_into_ptr::EndLocalThreadAndWriteIntoPtr;
+use crate::runtime::executor::sleeping_manager::SleepingManager;
 use crate::runtime::global_state::{SubscribedState, register_local_executor};
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::runtime::interaction_between_executors::{ExecutorIsNotRegisteredErr, Interactor};
@@ -17,18 +18,18 @@ use crate::runtime::{
     ExecutorSharedTaskList, Locality, TaskWithDeadline, get_core_id_for_executor,
 };
 use crate::sync::channels::CallStatePtr;
+use crate::sync::channels::waiting_task::TaskInSelectBranch;
 use crate::utils::{CoreId, OrengineInstant, ProgressiveTimeout, assert_hint, likely, unlikely};
 use fastrand::Rng;
 use std::cell::UnsafeCell;
-use std::collections::btree_map::Entry::{Occupied, Vacant};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
-use std::{mem, thread};
+use std::{mem, ptr, thread};
 
 macro_rules! shrink {
     ($list:expr) => {
@@ -117,30 +118,6 @@ pub fn local_executor() -> &'static mut Executor {
     }
 }
 
-/// Contains a [`Task`] to wake and its deadline.
-enum MaybeSpecialTask {
-    Common(Task),
-    WithDeadline(TaskWithDeadline),
-}
-
-impl MaybeSpecialTask {
-    /// Tries to wake [`MaybeSpecialTask`].
-    fn try_wake(self, ex: &mut Executor) {
-        match self {
-            Self::Common(task) => {
-                if task.is_local() {
-                    ex.exec_task(task);
-                } else {
-                    ex.spawn_shared_task(task);
-                }
-            }
-            Self::WithDeadline(task) => {
-                task.try_wake_by_deadline();
-            }
-        }
-    }
-}
-
 /// The executor that runs futures in the current thread.
 ///
 /// # The difference between `local` and `shared` task and futures
@@ -188,7 +165,7 @@ pub struct Executor {
     local_worker: &'static mut Option<WorkerSys>,
     thread_pool: LocalThreadWorkerPool,
 
-    local_sleeping_tasks: BTreeMap<OrengineInstant, MaybeSpecialTask>,
+    sleeping_manager: SleepingManager,
 }
 
 /// The next id of the executor. It is used to generate the unique executor id.
@@ -288,7 +265,7 @@ impl Executor {
                 interactor: Interactor::new(),
                 local_worker: get_local_worker_ref(),
                 thread_pool: LocalThreadWorkerPool::new(number_of_thread_workers),
-                local_sleeping_tasks: BTreeMap::new(),
+                sleeping_manager: SleepingManager::new(),
             });
 
             local_executor()
@@ -429,22 +406,12 @@ impl Executor {
 
     // endregion
 
-    // region register special tasks
+    // region register sleeping (with deadline too) tasks
 
     /// Registers a [`task`] to be executed at the provided [`OrengineInstant`].
-    pub(crate) fn register_sleeping_task(&mut self, task: Task, mut sleep_until: OrengineInstant) {
-        loop {
-            match self.local_sleeping_tasks.entry(sleep_until) {
-                Vacant(entry) => {
-                    entry.insert(MaybeSpecialTask::Common(task));
-
-                    break;
-                }
-                Occupied(_) => {
-                    sleep_until += Duration::from_nanos(1);
-                }
-            }
-        }
+    pub(crate) fn register_sleeping_task(&mut self, task: Task, sleep_until: OrengineInstant) {
+        self.sleeping_manager
+            .register_sleeping_task(sleep_until, task);
     }
 
     /// Registers a [`TaskWithDeadline`] to be executed at the provided [`OrengineInstant`].
@@ -452,24 +419,24 @@ impl Executor {
         &mut self,
         task: Task,
         result_ptr: CallStatePtr,
-        mut deadline: OrengineInstant,
+        deadline: OrengineInstant,
     ) -> TaskWithDeadline {
         let task_with_deadline = TaskWithDeadline::new(task, result_ptr);
 
-        loop {
-            match self.local_sleeping_tasks.entry(deadline) {
-                Vacant(entry) => {
-                    entry.insert(MaybeSpecialTask::WithDeadline(unsafe {
-                        std::ptr::read(&task_with_deadline)
-                    }));
+        self.sleeping_manager
+            .register_task_with_deadline(deadline, unsafe { ptr::read(&task_with_deadline) });
 
-                    break task_with_deadline;
-                }
-                Occupied(_) => {
-                    deadline += Duration::from_nanos(1);
-                }
-            }
-        }
+        task_with_deadline
+    }
+
+    /// Registers a [`TaskInSelectBranch`] to be executed at the provided [`OrengineInstant`].
+    pub fn register_task_in_select_with_deadline(
+        &mut self,
+        task_in_select_branch: TaskInSelectBranch,
+        deadline: impl Into<OrengineInstant>,
+    ) {
+        self.sleeping_manager
+            .register_task_in_select_with_deadline(deadline.into(), task_in_select_branch);
     }
 
     // endregion
@@ -497,9 +464,6 @@ impl Executor {
         match mem::take(&mut self.current_call) {
             Call::None => {}
             Call::PushCurrentTaskTo(task_list) => unsafe { task_list.as_ref().push(task) },
-            Call::SpawnCurrentGlobalTask => {
-                self.spawn_shared_task(task);
-            }
             Call::PushCurrentTaskToAndRemoveItIfCounterIsZero(task_list, counter, order) => {
                 unsafe {
                     let list = task_list.as_ref();
@@ -693,7 +657,7 @@ impl Executor {
     ///
     /// # Usage
     ///
-    /// Can be used to execute the [`task`](Task) in the next round.
+    /// It can be used to execute the [`task`](Task) in the next round.
     pub fn spawn_task_at_end_of_local_tasks_queue(&mut self, task: Task) {
         debug_assert!(task.is_local());
 
@@ -732,31 +696,29 @@ impl Executor {
 
         debug_assert!(!task.is_local(), "Try to spawn `local` task as `shared`!");
 
-        #[allow(clippy::branches_sharing_code, reason = "It is more readable")]
+        if !PUT_IN_THE_START_OF_QUEUE {
+            // It never shares this task.
+
+            self.shared_tasks.push_front(task);
+
+            return;
+        }
+
         if likely(self.config.is_work_sharing_enabled()) {
             if likely(self.shared_tasks.len() <= self.config.work_sharing_level) {
                 // Fast path
 
-                if PUT_IN_THE_START_OF_QUEUE {
-                    self.shared_tasks.push_back(task);
-                } else {
-                    self.shared_tasks.push_front(task);
-                }
-            } else {
-                // Slow path
-                try_flush(self);
+                self.shared_tasks.push_back(task);
 
-                if PUT_IN_THE_START_OF_QUEUE {
-                    self.shared_tasks.push_back(task);
-                } else {
-                    self.shared_tasks.push_front(task);
-                }
+                return;
             }
-        } else if PUT_IN_THE_START_OF_QUEUE {
-            self.shared_tasks.push_back(task);
-        } else {
-            self.shared_tasks.push_front(task);
+
+            // Slow path
+
+            try_flush(self);
         }
+
+        self.shared_tasks.push_back(task);
     }
 
     /// Enqueues a `shared` [`task`](Task).
@@ -1081,21 +1043,11 @@ impl Executor {
     /// if there are no sleeping tasks.
     #[inline]
     fn check_sleeping_tasks(&mut self) -> Option<Duration> {
-        if !self.local_sleeping_tasks.is_empty() {
-            self.start_round_time = OrengineInstant::now();
+        self.start_round_time = OrengineInstant::now();
 
-            while let Some((time_to_wake, task)) = self.local_sleeping_tasks.pop_first() {
-                if time_to_wake <= self.start_round_time {
-                    task.try_wake(self);
-                } else {
-                    self.local_sleeping_tasks.insert(time_to_wake, task);
-
-                    return Some(time_to_wake - self.start_round_time);
-                }
-            }
-        }
-
-        None
+        self.sleeping_manager
+            .poll(self.start_round_time)
+            .map(|deadline| deadline - self.start_round_time)
     }
 
     /// Prepares the executor for the next round.

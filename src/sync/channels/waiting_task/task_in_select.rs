@@ -71,7 +71,7 @@ impl TaskInSelect {
     ///
     /// # Panics
     ///
-    /// Panics if the resolved branch ID has already been set.
+    /// It panics if the resolved branch ID has already been set.
     fn set_resolved_branch_id(&self, branch_id: usize) {
         debug_assert_eq!(
             unsafe { self.inner().resolved_branch_id.read() },
@@ -86,7 +86,7 @@ impl TaskInSelect {
     ///
     /// # Panics
     ///
-    /// Panics if the task is not acquired or if the reference count is not zero.
+    /// It panics if the task is not acquired or if the reference count is not zero.
     fn release(&self) {
         debug_assert_eq!(self.inner().ref_count.load(Acquire), 0);
         debug_assert_eq!(
@@ -241,10 +241,10 @@ impl TaskInSelectBranch {
                         return None;
                     }
 
-                    // Another thread acquires first of two task and trying to acquire second one.
+                    // Another thread acquires the first of two tasks and tries to acquire the second one.
                     // It may fail (and set `NOT_ACQUIRED`) or succeed (and set `ACQUIRED`).
-                    // We will for this update. It is not a performance issue, because it
-                    // happens very rarely, and we wait at max time of `load` + `store`.
+                    // We will for this update. It is not a performance issue because it
+                    // happens very rarely, and we wait at the max time of `load` + `store`.
                     backoff.spin();
                 } else {
                     self.task_in_select

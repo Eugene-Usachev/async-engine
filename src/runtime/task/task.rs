@@ -178,7 +178,7 @@ impl Task {
     /// println!("Was unparked");
     /// # }
     /// ```
-    pub unsafe fn park_current_task() -> impl Future<Output = ()> {
+    pub unsafe fn park_current_task() -> impl Future<Output = ()> + Send {
         #[repr(C)]
         struct ParkCurrentTask {
             was_called: bool,
@@ -200,6 +200,9 @@ impl Task {
                 }
             }
         }
+
+        unsafe impl Send for ParkCurrentTask {}
+        unsafe impl Sync for ParkCurrentTask {}
 
         ParkCurrentTask { was_called: false }
     }

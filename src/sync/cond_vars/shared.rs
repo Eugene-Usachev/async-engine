@@ -311,11 +311,14 @@ mod tests {
         local_executor().spawn_shared(async move {
             let (lock, cvar) = &*pair2;
             let mut started = lock.lock().await;
+
             sleep(TIME_TO_SLEEP).await;
+
             *started = true;
             if need_drop {
                 drop(started);
             }
+
             cvar.notify_all();
         });
 
@@ -323,14 +326,17 @@ mod tests {
         for _ in 0..NUMBER_OF_WAITERS {
             let pair = pair.clone();
             let wg = wg.clone();
+
             wg.add(1);
 
             sched_future_to_another_thread(async move {
                 let (lock, cvar) = &*pair;
                 let mut started = lock.lock().await;
+
                 while !*started {
                     started = cvar.wait(started).await;
                 }
+
                 wg.done();
             });
         }

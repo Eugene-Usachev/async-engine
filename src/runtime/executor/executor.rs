@@ -19,14 +19,18 @@ use crate::runtime::{
 };
 use crate::sync::channels::CallStatePtr;
 use crate::sync::channels::waiting_task::TaskInSelectBranch;
-use crate::utils::{CoreId, OrengineInstant, ProgressiveTimeout, assert_hint, likely, unlikely};
+use crate::utils::{
+    CoreId, OrengineInstant, ProgressiveTimeout, assert_hint, likely, unlikely,
+    unwrap_or_bug_message_hint,
+};
 use fastrand::Rng;
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering::{AcqRel, Release};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{mem, ptr, thread};
@@ -56,7 +60,6 @@ pub(crate) fn get_local_executor_ref() -> &'static mut Option<Executor> {
 
 /// Message that prints out when the local executor is not initialized
 /// but [`local_executor()`](local_executor) is called.
-#[cfg(debug_assertions)]
 pub const MSG_LOCAL_EXECUTOR_IS_NOT_INIT: &str = "\
 ------------------------------------------------------------------------------------------
 |    Local executor is not initialized.                                                  |
@@ -105,17 +108,10 @@ pub const MSG_LOCAL_EXECUTOR_IS_NOT_INIT: &str = "\
 /// Read [`MSG_LOCAL_EXECUTOR_IS_NOT_INIT`] for more details.
 #[inline]
 pub fn local_executor() -> &'static mut Executor {
-    #[cfg(debug_assertions)]
-    {
-        get_local_executor_ref()
-            .as_mut()
-            .expect(MSG_LOCAL_EXECUTOR_IS_NOT_INIT)
-    }
-
-    #[cfg(not(debug_assertions))]
-    unsafe {
-        get_local_executor_ref().as_mut().unwrap_unchecked()
-    }
+    unwrap_or_bug_message_hint(
+        get_local_executor_ref().as_mut(),
+        MSG_LOCAL_EXECUTOR_IS_NOT_INIT,
+    )
 }
 
 /// The executor that runs futures in the current thread.
@@ -140,6 +136,7 @@ pub fn local_executor() -> &'static mut Executor {
 /// When `Executor` has no work, it tries to take tasks from other executors.
 #[repr(C)]
 pub struct Executor {
+    is_running: AtomicBool,
     core_id: CoreId,
     id: usize,
     config: ValidConfig,
@@ -242,6 +239,7 @@ impl Executor {
             }
 
             *get_local_executor_ref() = Some(Self {
+                is_running: AtomicBool::new(false),
                 core_id,
                 id: executor_id,
                 config: valid_config,
@@ -697,7 +695,7 @@ impl Executor {
         debug_assert!(!task.is_local(), "Try to spawn `local` task as `shared`!");
 
         if !PUT_IN_THE_START_OF_QUEUE {
-            // It never shares this task.
+            // It never shares at the time this task.
 
             self.shared_tasks.push_front(task);
 
@@ -1101,6 +1099,8 @@ impl Executor {
     /// Called after [`check_version_and_update_if_needed`](SubscribedState::check_version_and_update_if_needed).
     #[inline(never)]
     unsafe fn graceful_stop(&mut self) {
+        self.is_running.store(false, Release);
+
         uninit_local_buf_pool();
         if self.config.is_work_sharing_enabled() {
             unsafe {
@@ -1144,6 +1144,10 @@ impl Executor {
 
     /// Runs the executor.
     ///
+    /// # Panics
+    ///
+    /// If the executor is already running.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -1163,6 +1167,11 @@ impl Executor {
     /// println!("Hello from a sync runtime after at least 3 seconds");
     /// ```
     pub fn run(&mut self) {
+        assert!(
+            !self.is_running.swap(true, AcqRel),
+            "The executor is already running"
+        );
+
         register_local_executor();
 
         loop {
@@ -1269,6 +1278,10 @@ impl Executor {
     ///
     /// Read it in [`Executor`].
     ///
+    /// # Panics
+    ///
+    /// If the executor is already running.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -1298,6 +1311,10 @@ impl Executor {
     /// # The difference between shared and local tasks
     ///
     /// Read it in [`Executor`].
+    ///
+    /// # Panics
+    ///
+    /// If the executor is already running.
     ///
     /// # Example
     ///
@@ -1331,6 +1348,10 @@ impl Executor {
     /// # Returns
     ///
     /// It returns `Err(&'static msg)` if undefined behavior happened or `Ok(T)` if everything is ok.
+    ///
+    /// # Panics
+    ///
+    /// If the executor is already running.
     ///
     /// # Example
     ///
@@ -1369,6 +1390,10 @@ impl Executor {
     /// # Returns
     ///
     /// It returns `Err(&'static msg)` if undefined behavior happened or `Ok(T)` if everything is ok.
+    ///
+    /// # Panics
+    ///
+    /// If the executor is already running.
     ///
     /// # Example
     ///

@@ -36,11 +36,14 @@ impl<R, Fut: Future<Output = R>> Future for EndLocalThreadAndWriteIntoPtr<R, Fut
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = unsafe { self.get_unchecked_mut() };
         let mut pinned_fut = unsafe { Pin::new_unchecked(&mut this.future) };
+
         match pinned_fut.as_mut().poll(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(res) => {
                 unsafe { this.res_ptr.write(Some(res)) };
+
                 stop_executor(this.local_executor_id);
+
                 Poll::Ready(())
             }
         }

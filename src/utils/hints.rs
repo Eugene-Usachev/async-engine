@@ -102,3 +102,18 @@ pub(crate) fn unwrap_or_bug_hint<T>(item: impl UnwrapOrPanic<T>) -> T {
         unsafe { item.unwrap_unchecked() }
     }
 }
+
+/// Unwraps a value, panicking if it is [`None`] or [`Err`] with `debug_assertions`.
+///
+/// Else hints to the compiler that the value is not `None` or `Err`.
+#[allow(unused_variables, reason = "It contains #[cfg(debug_assertions)]")]
+pub(crate) fn unwrap_or_bug_message_hint<T>(
+    item: impl UnwrapOrPanic<T>,
+    message: &'static str,
+) -> T {
+    if cfg!(debug_assertions) {
+        item.unwrap_or_panic(message)
+    } else {
+        unsafe { item.unwrap_unchecked() }
+    }
+}

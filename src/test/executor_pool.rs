@@ -211,6 +211,7 @@ impl ExecutorPool {
     /// use std::sync::Arc;
     /// use std::sync::atomic::AtomicUsize;
     /// use std::sync::atomic::Ordering::SeqCst;
+    /// use std::time::Duration;
     /// use orengine::test::{run_test_and_block_on_shared, ExecutorPool};
     /// use orengine::yield_now;
     ///
@@ -239,7 +240,7 @@ impl ExecutorPool {
     ///         }
     ///
     ///         assert_eq!(atomic_to_sync_test.load(SeqCst), 20);
-    ///     });
+    ///     }, Some(Duration::from_millis(1))); // Times out after 1 ms
     /// }
     /// ```
     #[allow(
@@ -284,6 +285,7 @@ impl ExecutorPool {
 /// use std::sync::Arc;
 /// use std::sync::atomic::AtomicUsize;
 /// use std::sync::atomic::Ordering::SeqCst;
+/// use std::time::Duration;
 /// use orengine::sync::{AsyncWaitGroup, WaitGroup};
 /// use orengine::test::{run_test_and_block_on_shared, sched_future_to_another_thread};
 /// use orengine::yield_now;
@@ -311,7 +313,7 @@ impl ExecutorPool {
 ///
 ///         wg.wait().await;
 ///         assert_eq!(atomic_to_sync_test.load(SeqCst), 20);
-///     });
+///     }, Some(Duration::from_millis(1))); // Times out after 1 ms
 /// }
 /// ```
 pub fn sched_future_to_another_thread<Fut>(future: Fut)

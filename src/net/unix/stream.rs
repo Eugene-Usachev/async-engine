@@ -407,8 +407,9 @@ mod tests {
         let state_clone = state.clone();
         let state_cond_var_clone = state_cond_var.clone();
         let wg = Rc::new(LocalWaitGroup::new());
-        wg.inc();
         let wg_clone = wg.clone();
+
+        wg.inc();
 
         local_executor().spawn_local(async move {
             let mut listener = UnixListener::bind(ADDR).await.expect("bind failed");

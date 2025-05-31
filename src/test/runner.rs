@@ -25,14 +25,14 @@
 //! You can use macro [`orengine::test::test_local`](crate::test::test_local) instead
 //! of [`run_test_and_block_on_local`] and [`orengine::test::test_shared`](crate::test::test_shared)
 //! instead of [`run_test_and_block_on_shared`]. Read [`run_test_and_block_on_local`] and
-//! [`run_test_and_block_on_shared`] for examples.
+//! [`run_test_and_block_on_shared`] to find examples.
 use crate::bug_message::BUG_MESSAGE;
-use crate::runtime::Config;
 use crate::runtime::executor::get_local_executor_ref;
-use crate::test::sched_future_to_another_thread;
-use crate::{Executor, local_executor, yield_now};
+use crate::runtime::{Config, Locality, Task};
+use crate::{Executor, local_executor, stop_executor, yield_now};
 use std::future::Future;
-use std::panic::AssertUnwindSafe;
+use std::panic::UnwindSafe;
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 use std::{panic, thread};
 
@@ -85,9 +85,23 @@ where
     future.await;
 }
 
+/// Upgrades provided future to release all previous tasks and close its executor after its executing.
+#[allow(clippy::future_not_send, reason = "This can be non-Send")]
+pub(crate) async fn upgrade_future_for_with_timeout<Fut>(future: Fut)
+where
+    Fut: Future<Output = ()> + 'static,
+{
+    upgrade_future(async move {
+        future.await;
+
+        stop_executor(local_executor().id());
+    })
+    .await;
+}
+
 /// An error that is returned by [`run_in_another_thread_and_wait_for_result_with_timeout`]
 /// on timeout.
-struct ErrTimeout;
+pub struct ErrTimeout;
 
 impl std::fmt::Debug for ErrTimeout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -100,30 +114,34 @@ impl std::fmt::Debug for ErrTimeout {
 /// # Panics
 ///
 /// It panics when the provided function panics.
-fn run_in_another_thread_and_wait_for_result_with_timeout(
-    f: impl FnOnce() + Send + 'static,
+fn run_in_another_thread_and_wait_for_result_with_timeout<F>(
+    f: F,
     timeout: Duration,
-) -> Result<(), ErrTimeout> {
-    //  TODO: Why can't we call sched_future_to_another_thread with timeout?
-    get_local_executor()
-        .run_and_block_on_local(async move {
-            let (tx, rx) = std::sync::mpsc::channel();
+) -> Result<(), ErrTimeout>
+where
+    F: UnwindSafe + Send + 'static + FnOnce() -> Task,
+{
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
 
-            sched_future_to_another_thread(AssertUnwindSafe(async move {
-                let res: thread::Result<()> = panic::catch_unwind(AssertUnwindSafe(|| {
-                    f();
-                }));
+    thread::spawn(move || {
+        let ex = get_local_executor();
+        let task = f();
 
-                tx.send(res).expect("[BUG] Failed to send a result");
-            }));
+        ex.spawn_task(task);
 
-            match rx.recv_timeout(timeout).map_err(|_| ErrTimeout) {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(panic_msg)) => panic::resume_unwind(panic_msg),
-                Err(ErrTimeout) => Err(ErrTimeout),
-            }
-        })
-        .expect(BUG_MESSAGE)
+        let res = panic::catch_unwind(move || {
+            local_executor().run();
+        });
+
+        let _ = sender.send(res);
+    });
+
+    match receiver.recv_timeout(timeout) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(msg)) => panic::resume_unwind(msg),
+        Err(RecvTimeoutError::Timeout) => panic!("Test timed out!"),
+        _ => panic!("{BUG_MESSAGE}"),
+    }
 }
 
 /// Initializes the local executor (if it is not initialized) and blocks the current
@@ -157,7 +175,7 @@ fn run_in_another_thread_and_wait_for_result_with_timeout(
 /// # Shortcut
 ///
 /// You can use [`orengine::test::test_local`](crate::test::test_local).
-/// An example below is equivalent to the one above:
+/// The example below is equivalent to the one above:
 ///
 /// ```no_run
 /// async fn awesome_async_function() -> usize {
@@ -177,16 +195,23 @@ pub fn run_test_and_block_on_local<Fut>(creator: fn() -> Fut, timeout: Option<Du
 where
     Fut: Future<Output = ()> + 'static,
 {
-    let test_fn = move || {
-        get_local_executor()
-            .run_and_block_on_local(upgrade_future(creator()))
-            .expect(BUG_MESSAGE);
-    };
-
     if let Some(timeout) = timeout {
-        run_in_another_thread_and_wait_for_result_with_timeout(test_fn, timeout).unwrap();
+        run_in_another_thread_and_wait_for_result_with_timeout(
+            move || unsafe {
+                Task::from_future(
+                    upgrade_future_for_with_timeout(creator()),
+                    Locality::local(),
+                )
+            },
+            timeout,
+        )
+        .unwrap();
     } else {
-        test_fn();
+        get_local_executor()
+            .run_and_block_on_local(async move {
+                upgrade_future(creator()).await;
+            })
+            .expect(BUG_MESSAGE);
     }
 }
 
@@ -252,74 +277,84 @@ pub fn run_test_and_block_on_shared<Fut>(creator: fn() -> Fut, timeout: Option<D
 where
     Fut: Future<Output = ()> + Send + 'static,
 {
-    let test_fn = move || {
-        get_local_executor()
-            .run_and_block_on_shared(upgrade_future(creator()))
-            .expect(BUG_MESSAGE);
-    };
-
     if let Some(timeout) = timeout {
-        run_in_another_thread_and_wait_for_result_with_timeout(test_fn, timeout).unwrap();
+        run_in_another_thread_and_wait_for_result_with_timeout(
+            move || unsafe {
+                Task::from_future(
+                    upgrade_future_for_with_timeout(creator()),
+                    Locality::shared(),
+                )
+            },
+            timeout,
+        )
+        .unwrap();
     } else {
-        test_fn();
+        get_local_executor()
+            .run_and_block_on_shared(async move {
+                upgrade_future(creator()).await;
+            })
+            .expect(BUG_MESSAGE);
     }
 }
 
-// TODO
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::sleep;
-//
-//     async fn awesome_fn() {}
-//
-//     fn awesome_fn_that_sync_time_out() {
-//         thread::sleep(Duration::from_millis(100));
-//     }
-//
-//     async fn awesome_fn_that_async_time_out() {
-//         sleep(Duration::from_millis(100)).await;
-//     }
-//
-//     #[test]
-//     fn test_test_runner_not_timeout() {
-//         run_test_and_block_on_local(awesome_fn, None);
-//         run_test_and_block_on_local(awesome_fn, Some(Duration::from_secs(1)));
-//
-//         run_test_and_block_on_local(
-//             || async { awesome_fn_that_sync_time_out() },
-//             None,
-//         );
-//         run_test_and_block_on_local(
-//             || async { awesome_fn_that_sync_time_out() },
-//             Some(Duration::from_secs(1)),
-//         );
-//
-//         run_test_and_block_on_local(
-//             awesome_fn_that_async_time_out,
-//             None,
-//         );
-//         run_test_and_block_on_local(
-//             || awesome_fn_that_async_time_out(),
-//             Some(Duration::from_secs(1)),
-//         );
-//     }
-//
-//     #[test]
-//     #[should_panic = "Test timed out"]
-//     fn test_test_runner_sync_timeout() {
-//         run_test_and_block_on_local(
-//             || async { awesome_fn_that_sync_time_out() },
-//             Some(Duration::from_millis(1)),
-//         );
-//     }
-//
-//     #[test]
-//     #[should_panic = "Test timed out"]
-//     fn test_test_runner_async_timeout() {
-//         run_test_and_block_on_local(
-//             awesome_fn_that_async_time_out,
-//             Some(Duration::from_millis(1)),
-//         );
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate as orengine;
+    use crate::sleep;
+    use std::thread;
+
+    async fn awesome_fn() {}
+
+    fn awesome_fn_that_sync_time_out() {
+        thread::sleep(Duration::from_secs(10));
+    }
+
+    async fn awesome_fn_that_async_time_out() {
+        sleep(Duration::from_secs(10)).await;
+    }
+
+    #[test]
+    fn test_test_runner_not_timeout() {
+        run_test_and_block_on_shared(awesome_fn, None);
+        run_test_and_block_on_shared(awesome_fn, Some(Duration::from_secs(1)));
+
+        run_test_and_block_on_local(awesome_fn, None);
+        run_test_and_block_on_local(awesome_fn, Some(Duration::from_secs(1)));
+    }
+
+    #[test]
+    #[should_panic = "Test timed out"]
+    fn test_test_runner_sync_timeout() {
+        run_test_and_block_on_local(
+            || async {
+                awesome_fn_that_sync_time_out();
+            },
+            Some(Duration::from_millis(1)),
+        );
+    }
+
+    #[test]
+    #[should_panic = "Test timed out"]
+    fn test_test_runner_async_timeout() {
+        run_test_and_block_on_local(
+            awesome_fn_that_async_time_out,
+            Some(Duration::from_millis(1)),
+        );
+    }
+
+    #[orengine::test::test_local(timeout_ms = 3000)]
+    fn test_test_macro_not_timeout() {}
+
+    #[orengine::test::test_local(timeout_ms = 500)]
+    #[should_panic = "Test timed out"]
+    fn test_test_macro_sync_timeout() {
+        awesome_fn_that_sync_time_out();
+    }
+
+    #[orengine::test::test_local(timeout_ms = 500)]
+    #[should_panic = "Test timed out"]
+    fn test_test_macro_async_timeout() {
+        awesome_fn_that_async_time_out().await;
+    }
+}

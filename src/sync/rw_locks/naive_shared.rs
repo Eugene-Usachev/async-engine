@@ -10,8 +10,10 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
 use crate::runtime::IsLocal;
 use crate::sync::{AsyncRWLock, AsyncReadLockGuard, AsyncWriteLockGuard, LockStatus};
+use crate::utils::likely;
 use crate::yield_now;
 use crossbeam::utils::CachePadded;
+
 // region guards
 
 /// RAII structure used to release the shared read access of a lock when
@@ -124,10 +126,10 @@ unsafe impl<T: ?Sized + Send> Send for WriteLockGuard<'_, T> {}
 ///
 /// This type of lock allows a number of readers or at most one writer at any
 /// point in time. The write portion of this lock typically allows modification
-/// of the underlying data (exclusive access) and the read portion of this lock
+/// of the underlying data (exclusive access), and the read portion of this lock
 /// typically allows for read-only access (shared access).
 ///
-/// In comparison, a [`Mutex`](crate::sync::Mutex)
+/// In comparison, a [`AsyncMutex`](crate::sync::AsyncMutex)
 /// does not distinguish between readers or writers
 /// that acquire the lock, therefore blocking any tasks waiting for the lock to
 /// become available. An `RWLock` will allow any number of readers to acquire the
@@ -248,6 +250,7 @@ impl<T: ?Sized> AsyncRWLock<T> for RWLock<T> {
             .number_of_readers
             .compare_exchange(0, -1, Acquire, Relaxed)
             .is_ok();
+
         if !was_swapped {
             None
         } else {
@@ -257,18 +260,40 @@ impl<T: ?Sized> AsyncRWLock<T> for RWLock<T> {
 
     #[inline]
     fn try_read(&self) -> Option<Self::ReadLockGuard<'_>> {
+        // Optimistic relaxed load
+        let current = self.number_of_readers.load(Relaxed);
+
+        // This branch is only an optimization; correctness still depends on a retry path
+        if likely(current >= 0) {
+            // Try once optimistically
+            if self
+                .number_of_readers
+                .compare_exchange(
+                    current,
+                    current + 1,
+                    Acquire,
+                    Relaxed, // No memory sync needed on failure; we fall back
+                )
+                .is_ok()
+            {
+                return Some(ReadLockGuard::new(self));
+            }
+        }
+
+        // Full retry loop with Acquire on all paths
+        let mut current = self.number_of_readers.load(Acquire);
+
         loop {
-            let number_of_readers = self.number_of_readers.load(Acquire);
-            if number_of_readers >= 0 {
-                if self
-                    .number_of_readers
-                    .compare_exchange(number_of_readers, number_of_readers + 1, Acquire, Relaxed)
-                    .is_ok()
-                {
-                    break Some(ReadLockGuard::new(self));
-                }
-            } else {
-                break None;
+            if current < 0 {
+                return None;
+            }
+
+            match self
+                .number_of_readers
+                .compare_exchange(current, current + 1, Acquire, Acquire)
+            {
+                Ok(_) => return Some(ReadLockGuard::new(self)),
+                Err(actual) => current = actual,
             }
         }
     }

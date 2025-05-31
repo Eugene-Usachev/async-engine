@@ -20,7 +20,9 @@ pub(crate) mod vec_map;
 pub use array_deque::ArrayDeque;
 pub use backoff::Backoff;
 pub use core::*;
-pub(crate) use hints::{assert_hint, likely, unlikely, unreachable_hint, unwrap_or_bug_hint};
+pub(crate) use hints::{
+    assert_hint, likely, unlikely, unreachable_hint, unwrap_or_bug_hint, unwrap_or_bug_message_hint,
+};
 pub use instant::OrengineInstant;
 pub(crate) use progressive_timeout::*;
 pub use ptr::*;

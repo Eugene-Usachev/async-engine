@@ -4,7 +4,7 @@ use std::task::{RawWaker, RawWakerVTable, Waker};
 
 /// This is really unsafe.
 ///
-/// - [`Task`] has no some ref counters, so, task can be dropped
+/// - [`Task`] has no some ref counters, so the task can be dropped
 ///   before it is woken up.
 ///
 /// - [`Task`] can be executed only when it is not running. So you need to control that
@@ -35,7 +35,7 @@ macro_rules! generate_wake {
 }
 
 /// Do the same as [`wake_by_ref`].
-/// [`Executor`](crate::runtime::Executor) will drop the [`Task`] only when it is needed.
+/// [`Executor`](crate::runtime::Executor) will drop the [`Task`] only when it is necessary.
 /// So, you can call it without fear.
 #[inline]
 unsafe fn wake(data_ptr: *const ()) {
@@ -43,7 +43,7 @@ unsafe fn wake(data_ptr: *const ()) {
 }
 
 /// Wakes the [`Task`].
-/// [`Executor`](crate::runtime::Executor) will drop the [`Task`] only when it is needed.
+/// [`Executor`](crate::runtime::Executor) will drop the [`Task`] only when it is necessary.
 /// So, you can call it without fear.
 #[inline]
 unsafe fn wake_by_ref(data_ptr: *const ()) {
@@ -51,7 +51,7 @@ unsafe fn wake_by_ref(data_ptr: *const ()) {
 }
 
 /// Do nothing, because [`Executor`](crate::runtime::Executor) will drop the [`Task`]
-/// only when it is needed.
+/// only when it is necessary.
 #[inline]
 unsafe fn drop(_data_ptr: *const ()) {
     // Executor doesn't drop context. So, if you want to update this function, you should update it in `Executor` too.

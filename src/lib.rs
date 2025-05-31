@@ -2,8 +2,8 @@
 #![deny(clippy::assertions_on_result_states)]
 #![deny(clippy::match_wild_err_arm)]
 #![deny(clippy::allow_attributes_without_reason)]
-#![warn(clippy::pedantic)]
-#![warn(clippy::nursery)]
+#![deny(clippy::pedantic)]
+#![deny(clippy::nursery)]
 #![warn(clippy::cargo)]
 #![allow(
     clippy::too_many_lines,
@@ -27,7 +27,7 @@
 #![allow(
     clippy::missing_errors_doc,
     reason = "Unless the error is something special,
-    the developer should document it."
+    the developer shouldn't document it."
 )]
 #![allow(clippy::redundant_pub_crate, reason = "It improves readability.")]
 #![allow(clippy::struct_field_names, reason = "It improves readability.")]

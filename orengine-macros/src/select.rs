@@ -675,7 +675,8 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
             }
         }
     } else {
-        let mut send_vars = Vec::with_capacity(branches.len()); // move it to avoid temporary values
+        let mut send_vars = Vec::with_capacity(branches.len()); // move it
+                                                                // to avoid temporary values and recreating
         let mut generics = Vec::with_capacity(branches.len());
         let mut union_generic_params = Vec::with_capacity(branches.len());
         let mut match_arms = Vec::with_capacity(branches.len());
@@ -699,10 +700,13 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
             let deadline_body = deadline.body;
 
             set_deadline_block = quote! {
-                local_executor().register_task_in_select_with_deadline(
-                    TaskInSelectBranch::new(task_in_select, 0),
-                    #deadline_expr
-                );
+                #[allow(unused_parens, reason = "Else users can't write `deadline(Instant::now() + timout)`")]
+                {
+                   local_executor().register_task_in_select_with_deadline(
+                        TaskInSelectBranch::new(task_in_select, 0),
+                        #deadline_expr
+                    );
+                }
             };
 
             match_arms.push(quote! {

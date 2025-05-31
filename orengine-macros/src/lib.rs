@@ -9,12 +9,13 @@
 
 extern crate proc_macro;
 mod ident_helper;
+mod poll_for_io_request;
 mod select;
+mod test;
 
+use crate::poll_for_io_request::{poll_for_io_request_, poll_for_time_bounded_io_request_};
+use crate::test::{generate_test, parse_args_to_timeout};
 use proc_macro::TokenStream;
-use quote::quote;
-use std::time::Duration;
-use syn::parse_macro_input;
 
 /// Generates code for [`Future::poll`](std::future::Future::poll).
 ///
@@ -33,34 +34,7 @@ use syn::parse_macro_input;
 /// * `ret_statement` - the return statement which can use `ret`(`usize`) variable.
 #[proc_macro]
 pub fn poll_for_io_request(input: TokenStream) -> TokenStream {
-    let input_elems = parse_macro_input!(input as syn::ExprTuple).elems;
-
-    let do_request = &input_elems[0];
-    let ret_statement = &input_elems[1];
-
-    let expanded = quote! {
-        if let Some(mut io_request_data) = this.io_request_data.take() {
-            match io_request_data.ret() {
-                Ok(io_request_data_ret) => {
-                    ret = io_request_data_ret;
-
-                    return Poll::Ready(Ok(#ret_statement));
-                }
-                Err(err) => {
-                    return Poll::Ready(Err(err));
-                }
-            }
-        }
-
-        let task = unsafe { orengine::runtime::Task::from_context(cx) };
-        this.io_request_data = Some(IoRequestData::new(task));
-
-        #do_request;
-
-        return Poll::Pending;
-    };
-
-    TokenStream::from(expanded)
+    poll_for_io_request_(input)
 }
 
 /// Generates code for [`Future::poll`](std::future::Future::poll).
@@ -87,75 +61,7 @@ pub fn poll_for_io_request(input: TokenStream) -> TokenStream {
 /// * `ret_statement` - the return statement which can use `ret`(`usize`) variable.
 #[proc_macro]
 pub fn poll_for_time_bounded_io_request(input: TokenStream) -> TokenStream {
-    let input_elems = parse_macro_input!(input as syn::ExprTuple).elems;
-
-    let do_request = &input_elems[0];
-    let ret_statement = &input_elems[1];
-
-    let expanded = quote! {
-        if let Some(mut io_request_data) = this.io_request_data.take() {
-            match io_request_data.ret() {
-                Ok(io_request_data_ret) => {
-                    ret = io_request_data_ret;
-                    worker.deregister_time_bounded_io_task(&this.deadline);
-
-                    return Poll::Ready(Ok(#ret_statement));
-                }
-                Err(err) => {
-                    if err.kind() != std::io::ErrorKind::TimedOut {
-                        worker.deregister_time_bounded_io_task(&this.deadline);
-                    }
-
-                    return Poll::Ready(Err(err));
-                }
-            }
-        }
-
-        let task = unsafe { orengine::runtime::Task::from_context(cx) };
-        this.io_request_data = Some(IoRequestData::new(task));
-
-        #do_request;
-
-        return Poll::Pending;
-    };
-
-    TokenStream::from(expanded)
-}
-
-/// Generates a test function with a provided locality.
-fn generate_test(input: TokenStream, is_local: bool, timeout: Option<Duration>) -> TokenStream {
-    // TODO timeout
-    let fn_item = parse_macro_input!(input as syn::ItemFn);
-    let body = &fn_item.block;
-    let attrs = &fn_item.attrs;
-    let signature = &fn_item.sig;
-    let name = &signature.ident;
-    let name_str = name.to_string();
-
-    assert!(
-        signature.inputs.is_empty(),
-        "Test function must have zero arguments!"
-    );
-
-    let spawn_fn = if is_local {
-        quote! { orengine::test::run_test_and_block_on_local }
-    } else {
-        quote! { orengine::test::run_test_and_block_on_shared }
-    };
-
-    let expanded = quote! {
-        #[test]
-        #(#attrs)*
-        fn #name() {
-            println!("Test {} started!", #name_str.to_string());
-            #spawn_fn(|| async {
-                #body
-            }, None); // TODO timeout
-            println!("Test {} finished!", #name_str.to_string());
-        }
-    };
-
-    TokenStream::from(expanded)
+    poll_for_time_bounded_io_request_(input)
 }
 
 /// Generates a test function by running an `Executor` with a `local` task.
@@ -166,7 +72,11 @@ fn generate_test(input: TokenStream, is_local: bool, timeout: Option<Duration>) 
 /// [`test_shared()`] generates a test function that runs an
 /// `Executor` with a `shared` task.
 ///
-/// # Example
+/// You also can pass timeout to the test function by the argument `timeout_ms`.
+///
+/// # Examples
+///
+/// ## Without timeout
 ///
 /// ```ignore
 /// #[orengine::test::test_local]
@@ -174,6 +84,16 @@ fn generate_test(input: TokenStream, is_local: bool, timeout: Option<Duration>) 
 ///     let start = std::time::Instant::now();
 ///     orengine::sleep(std::time::Duration::from_secs(1)).await;
 ///     assert!(start.elapsed() >= std::time::Duration::from_secs(1));
+/// }
+/// ```
+///
+/// ## With timeout
+///
+/// ```ignore
+/// #[orengine::test::test_local(timeout_ms = 100)]
+/// #[should_panic = "Test timed out"]
+/// fn test_sleep() {
+///     orengine::sleep(std::time::Duration::from_secs(3)).await;
 /// }
 /// ```
 ///
@@ -198,8 +118,8 @@ fn generate_test(input: TokenStream, is_local: bool, timeout: Option<Duration>) 
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn test_local(_: TokenStream, input: TokenStream) -> TokenStream {
-    generate_test(input, true, None) // TODO timeout
+pub fn test_local(args: TokenStream, input: TokenStream) -> TokenStream {
+    generate_test(input, true, parse_args_to_timeout(args))
 }
 
 /// Generates a test function by running an `Executor` with a `local` task.
@@ -209,7 +129,11 @@ pub fn test_local(_: TokenStream, input: TokenStream) -> TokenStream {
 /// [`test_shared()`] generates a test function that runs an `Executor` with a `shared` task.
 /// `test_local` generates a test function that runs an `Executor` with a `local` task.
 ///
-/// # Example
+/// You also can pass timeout to the test function by the argument `timeout_ms`.
+///
+/// # Examples
+///
+/// ## Without timeout
 ///
 /// ```ignore
 /// #[orengine::test::test_shared]
@@ -221,6 +145,17 @@ pub fn test_local(_: TokenStream, input: TokenStream) -> TokenStream {
 ///     assert!(start.elapsed() >= std::time::Duration::from_secs(1));
 /// }
 /// ```
+///
+/// ## With timeout
+///
+/// ```ignore
+/// #[orengine::test::test_shared(timeout_ms = 100)]
+/// #[should_panic = "Test timed out"]
+/// fn test_sleep() {
+///     orengine::sleep(std::time::Duration::from_secs(3)).await;
+/// }
+/// ```
+///
 ///
 /// # Note
 ///
@@ -243,8 +178,8 @@ pub fn test_local(_: TokenStream, input: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn test_shared(_: TokenStream, input: TokenStream) -> TokenStream {
-    generate_test(input, false, None) // TODO timeout
+pub fn test_shared(args: TokenStream, input: TokenStream) -> TokenStream {
+    generate_test(input, false, parse_args_to_timeout(args))
 }
 
 ///# `select!` Macro

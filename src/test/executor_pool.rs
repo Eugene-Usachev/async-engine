@@ -184,7 +184,7 @@ impl ExecutorPool {
         }
     }
 
-    /// Creates a new executor in new thread and returns its [`channel`](Channel).
+    /// Creates a new executor in a new thread and returns its [`channel`](Channel).
     fn new_executor() -> Arc<Channel<Job>> {
         let channel = Arc::new(Channel::bounded(0));
         let channel_clone = channel.clone();

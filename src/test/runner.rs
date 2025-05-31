@@ -92,9 +92,11 @@ where
     Fut: Future<Output = ()> + 'static,
 {
     upgrade_future(async move {
+        let id = local_executor().id();
+
         future.await;
 
-        stop_executor(local_executor().id());
+        stop_executor(id);
     })
     .await;
 }

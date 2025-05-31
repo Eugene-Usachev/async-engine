@@ -1,5 +1,6 @@
 // region `local` stress tests
 
+use crate::acquire_global_lock;
 use orengine::sync::{
     AsyncChannel, AsyncSender, AsyncWaitGroup, Channel, LocalChannel, LocalWaitGroup, WaitGroup,
 };
@@ -238,6 +239,8 @@ async fn test_local_select_stress(with_default: bool) {
         assert_eq!(*total_sent.borrow(), *total_received.borrow());
     }
 
+    let guard = acquire_global_lock();
+
     for _ in 0..TRIES {
         stress_test_with_creators_select(
             with_default,
@@ -275,14 +278,16 @@ async fn test_local_select_stress(with_default: bool) {
         )
         .await;
     }
+
+    drop(guard);
 }
 
-#[orengine::test::test_local]
+#[orengine::test::test_local(timeout_ms = 10000)]
 fn test_local_select_stress_with_default() {
     test_local_select_stress(true).await;
 }
 
-#[orengine::test::test_local]
+#[orengine::test::test_local(timeout_ms = 10000)]
 fn test_local_select_stress_without_default() {
     test_local_select_stress(false).await;
 }
@@ -516,6 +521,8 @@ async fn test_shared_select_stress(with_default: bool) {
         assert_eq!(total_sent.load(Relaxed), total_received.load(Relaxed));
     }
 
+    let guard = acquire_global_lock();
+
     for _ in 0..TRIES {
         stress_test_with_creators_select(
             with_default,
@@ -553,14 +560,16 @@ async fn test_shared_select_stress(with_default: bool) {
         )
         .await;
     }
+
+    drop(guard);
 }
 
-#[orengine::test::test_shared]
+#[orengine::test::test_shared(timeout_ms = 10000)]
 fn test_shared_select_stress_with_default() {
     test_shared_select_stress(true).await;
 }
 
-#[orengine::test::test_shared]
+#[orengine::test::test_shared(timeout_ms = 10000)]
 fn test_shared_select_stress_without_default() {
     test_shared_select_stress(false).await;
 }

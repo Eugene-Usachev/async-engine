@@ -1,10 +1,10 @@
-use crate::global_lock;
+use crate::acquire_global_lock;
 use orengine::sync::{AsyncWaitGroup, WaitGroup};
 use orengine::test::sched_future_to_another_thread;
 use orengine::utils::SpinLock;
 use std::sync::Arc;
 
-#[orengine::test::test_shared]
+#[orengine::test::test_shared(timeout_ms = 10000)]
 fn stress_test_mutex() {
     const PAR: usize = 4;
     const TRIES: usize = 1000;
@@ -17,7 +17,7 @@ fn stress_test_mutex() {
         wg.done();
     }
 
-    let lock = global_lock();
+    let lock = acquire_global_lock();
 
     for _ in 0..20 {
         let mutex = Arc::new(SpinLock::new(0));

@@ -1,13 +1,16 @@
-use crate::global_lock;
-use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender, AsyncWaitGroup, LocalChannel, LocalWaitGroup, TryRecvErr, TrySendErr};
-use orengine::{local_executor, yield_now, Local};
+use crate::acquire_global_lock;
+use orengine::sync::{
+    AsyncChannel, AsyncReceiver, AsyncSender, AsyncWaitGroup, LocalChannel, LocalWaitGroup,
+    TryRecvErr, TrySendErr,
+};
+use orengine::{Local, local_executor, yield_now};
 
 #[allow(clippy::future_not_send, reason = "Because it is test")]
 async fn stress_test_local_channel_try(channel: LocalChannel<usize>) {
     const PAR: usize = 10;
     const COUNT: usize = 100;
 
-    let lock = global_lock();
+    let guard = acquire_global_lock();
 
     for _ in 0..10 {
         let res = Local::new(0);
@@ -73,15 +76,15 @@ async fn stress_test_local_channel_try(channel: LocalChannel<usize>) {
         assert_eq!(*res.borrow(), PAR * COUNT * (COUNT - 1) / 2);
     }
 
-    drop(lock);
+    drop(guard);
 }
 
-#[orengine::test::test_local]
+#[orengine::test_local(timeout_ms = 10000)]
 fn stress_test_local_channel_try_unbounded() {
     stress_test_local_channel_try(LocalChannel::unbounded()).await;
 }
 
-#[orengine::test::test_local]
+#[orengine::test_local(timeout_ms = 10000)]
 fn stress_test_local_channel_try_bounded() {
     stress_test_local_channel_try(LocalChannel::bounded(1024)).await;
 }

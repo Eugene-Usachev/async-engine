@@ -1,4 +1,4 @@
-use crate::runtime::{Locality, Task};
+use crate::runtime::Task;
 use crate::sync_task_queue::SyncTaskList;
 use crossbeam::utils::CachePadded;
 use std::fmt::Debug;
@@ -77,44 +77,6 @@ pub enum Call {
     ///
     /// * calling task must be shared (else you don't need any [`Calls`](Call))
     PushFnToThreadPool(NonNull<dyn Fn()>),
-    /// Changes the current task locality and wakes up the current task.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use std::future::Future;
-    /// use std::pin::Pin;
-    /// use std::task::{Context, Poll};
-    /// use orengine::local_executor;
-    /// use orengine::runtime::call::Call;
-    /// use orengine::runtime::Locality;
-    ///
-    /// struct UpdateCurrentTaskLocality {
-    ///     locality: Locality,
-    ///     was_called: bool,
-    /// }
-    ///
-    /// impl Future for UpdateCurrentTaskLocality {
-    ///     type Output = ();
-    ///
-    ///     fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
-    ///         let this = &mut *self;
-    ///
-    ///         if !this.was_called {
-    ///             this.was_called = true;
-    ///
-    ///             unsafe {
-    ///                 local_executor().invoke_call(Call::change_current_task_locality(this.locality));
-    ///             };
-    ///
-    ///             return Poll::Pending;
-    ///         }
-    ///
-    ///         Poll::Ready(())
-    ///     }
-    /// }
-    /// ```
-    ChangeCurrentTaskLocality(Locality),
     /// It is a fallback if [`Call`] don't support necessary action. If you think your action
     /// should be supported, please open an issue.
     ///
@@ -197,47 +159,6 @@ impl Call {
         Self::PushFnToThreadPool(f)
     }
 
-    /// Changes the current task locality and wakes up the current task.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use std::future::Future;
-    /// use std::pin::Pin;
-    /// use std::task::{Context, Poll};
-    /// use orengine::local_executor;
-    /// use orengine::runtime::call::Call;
-    /// use orengine::runtime::Locality;
-    ///
-    /// struct UpdateCurrentTaskLocality {
-    ///     locality: Locality,
-    ///     was_called: bool,
-    /// }
-    ///
-    /// impl Future for UpdateCurrentTaskLocality {
-    ///     type Output = ();
-    ///
-    ///     fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
-    ///         let this = &mut *self;
-    ///
-    ///         if !this.was_called {
-    ///             this.was_called = true;
-    ///
-    ///             unsafe {
-    ///                 local_executor().invoke_call(Call::change_current_task_locality(this.locality));
-    ///             };
-    ///
-    ///             return Poll::Pending;
-    ///         }
-    ///
-    ///         Poll::Ready(())
-    ///     }
-    /// }
-    /// ```
-    pub fn change_current_task_locality(locality: Locality) -> Self {
-        Self::ChangeCurrentTaskLocality(locality)
-    }
-
     /// It is a fallback if [`Call`] don't support necessary action. If you think your action
     /// should be supported, please open an issue.
     ///
@@ -262,10 +183,6 @@ impl Debug for Call {
             }
             Self::ReleaseAtomicBool(_) => write!(f, "Call::ReleaseAtomicBool"),
             Self::PushFnToThreadPool(_) => write!(f, "Call::PushFnToThreadPool"),
-            Self::ChangeCurrentTaskLocality(locality) => write!(
-                f,
-                "Call::ChangeCurrentTaskLocality with locality: {locality:?}"
-            ),
             Self::CallFn(_) => write!(f, "Call::CallFn"),
         }
     }

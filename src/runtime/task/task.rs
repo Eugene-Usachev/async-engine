@@ -1,5 +1,4 @@
 use crate::runtime::Locality;
-use crate::runtime::call::Call;
 use crate::runtime::task::task_data::TaskData;
 use crate::{Executor, local_executor};
 use std::future::Future;
@@ -380,34 +379,25 @@ macro_rules! panic_if_shared_in_future {
 pub async unsafe fn update_current_task_locality(locality: Locality) {
     struct UpdateCurrentTaskLocality {
         locality: Locality,
-        was_called: bool,
     }
 
     impl Future for UpdateCurrentTaskLocality {
         type Output = ();
 
-        fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let this = &mut *self;
 
-            if !this.was_called {
-                this.was_called = true;
-
-                unsafe {
-                    local_executor().invoke_call(Call::change_current_task_locality(this.locality));
-                };
-
-                return Poll::Pending;
+            unsafe {
+                (*cx.waker().data().cast::<Task>().cast_mut())
+                    .data
+                    .set_locality(this.locality);
             }
 
             Poll::Ready(())
         }
     }
 
-    UpdateCurrentTaskLocality {
-        locality,
-        was_called: false,
-    }
-    .await;
+    UpdateCurrentTaskLocality { locality }.await;
 }
 
 #[cfg(test)]

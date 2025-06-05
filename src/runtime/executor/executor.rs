@@ -458,7 +458,7 @@ impl Executor {
     /// Processing current [`Call`]. It is taken out [`exec_task_now`](Executor::exec_task_now)
     /// to allow the compiler to decide whether to inline this function.
     #[inline(never)]
-    fn handle_call(&mut self, mut task: Task) {
+    fn handle_call(&mut self, task: Task) {
         match mem::take(&mut self.current_call) {
             Call::None => {}
             Call::PushCurrentTaskTo(task_list) => unsafe { task_list.as_ref().push(task) },
@@ -486,23 +486,6 @@ impl Executor {
                 );
 
                 self.thread_pool.push(task, unsafe { f.as_mut() });
-            }
-            Call::ChangeCurrentTaskLocality(locality) => {
-                task.data.set_locality(locality);
-                assert_eq!(
-                    task.is_local(),
-                    locality.is_local(),
-                    "locality is {}, local is {}, shared is {}",
-                    locality.value,
-                    Locality::local().value,
-                    Locality::shared().value
-                );
-
-                if locality.is_local() {
-                    self.spawn_local_task(task);
-                } else {
-                    self.spawn_shared_task(task);
-                }
             }
             Call::CallFn(func) => unsafe { (*func)(task) },
         }

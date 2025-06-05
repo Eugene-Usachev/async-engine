@@ -880,178 +880,6 @@ macro_rules! generate_recv_or_subscribe {
     };
 }
 
-// region sender
-
-/// The `Sender` allows sending values into the [`Channel`].
-///
-/// When the [`channel`](Channel) is not full, values are sent immediately.
-///
-/// If the [`channel`](Channel) is full, the sender waits until capacity
-/// is available or the [`channel`](Channel) is closed.
-///
-/// # Example
-///
-/// ```rust
-/// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
-///
-///  async fn foo() {
-///     let channel = orengine::sync::Channel::bounded(2); // capacity = 2
-///     let (sender, receiver) = channel.split();
-///
-///     sender.send(1).await.unwrap();
-///     let res = receiver.recv().await.unwrap();
-///     assert_eq!(res, 1);
-/// }
-/// ```
-pub struct Sender<'channel, T> {
-    inner: &'channel NaiveMutex<Inner<T>>,
-}
-
-impl<'channel, T> Sender<'channel, T> {
-    /// Creates a new [`Sender`].
-    #[inline]
-    fn new(inner: &'channel NaiveMutex<Inner<T>>) -> Self {
-        Self { inner }
-    }
-}
-
-impl<T> AsyncSender<T> for Sender<'_, T> {
-    #[allow(
-        clippy::future_not_send,
-        reason = "It is not `Send` only when T is not `Send`, it is fine"
-    )]
-    fn send(&self, value: T) -> impl Future<Output = Result<(), SendErr<T>>> {
-        WaitSend::new(value, self.inner)
-    }
-
-    #[allow(
-        clippy::future_not_send,
-        reason = "It is not `Send` only when T is not `Send`, it is fine"
-    )]
-    fn send_deadline(
-        &self,
-        value: T,
-        deadline: impl Into<OrengineInstant>,
-    ) -> impl Future<Output = Result<(), SendTimeoutErr<T>>> {
-        WaitSendWithDeadline::new(value, self.inner, deadline.into())
-    }
-
-    generate_try_send!();
-
-    #[allow(
-        clippy::future_not_send,
-        reason = "It is not `Send` only when T is not `Send`, it is fine"
-    )]
-    async fn sender_close(&self) {
-        close(self.inner).await;
-    }
-}
-
-impl<T> IsLocal for Sender<'_, T> {
-    const IS_LOCAL: bool = false;
-}
-
-impl<T> Clone for Sender<'_, T> {
-    fn clone(&self) -> Self {
-        Sender { inner: self.inner }
-    }
-}
-
-impl<T> SelectSender for Sender<'_, T> {
-    type Data = T;
-
-    generate_send_or_subscribe!();
-}
-
-unsafe impl<T: Send> Sync for Sender<'_, T> {}
-unsafe impl<T: Send> Send for Sender<'_, T> {}
-impl<T: UnwindSafe> UnwindSafe for Sender<'_, T> {}
-impl<T: RefUnwindSafe> RefUnwindSafe for Sender<'_, T> {}
-
-// endregion
-
-// region receiver
-
-/// The `Receiver` allows receiving values from the [`Channel`].
-///
-/// When the [`channel`](Channel) is not empty, values are received immediately.
-///
-/// If the [`channel`](Channel) is empty, the receiver waits until a value
-/// is available or the [`channel`](Channel) is closed.
-///
-/// # Example
-///
-/// ```rust
-/// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
-///
-/// async fn foo() {
-///     let channel = orengine::sync::Channel::bounded(2); // capacity = 2
-///     let (sender, receiver) = channel.split();
-///
-///     sender.send(1).await.unwrap();
-///     let res = receiver.recv().await.unwrap();
-///     assert_eq!(res, 1);
-/// }
-pub struct Receiver<'channel, T> {
-    inner: &'channel NaiveMutex<Inner<T>>,
-}
-
-impl<'channel, T> Receiver<'channel, T> {
-    /// Creates a new [`Receiver`].
-    #[inline]
-    fn new(inner: &'channel NaiveMutex<Inner<T>>) -> Self {
-        Self { inner }
-    }
-
-    /// Returns a reference to the inner [`NaiveMutex`].
-    fn inner(&self) -> &NaiveMutex<Inner<T>> {
-        self.inner
-    }
-
-    generate_recv_in_ptr_and_recv_in_ptr_with_timeout!();
-
-    generate_try_recv_in!();
-}
-
-impl<T> AsyncReceiver<T> for Receiver<'_, T> {
-    crate::sync::channels::macros::impl_recv_from_recv_in_ptr!();
-
-    crate::sync::channels::macros::impl_recv_with_timeout_from_recv_in_ptr_with_deadline!();
-
-    crate::sync::channels::macros::impl_try_recv_from_recv_in_ptr!();
-
-    #[allow(
-        clippy::future_not_send,
-        reason = "It is not `Send` only when T is not `Send`, it is fine"
-    )]
-    fn receiver_close(&self) -> impl Future<Output = ()> {
-        close(self.inner)
-    }
-}
-
-impl<T> IsLocal for Receiver<'_, T> {
-    const IS_LOCAL: bool = false;
-}
-
-impl<T> SelectReceiver for Receiver<'_, T> {
-    type Data = T;
-
-    generate_recv_or_subscribe!();
-}
-
-impl<T> Clone for Receiver<'_, T> {
-    fn clone(&self) -> Self {
-        Receiver { inner: self.inner }
-    }
-}
-
-unsafe impl<T: Send> Sync for Receiver<'_, T> {}
-unsafe impl<T: Send> Send for Receiver<'_, T> {}
-impl<T: UnwindSafe> UnwindSafe for Receiver<'_, T> {}
-impl<T: RefUnwindSafe> RefUnwindSafe for Receiver<'_, T> {}
-
-// endregion
-
 // region channel
 
 /// The `Channel` provides an asynchronous communication channel between tasks.
@@ -1073,9 +901,7 @@ impl<T: RefUnwindSafe> RefUnwindSafe for Receiver<'_, T> {}
 ///
 /// Read [`Executor`](crate::Executor) for more details.
 ///
-/// # Examples
-///
-/// ## Don't split
+/// # Example
 ///
 /// ```rust
 /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
@@ -1085,21 +911,6 @@ impl<T: RefUnwindSafe> RefUnwindSafe for Receiver<'_, T> {}
 ///
 ///     channel.send(1).await.unwrap();
 ///     let res = channel.recv().await.unwrap();
-///     assert_eq!(res, 1);
-/// }
-/// ```
-///
-/// ## Split into receiver and sender
-///
-/// ```rust
-/// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
-///
-///  async fn foo() {
-///     let channel = orengine::sync::Channel::bounded(1); // capacity = 1
-///     let (sender, receiver) = channel.split();
-///
-///     sender.send(1).await.unwrap();
-///     let res = receiver.recv().await.unwrap();
 ///     assert_eq!(res, 1);
 /// }
 /// ```
@@ -1135,15 +946,6 @@ impl<T> Channel<T> {
 }
 
 impl<T> AsyncChannel<T> for Channel<T> {
-    type Sender<'channel>
-        = Sender<'channel, T>
-    where
-        T: 'channel;
-    type Receiver<'channel>
-        = Receiver<'channel, T>
-    where
-        T: 'channel;
-
     /// Creates a bounded [`channel`](Channel) with a given capacity.
     ///
     /// A bounded channel limits the number of items that can be stored before sending blocks.
@@ -1182,10 +984,6 @@ impl<T> AsyncChannel<T> for Channel<T> {
                 deque: WaitingTaskSharedDequeGuard::new(),
             }),
         }
-    }
-
-    fn split(&self) -> (Sender<T>, Receiver<T>) {
-        (Sender::new(&self.inner), Receiver::new(&self.inner))
     }
 
     #[allow(
@@ -1571,46 +1369,6 @@ mod tests {
         assert_eq!(dropped.lock().as_slice(), [2]);
 
         channel.receiver_close().await;
-        match channel
-            .send(DroppableElement::new(5, dropped.clone()))
-            .await
-            .expect_err("should be closed")
-        {
-            SendErr::Closed(elem) => {
-                assert_eq!(elem.value, 5);
-                assert_eq!(dropped.lock().as_slice(), [2]);
-            }
-        }
-        assert_eq!(dropped.lock().as_slice(), [2, 5]);
-    }
-
-    #[orengine::test::test_shared]
-    fn test_drop_shared_channel_split() {
-        let channel = Channel::bounded(1);
-        let dropped = Arc::new(SpinLock::new(Vec::new()));
-        let (sender, receiver) = channel.split();
-
-        let _ = sender.send(DroppableElement::new(1, dropped.clone())).await;
-        let mut prev_elem = DroppableElement::new(2, dropped.clone());
-
-        drop(prev_elem);
-
-        prev_elem = receiver.recv().await.unwrap();
-
-        assert_eq!(prev_elem.value, 1);
-        assert_eq!(dropped.lock().as_slice(), [2]);
-
-        let _ = sender.send(DroppableElement::new(3, dropped.clone())).await;
-        unsafe {
-            receiver
-                .recv_in_ptr(Ptr::from(&mut prev_elem))
-                .await
-                .unwrap();
-        };
-        assert_eq!(prev_elem.value, 3);
-        assert_eq!(dropped.lock().as_slice(), [2]);
-
-        sender.sender_close().await;
         match channel
             .send(DroppableElement::new(5, dropped.clone()))
             .await

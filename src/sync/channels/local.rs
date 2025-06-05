@@ -727,172 +727,6 @@ macro_rules! generate_recv_or_subscribe {
     };
 }
 
-// region sender
-
-/// The `LocalSender` allows sending values into the [`LocalChannel`].
-///
-/// When the [`local channel`](LocalChannel) is not full, values are sent immediately.
-///
-/// If the [`local channel`](LocalChannel) is full, the sender waits until capacity
-/// is available or the [`local channel`](LocalChannel) is closed.
-///
-/// # Example
-///
-/// ```rust
-/// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
-///
-/// async fn foo() {
-///     let channel = orengine::sync::LocalChannel::bounded(2); // capacity = 2
-///     let (sender, receiver) = channel.split();
-///
-///     sender.send(1).await.unwrap();
-///     let res = receiver.recv().await.unwrap();
-///     assert_eq!(res, 1);
-/// }
-/// ```
-pub struct LocalSender<'channel, T> {
-    inner: &'channel UnsafeCell<Inner<T>>,
-    // impl !Send
-    no_send_marker: std::marker::PhantomData<*const ()>,
-}
-
-impl<'channel, T> LocalSender<'channel, T> {
-    /// Creates a new [`LocalSender`].
-    #[inline]
-    fn new(inner: &'channel UnsafeCell<Inner<T>>) -> Self {
-        Self {
-            inner,
-            no_send_marker: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<T> IsLocal for LocalSender<'_, T> {
-    const IS_LOCAL: bool = true;
-}
-
-impl<T> AsyncSender<T> for LocalSender<'_, T> {
-    #[allow(clippy::future_not_send, reason = "Because it is `local`")]
-    fn send(&self, value: T) -> impl Future<Output = Result<(), SendErr<T>>> {
-        WaitLocalSend::new(value, unsafe { &mut *self.inner.get() })
-    }
-
-    #[allow(clippy::future_not_send, reason = "Because it is `local`")]
-    fn send_deadline(
-        &self,
-        value: T,
-        deadline: impl Into<OrengineInstant>,
-    ) -> impl Future<Output = Result<(), SendTimeoutErr<T>>> {
-        WaitLocalSendWithDeadline::new(value, unsafe { &mut *self.inner.get() }, deadline.into())
-    }
-
-    generate_try_send!();
-
-    async fn sender_close(&self) {
-        let inner = unsafe { &mut *self.inner.get() };
-        close(inner);
-    }
-}
-
-impl<T> SelectSender for LocalSender<'_, T> {
-    type Data = T;
-
-    generate_send_or_subscribe!();
-}
-
-impl<T> Clone for LocalSender<'_, T> {
-    fn clone(&self) -> Self {
-        LocalSender {
-            inner: self.inner,
-            no_send_marker: std::marker::PhantomData,
-        }
-    }
-}
-
-unsafe impl<T> Sync for LocalSender<'_, T> {}
-
-// endregion
-
-// region receiver
-
-/// The `LocalReceiver` allows receiving values from the [`LocalChannel`].
-///
-/// When the [`local channel`](LocalChannel) is not empty, values are received immediately.
-///
-/// If the [`local channel`](LocalChannel) is empty, the receiver waits until a value
-/// is available or the [`local channel`](LocalChannel) is closed.
-///
-/// # Example
-///
-/// ```rust
-/// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
-///
-/// async fn foo() {
-///     let channel = orengine::sync::LocalChannel::bounded(2); // capacity = 2
-///     let (sender, receiver) = channel.split();
-///
-///     sender.send(1).await.unwrap();
-///     let res = receiver.recv().await.unwrap();
-///     assert_eq!(res, 1);
-/// }
-/// ```
-pub struct LocalReceiver<'channel, T> {
-    inner: &'channel UnsafeCell<Inner<T>>,
-    // impl !Send
-    no_send_marker: std::marker::PhantomData<*const ()>,
-}
-
-impl<'channel, T> LocalReceiver<'channel, T> {
-    /// Creates a new [`LocalReceiver`].
-    #[inline]
-    fn new(inner: &'channel UnsafeCell<Inner<T>>) -> Self {
-        Self {
-            inner,
-            no_send_marker: std::marker::PhantomData,
-        }
-    }
-
-    generate_recv_in_ptr_and_recv_in_ptr_with_timeout!();
-
-    generate_try_recv_in_ptr!();
-}
-
-impl<T> AsyncReceiver<T> for LocalReceiver<'_, T> {
-    crate::sync::channels::macros::impl_recv_from_recv_in_ptr!();
-
-    crate::sync::channels::macros::impl_recv_with_timeout_from_recv_in_ptr_with_deadline!();
-
-    crate::sync::channels::macros::impl_try_recv_from_recv_in_ptr!();
-
-    async fn receiver_close(&self) {
-        let inner = unsafe { &mut *self.inner.get() };
-        close(inner);
-    }
-}
-
-impl<T> IsLocal for LocalReceiver<'_, T> {
-    const IS_LOCAL: bool = true;
-}
-
-impl<T> SelectReceiver for LocalReceiver<'_, T> {
-    type Data = T;
-
-    generate_recv_or_subscribe!();
-}
-
-impl<T> Clone for LocalReceiver<'_, T> {
-    fn clone(&self) -> Self {
-        LocalReceiver {
-            inner: self.inner,
-            no_send_marker: std::marker::PhantomData,
-        }
-    }
-}
-
-unsafe impl<T> Sync for LocalReceiver<'_, T> {}
-
-// endregion
-
 // region channel
 
 /// The `LocalChannel` provides an asynchronous communication channel between
@@ -915,9 +749,7 @@ unsafe impl<T> Sync for LocalReceiver<'_, T> {}
 ///
 /// Read [`Executor`](crate::Executor) for more details.
 ///
-/// # Examples
-///
-/// ## Don't split
+/// # Example
 ///
 /// ```rust
 /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
@@ -927,21 +759,6 @@ unsafe impl<T> Sync for LocalReceiver<'_, T> {}
 ///
 ///     channel.send(1).await.unwrap();
 ///     let res = channel.recv().await.unwrap();
-///     assert_eq!(res, 1);
-/// }
-/// ```
-///
-/// ## Split into receiver and sender
-///
-/// ```rust
-/// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
-///
-/// async fn foo() {
-///     let channel = orengine::sync::LocalChannel::bounded(1); // capacity = 1
-///     let (sender, receiver) = channel.split();
-///
-///     sender.send(1).await.unwrap();
-///     let res = receiver.recv().await.unwrap();
 ///     assert_eq!(res, 1);
 /// }
 /// ```
@@ -972,15 +789,6 @@ impl<T> LocalChannel<T> {
 }
 
 impl<T> AsyncChannel<T> for LocalChannel<T> {
-    type Sender<'channel>
-        = LocalSender<'channel, T>
-    where
-        Self: 'channel;
-    type Receiver<'channel>
-        = LocalReceiver<'channel, T>
-    where
-        Self: 'channel;
-
     #[inline]
     fn bounded(capacity: usize) -> Self {
         Self {
@@ -1005,14 +813,6 @@ impl<T> AsyncChannel<T> for LocalChannel<T> {
             }),
             no_send_marker: std::marker::PhantomData,
         }
-    }
-
-    #[inline]
-    fn split(&self) -> (Self::Sender<'_>, Self::Receiver<'_>) {
-        (
-            LocalSender::new(&self.inner),
-            LocalReceiver::new(&self.inner),
-        )
     }
 
     async fn close(&self) {
@@ -1376,23 +1176,6 @@ mod tests {
     }
 
     #[orengine::test::test_local]
-    fn test_local_channel_split() {
-        let chan = LocalChannel::bounded(N);
-        let (tx, rx) = chan.split();
-
-        local_executor().spawn_local(async {
-            for i in 0..=N * 2 {
-                let res = rx.recv().await.unwrap();
-                assert_eq!(res, i);
-            }
-        });
-
-        for i in 0..=N * 3 {
-            tx.send(i).await.unwrap();
-        }
-    }
-
-    #[orengine::test::test_local]
     fn test_drop_local_channel() {
         let dropped = Arc::new(SpinLock::new(Vec::new()));
         let channel = LocalChannel::bounded(1);
@@ -1423,46 +1206,6 @@ mod tests {
 
         channel.close().await;
 
-        match channel
-            .send(DroppableElement::new(5, dropped.clone()))
-            .await
-            .expect_err("should be closed")
-        {
-            SendErr::Closed(elem) => {
-                assert_eq!(elem.value, 5);
-                assert_eq!(dropped.lock().as_slice(), [2]);
-            }
-        }
-        assert_eq!(dropped.lock().as_slice(), [2, 5]);
-    }
-
-    #[orengine::test::test_local]
-    fn test_drop_local_channel_split() {
-        let channel = LocalChannel::bounded(1);
-        let dropped = Arc::new(SpinLock::new(Vec::new()));
-        let (sender, receiver) = channel.split();
-
-        let _ = sender.send(DroppableElement::new(1, dropped.clone())).await;
-        let mut prev_elem = DroppableElement::new(2, dropped.clone());
-
-        drop(prev_elem);
-
-        prev_elem = receiver.recv().await.unwrap();
-
-        assert_eq!(prev_elem.value, 1);
-        assert_eq!(dropped.lock().as_slice(), [2]);
-
-        let _ = sender.send(DroppableElement::new(3, dropped.clone())).await;
-        unsafe {
-            receiver
-                .recv_in_ptr(Ptr::from(&mut prev_elem))
-                .await
-                .unwrap();
-        };
-        assert_eq!(prev_elem.value, 3);
-        assert_eq!(dropped.lock().as_slice(), [2]);
-
-        sender.sender_close().await;
         match channel
             .send(DroppableElement::new(5, dropped.clone()))
             .await

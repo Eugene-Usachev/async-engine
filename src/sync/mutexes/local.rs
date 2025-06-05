@@ -301,6 +301,8 @@ mod tests {
     use super::*;
     use crate as orengine;
     use crate::sleep::sleep;
+    use crate::sleep_until;
+    use crate::utils::OrengineInstant;
     use std::rc::Rc;
     use std::time::{Duration, Instant};
 
@@ -314,17 +316,24 @@ mod tests {
 
         local_executor().exec_local_future(async move {
             let mut value = mutex_clone.lock().await;
+
             println!("1");
+
             sleep(SLEEP_DURATION).await;
+
             println!("3");
+
             *value = true;
         });
 
         println!("2");
+
         let value = mutex.lock().await;
+
         println!("4");
 
         let elapsed = start.elapsed();
+
         assert!(elapsed >= SLEEP_DURATION);
         assert!(*value);
     }
@@ -333,29 +342,39 @@ mod tests {
     fn test_try_local_mutex() {
         const SLEEP_DURATION: Duration = Duration::from_millis(1);
 
-        let start = Instant::now();
         let mutex = Rc::new(LocalMutex::new(false));
         let mutex_clone = mutex.clone();
+        let start = OrengineInstant::now();
 
         local_executor().exec_local_future(async move {
             let mut value = mutex_clone.lock().await;
+
             println!("1");
-            sleep(SLEEP_DURATION).await;
+
+            sleep_until(start + SLEEP_DURATION).await;
+
             println!("4");
+
             *value = true;
         });
 
         println!("2");
+
         let value = mutex.try_lock();
+
         println!("3");
+
         assert!(value.is_none());
 
-        sleep(SLEEP_DURATION * 2).await;
+        sleep_until(start + SLEEP_DURATION * 2).await;
 
         let elapsed = start.elapsed();
         assert!(elapsed >= SLEEP_DURATION * 2);
+
         let value = mutex.try_lock();
+
         println!("5");
-        assert!(*(value.expect("not waited")));
+
+        assert!(*(value.expect("not locked")), "not waited");
     }
 }

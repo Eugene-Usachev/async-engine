@@ -272,6 +272,7 @@ unsafe impl Send for File {}
 impl Drop for File {
     fn drop(&mut self) {
         let close_future = self.close();
+
         local_executor().exec_local_future(async {
             close_future.await.expect("Failed to close file");
         });

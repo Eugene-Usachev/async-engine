@@ -62,7 +62,7 @@ pub use local::Local;
 pub use orengine_macros::select;
 pub use run::*;
 pub use runtime::{Executor, local_executor, stop_all_executors, stop_executor};
-pub use sleep::sleep;
+pub use sleep::{sleep, sleep_until};
 pub use socket2;
 pub use test::{test_local, test_shared};
 pub use yield_now::{Yield, yield_now};

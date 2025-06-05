@@ -19,10 +19,11 @@ use std::time::Duration;
 ///
 ///  async fn foo() {
 ///     let channel = orengine::sync::Channel::bounded(2); // capacity = 2
-///     let (sender, receiver) = channel.split();
 ///
-///     sender.send(1).await.unwrap();
-///     let res = receiver.recv().await.unwrap();
+///     channel.send(1).await.unwrap();
+///
+///     let res = channel.recv().await.unwrap();
+///
 ///     assert_eq!(res, 1);
 /// }
 /// ```
@@ -35,25 +36,26 @@ pub trait AsyncSender<T>: IsLocal {
     /// # Example
     ///
     /// ```no_run
+    /// use std::sync::Arc;
     /// use std::time::Duration;
     /// use orengine::{local_executor, sleep};
     /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
     ///
     ///  async fn foo() {
-    ///     let channel = orengine::sync::Channel::bounded(1);
-    ///     let (sender, receiver) = channel.split();
+    ///     let channel = Arc::new(orengine::sync::Channel::bounded(1));
+    ///     let channel_clone = channel.clone();
     ///     let start = std::time::Instant::now();
     ///
     ///     local_executor().spawn_local(async move {
     ///         sleep(Duration::from_millis(100)).await;
     ///
-    ///         receiver.recv().await.unwrap();
+    ///         channel_clone.recv().await.unwrap();
     ///     });
     ///
-    ///     sender.send(1).await.unwrap();
+    ///     channel.send(1).await.unwrap();
     ///     assert!(start.elapsed() < Duration::from_millis(100));
     ///
-    ///     sender.send(2).await.unwrap(); // blocks, because the channel is full
+    ///     channel.send(2).await.unwrap(); // blocks, because the channel is full
     ///     assert!(start.elapsed() >= Duration::from_millis(100));
     /// }
     /// ```
@@ -149,12 +151,13 @@ pub trait AsyncSender<T>: IsLocal {
     ///
     /// # async fn foo() {
     /// let channel = orengine::sync::Channel::bounded(1);
-    /// let (sender, receiver) = channel.split();
     ///
-    /// assert!(sender.try_send(1).is_ok());
-    /// assert!(matches!(sender.try_send(2).unwrap_err(), TrySendErr::Full(_)));
+    /// assert!(channel.try_send(1).is_ok());
+    /// assert!(matches!(channel.try_send(2).unwrap_err(), TrySendErr::Full(_)));
+    ///
     /// channel.close().await;
-    /// assert!(matches!(sender.try_send(3).unwrap_err(), TrySendErr::Closed(_)));
+    ///
+    /// assert!(matches!(channel.try_send(3).unwrap_err(), TrySendErr::Closed(_)));
     /// # }
     /// ```
     fn try_send(&self, value: T) -> Result<(), TrySendErr<T>>;
@@ -175,10 +178,11 @@ pub trait AsyncSender<T>: IsLocal {
 ///
 /// async fn foo() {
 ///     let channel = orengine::sync::Channel::bounded(2); // capacity = 2
-///     let (sender, receiver) = channel.split();
 ///
-///     sender.send(1).await.unwrap();
-///     let res = receiver.recv().await.unwrap();
+///     channel.send(1).await.unwrap();
+///
+///     let res = channel.recv().await.unwrap();
+///
 ///     assert_eq!(res, 1);
 /// }
 /// ```
@@ -348,9 +352,7 @@ pub trait AsyncReceiver<T>: IsLocal {
 ///
 /// Else use [`Channel`](crate::sync::Channel).
 ///
-/// # Examples
-///
-/// ## Don't split
+/// # Example
 ///
 /// ```rust
 /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
@@ -363,38 +365,7 @@ pub trait AsyncReceiver<T>: IsLocal {
 ///     assert_eq!(res, 1);
 /// }
 /// ```
-///
-/// ## Split into receiver and sender
-///
-/// ```rust
-/// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
-///
-/// async fn foo() {
-///     let channel = orengine::sync::Channel::bounded(1); // capacity = 1
-///     let (sender, receiver) = channel.split();
-///
-///     sender.send(1).await.unwrap();
-///     let res = receiver.recv().await.unwrap();
-///     assert_eq!(res, 1);
-/// }
-/// ```
 pub trait AsyncChannel<T>: AsyncSender<T> + AsyncReceiver<T> {
-    /// The `AsyncSender` allows sending values into the [`channel`](AsyncChannel).
-    ///
-    /// It provides blocking [`send`](AsyncSender::send) and non-blocking
-    /// [`try_send`](AsyncSender::try_send) methods.
-    type Sender<'channel>: AsyncSender<T> + 'channel
-    where
-        Self: 'channel;
-
-    /// The `AsyncReceiver` allows receiving values from the [`channel`](AsyncChannel).
-    ///
-    /// It provides blocking [`recv`](AsyncReceiver::recv) and non-blocking
-    /// [`try_recv`](AsyncReceiver::try_recv) methods.
-    type Receiver<'channel>: AsyncReceiver<T> + 'channel
-    where
-        Self: 'channel;
-
     /// Creates a bounded [`channel`](AsyncChannel) with a given capacity.
     ///
     /// A bounded channel limits the number of items that can be stored before sending blocks.
@@ -432,42 +403,6 @@ pub trait AsyncChannel<T>: AsyncSender<T> + AsyncReceiver<T> {
     /// }
     /// ```
     fn unbounded() -> Self;
-
-    /// Returns [`AsyncSender`] and [`AsyncReceiver`] for the [`channel`](AsyncChannel).
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use orengine::local_executor;
-    /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
-    ///
-    /// struct Actor1<Req: AsyncReceiver<usize>, Res: AsyncSender<usize>> {
-    ///     req_ch: Req,
-    ///     res_ch: Res
-    /// }
-    ///
-    /// # async fn run_actor1<Req: AsyncReceiver<usize>, Res: AsyncSender<usize>>(actor: Actor1<Req, Res>) {}
-    ///
-    /// struct Actor2<Req: AsyncReceiver<usize>, Res: AsyncSender<usize>> {
-    ///     req_ch: Req,
-    ///     res_ch: Res
-    /// }
-    ///
-    /// # async fn run_actor2<Req: AsyncReceiver<usize>, Res: AsyncSender<usize>>(actor: Actor2<Req, Res>) {}
-    ///
-    /// async fn start_actors<Ch1: AsyncChannel<usize>, Ch2: AsyncChannel<usize>>(ch1: Ch1, ch2: Ch2) {
-    ///     let (actor1_res, actor1_req) = ch1.split();
-    ///     let (actor2_res, actor2_req) = ch2.split();
-    ///
-    ///     let actor1 = Actor1 { req_ch: actor1_req, res_ch: actor2_res };
-    ///     let actor2 = Actor2 { req_ch: actor2_req, res_ch: actor1_res };
-    ///
-    ///     local_executor().spawn_local(run_actor1(actor1));
-    ///
-    ///     run_actor2(actor2).await;
-    /// }
-    /// ```
-    fn split(&self) -> (Self::Sender<'_>, Self::Receiver<'_>);
 
     /// Closes the [`channel`](AsyncChannel).
     fn close(&self) -> impl Future<Output = ()>;

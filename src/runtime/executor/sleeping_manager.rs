@@ -107,10 +107,18 @@ impl SleepingManager {
     ///
     /// It returns the nearest deadline.
     pub(super) fn poll(&mut self, now: OrengineInstant) -> Option<OrengineInstant> {
+        fn wake_task(task: Task) {
+            match (task.is_local(), cfg!(test)) {
+                (true, _) => local_executor().exec_task(task),
+                (false, true) => local_executor().spawn_task_at_end_of_shared_tasks_queue(task),
+                (false, false) => local_executor().spawn_shared_task(task),
+            }
+        }
+
         let mut the_nearest_deadline;
 
         the_nearest_deadline = Self::poll_map(&mut self.sleeping_tasks, now, |task| {
-            local_executor().spawn_task(task);
+            wake_task(task);
         });
 
         the_nearest_deadline = Self::poll_map(&mut self.tasks_with_deadline, now, |task| {
@@ -127,7 +135,7 @@ impl SleepingManager {
             now,
             |task_in_select_branch| {
                 if let Some(task) = task_in_select_branch.acquire_once() {
-                    local_executor().spawn_task(task);
+                    wake_task(task);
                 }
             },
         )

@@ -16,7 +16,7 @@ pub(crate) struct TaskPool {
 impl TaskPool {
     /// Returns a [`Task`] with the given future.
     #[inline]
-    pub(crate) fn acquire<F: Future<Output = ()>>(future: F, locality: Locality) -> Task {
+    pub(crate) fn acquire<F: Future<Output = ()> + 'static>(future: F, locality: Locality) -> Task {
         let executor = local_executor();
         let size = size_of::<F>();
         #[cfg(debug_assertions)]

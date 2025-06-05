@@ -172,36 +172,46 @@ mod tests {
     use crate::sync::{
         AsyncCondVar, AsyncMutex, AsyncWaitGroup, LocalCondVar, LocalMutex, LocalWaitGroup,
     };
-    use crate::{Local, sleep};
+    use crate::{Local, sleep_until};
     use std::time::Duration;
 
     #[orengine::test_local]
     fn test_task_with_deadline() {
+        use std::rc::Rc;
+
         macro_rules! generate_test_task_with_deadline {
-            ($option:pat, $assert_failure_message:expr, $wake_block:block, $task_name:ident) => {
+            ($option:pat, $assert_failure_message:expr, $deadline_ident:ident, $wake_block:block, $task_name:ident) => {
                 let result = Local::new(0);
-                let wg = LocalWaitGroup::new();
+                let wg = Rc::new(LocalWaitGroup::new());
+                let wg_clone = wg.clone();
                 let mut woken_result = CallState::FirstCall;
                 let woken_result_ptr = CallStatePtr::new(&mut woken_result);
-                let task = LocalMutex::new(None);
-                let cond_var = LocalCondVar::new();
+                let task = Rc::new(LocalMutex::new(None));
+                let task_clone = task.clone();
+                let cond_var = Rc::new(LocalCondVar::new());
+                let cond_var_clone = cond_var.clone();
+                let start = OrengineInstant::now();
+                let $deadline_ident = start + Duration::from_millis(1000);
 
                 wg.inc();
 
-                local_executor().exec_local_future(async {
-                    *task.lock().await = Some(unsafe { Task::get_current().await });
+                local_executor().exec_local_future(async move {
+                    *task_clone.lock().await = Some(unsafe { Task::get_current().await });
 
-                    local_executor().spawn_local(async {
-                        cond_var.notify_one();
+                    local_executor().spawn_local(async move {
+                        cond_var_clone.notify_one();
                     });
 
                     unsafe { Task::park_current_task().await };
 
-                    assert!(matches!(woken_result, $option), $assert_failure_message);
+                    assert!(
+                        matches!(*woken_result_ptr, $option),
+                        $assert_failure_message
+                    );
 
                     *result.borrow_mut() += 1;
 
-                    wg.done();
+                    wg_clone.done();
                 });
 
                 let mut task_guard = cond_var
@@ -211,7 +221,7 @@ mod tests {
                 let $task_name = TaskWithDeadline::create_new_and_register(
                     task_guard.take().unwrap(),
                     woken_result_ptr,
-                    OrengineInstant::now() + Duration::from_micros(10),
+                    start + Duration::from_micros(10),
                 );
 
                 $wake_block;
@@ -223,9 +233,10 @@ mod tests {
         generate_test_task_with_deadline!(
             CallState::WokenByDeadline,
             "TaskWithDeadline should be woken by deadline",
+            deadline,
             {
-                local_executor().spawn_local(async {
-                    sleep(Duration::from_millis(10)).await;
+                local_executor().spawn_local(async move {
+                    sleep_until(deadline).await;
 
                     assert!(
                         !task.try_wake_with(|| {}),
@@ -239,6 +250,7 @@ mod tests {
         generate_test_task_with_deadline!(
             CallState::FirstCall,
             "TaskWithDeadline should be woken by call",
+            _timeout,
             {
                 assert!(
                     task.try_wake_with(|| {}),

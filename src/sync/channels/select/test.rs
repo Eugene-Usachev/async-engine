@@ -59,7 +59,7 @@ fn test_local_select_with_default() {
         let chan = Rc::new(LocalChannel::<u32>::bounded(1));
         let chan_clone = chan.clone();
 
-        local_executor().spawn_local(async {
+        local_executor().spawn_local(async move {
             let ch2 = LocalChannel::<u32>::bounded(1);
             let ch3 = LocalChannel::<u32>::bounded(1);
             select! {
@@ -157,7 +157,7 @@ fn test_local_select_without_default_non_blocking() {
         let chan = Rc::new(LocalChannel::<u32>::bounded(1));
         let chan_clone = chan.clone();
 
-        local_executor().spawn_local(async {
+        local_executor().spawn_local(async move {
             let ch2 = LocalChannel::<u32>::bounded(1);
             let ch3 = LocalChannel::<u32>::bounded(1);
             select! {
@@ -382,7 +382,7 @@ fn test_shared_select_with_default() {
         let chan = Arc::new(Channel::<u32>::bounded(1));
         let chan_clone = chan.clone();
 
-        local_executor().spawn_shared(async {
+        local_executor().spawn_shared(async move {
             let ch2 = Channel::<u32>::bounded(1);
             let ch3 = Channel::<u32>::bounded(1);
             select! {
@@ -480,7 +480,7 @@ fn test_shared_select_without_default_non_blocking() {
         let chan = Arc::new(Channel::<u32>::bounded(1));
         let chan_clone = chan.clone();
 
-        local_executor().spawn_shared(async {
+        local_executor().spawn_shared(async move {
             let ch2 = Channel::<u32>::bounded(1);
             let ch3 = Channel::<u32>::bounded(1);
             select! {

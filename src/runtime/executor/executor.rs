@@ -608,7 +608,7 @@ impl Executor {
     #[inline]
     pub fn exec_local_future<F>(&mut self, future: F)
     where
-        F: Future<Output = ()>,
+        F: Future<Output = ()> + 'static,
     {
         let task = unsafe { Task::from_future(future, Locality::local()) };
         self.exec_task(task);
@@ -623,7 +623,7 @@ impl Executor {
     #[inline]
     pub fn exec_shared_future<F>(&mut self, future: F)
     where
-        F: Future<Output = ()> + Send,
+        F: Future<Output = ()> + 'static + Send,
     {
         let task = unsafe { Task::from_future(future, Locality::shared()) };
         self.exec_task(task);
@@ -758,7 +758,7 @@ impl Executor {
     #[inline]
     pub fn spawn_local<F>(&mut self, future: F)
     where
-        F: Future<Output = ()>,
+        F: Future<Output = ()> + 'static,
     {
         let task = unsafe { Task::from_future(future, Locality::local()) };
         self.spawn_local_task(task);
@@ -776,7 +776,7 @@ impl Executor {
     #[inline]
     pub fn spawn_shared<F>(&mut self, future: F)
     where
-        F: Future<Output = ()> + Send,
+        F: Future<Output = ()> + 'static + Send,
     {
         let task = unsafe { Task::from_future(future, Locality::shared()) };
         self.spawn_shared_task(task);
@@ -793,6 +793,20 @@ impl Executor {
             self.spawn_local_task(task);
         } else {
             self.spawn_shared_task(task);
+        }
+    }
+
+    /// Calls [`spawn_task_at_end_of_local_tasks_queue`](Executor::spawn_task_at_end_of_local_tasks_queue)
+    /// or [`spawn_task_at_end_of_shared_tasks_queue`](Executor::spawn_task_at_end_of_shared_tasks_queue) depending on
+    /// the [`locality`](Locality) of the provided [`task`](Task).
+    ///
+    /// It is a little bit slower than calling them directly.
+    #[inline]
+    pub fn spawn_task_at_start_of_queue(&mut self, task: Task) {
+        if task.is_local() {
+            self.spawn_task_at_end_of_local_tasks_queue(task);
+        } else {
+            self.spawn_task_at_end_of_shared_tasks_queue(task);
         }
     }
 
@@ -837,7 +851,7 @@ impl Executor {
     ///     STORAGE_SHARD.with(|shard| shard.get(&key).cloned())
     /// }
     ///
-    /// async fn handle_connection<S: Stream>(mut stream: S) {
+    /// async fn handle_connection<S: Stream + 'static>(mut stream: S) {
     ///     stream.poll_recv().await.unwrap();
     ///
     ///     let mut buffer = full_buffer();
@@ -920,12 +934,12 @@ impl Executor {
     ///     response_sender: Sender
     /// }
     ///
-    /// async fn process_stream<S: Stream>(mut stream: S) {
+    /// async fn process_stream<S: Stream + 'static>(mut stream: S) {
     ///     let mut request = read_request(stream).await;
     ///     let shard_id = get_shard_id(&request);
     ///
     ///     local_executor()
-    ///         .send_local_future_to_executor(|| async {
+    ///         .send_local_future_to_executor(move || async move {
     ///             let mut storage = get_local_storage();
     ///             let value = storage.get(&request.key).unwrap();
     ///
@@ -941,7 +955,7 @@ impl Executor {
         executor_id: usize,
     ) -> Result<(), ExecutorIsNotRegisteredErr>
     where
-        Fut: Future<Output = ()>,
+        Fut: Future<Output = ()> + 'static,
         F: FnOnce() -> Fut,
     {
         let task = unsafe { Task::from_future(creator(), Locality::local()) };
@@ -967,7 +981,7 @@ impl Executor {
         executor_id: usize,
     ) -> Result<(), ExecutorIsNotRegisteredErr>
     where
-        Fut: Future<Output = ()> + Send,
+        Fut: Future<Output = ()> + 'static + Send,
         F: FnOnce() -> Fut,
     {
         let task = unsafe { Task::from_future(creator(), Locality::shared()) };
@@ -1301,7 +1315,7 @@ impl Executor {
     ///
     /// println!("Hello from a sync runtime after at least 3 seconds");
     /// ```
-    pub fn run_with_local_future<Fut: Future<Output = ()>>(&mut self, future: Fut) {
+    pub fn run_with_local_future<Fut: Future<Output = ()> + 'static>(&mut self, future: Fut) {
         self.spawn_local(future);
         self.run();
     }
@@ -1333,7 +1347,10 @@ impl Executor {
     ///
     /// println!("Hello from a sync runtime after at least 3 seconds");
     /// ```
-    pub fn run_with_shared_future<Fut: Future<Output = ()> + Send>(&mut self, future: Fut) {
+    pub fn run_with_shared_future<Fut: Future<Output = ()> + 'static + Send>(
+        &mut self,
+        future: Fut,
+    ) {
         self.spawn_shared(future);
         self.run();
     }
@@ -1373,7 +1390,7 @@ impl Executor {
     ///
     /// println!("Hello from a sync runtime after at least 3 seconds with result: {}", res);
     /// ```
-    pub fn run_and_block_on_local<T, Fut: Future<Output = T>>(
+    pub fn run_and_block_on_local<T: 'static, Fut: Future<Output = T> + 'static>(
         &'static mut self,
         future: Fut,
     ) -> Result<T, &'static str> {
@@ -1413,7 +1430,7 @@ impl Executor {
     ///
     /// println!("Hello from a sync runtime after at least 3 seconds with result: {}", res);
     /// ```
-    pub fn run_and_block_on_shared<T, Fut: Future<Output = T> + Send>(
+    pub fn run_and_block_on_shared<T: 'static, Fut: Future<Output = T> + 'static + Send>(
         &'static mut self,
         future: Fut,
     ) -> Result<T, &'static str> {

@@ -1,9 +1,4 @@
-pub use channels::{
-    async_trait::*,
-    errors::*,
-    local::{LocalChannel, LocalReceiver, LocalSender},
-    shared::{Channel, Receiver, Sender},
-};
+pub use channels::{async_trait::*, errors::*, local::LocalChannel, shared::Channel};
 pub use cond_vars::{async_trait::*, local::LocalCondVar, shared::CondVar};
 pub use mutexes::{
     async_trait::*,

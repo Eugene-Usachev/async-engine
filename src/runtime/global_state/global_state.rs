@@ -153,23 +153,28 @@ static GLOBAL_STATE: SpinLock<GlobalState> = SpinLock::new(GlobalState::new());
 /// use orengine::runtime::lock_and_get_global_state;
 /// use orengine::sync::{AsyncWaitGroup, WaitGroup};
 /// use orengine::utils::get_core_ids;
+/// use std::sync::Arc;
 ///
 /// async fn run_shard() {}
 ///
 /// let number_of_cores = get_core_ids().unwrap().len();
-/// let wait_group = WaitGroup::new();
+/// let wait_group = Arc::new(WaitGroup::new());
 ///
 /// wait_group.add(number_of_cores);
 ///
-/// run_shared_future_on_all_cores(|| async {
-///     wait_group.done();
-///     wait_group.wait().await;
+/// run_shared_future_on_all_cores(move || {
+///     let wait_group = wait_group.clone();
 ///
-///     assert_eq!(lock_and_get_global_state().executors_ids().len(), number_of_cores);
+///     async move {
+///         wait_group.done();
+///         wait_group.wait().await;
 ///
-///     // Do some work
+///         assert_eq!(lock_and_get_global_state().executors_ids().len(), number_of_cores);
 ///
-///     stop_all_executors();
+///         // Do some work
+///
+///         stop_all_executors();
+///     }
 /// });
 /// ```
 pub fn lock_and_get_global_state() -> SpinLockGuard<'static, GlobalState> {

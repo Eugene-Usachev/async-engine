@@ -65,14 +65,16 @@ impl Future for Job {
         if let Ok(poll_res) = handle {
             if poll_res.is_ready() {
                 let sender = this.sender.take().unwrap();
+                let result_sender = this.result_sender.clone();
+
                 local_executor().exec_shared_future(async move {
-                    let send_res = this
-                        .result_sender
+                    let send_res = result_sender
                         .send(Result {
                             future_result: Ok(()),
                             sender,
                         })
                         .await;
+
                     assert!(send_res.is_ok(), "{BUG_MESSAGE}");
                 });
 
@@ -82,9 +84,10 @@ impl Future for Job {
             Poll::Pending
         } else {
             let sender = this.sender.take().unwrap();
+            let result_sender = this.result_sender.clone();
+
             local_executor().exec_shared_future(async move {
-                let send_res = this
-                    .result_sender
+                let send_res = result_sender
                     .send(Result {
                         future_result: Err(Box::new(handle.unwrap_err())),
                         sender,

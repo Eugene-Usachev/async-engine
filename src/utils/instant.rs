@@ -276,4 +276,28 @@ mod tests {
 
         assert_eq!(std_instant, std_instant_from_instant);
     }
+
+    #[test]
+    fn test_instant_ordering() {
+        let instant1: OrengineInstant = std::time::Instant::now().into();
+        let instant2 = instant1;
+
+        assert_eq!(instant1, instant2);
+
+        let instant3 = instant1 + Duration::from_millis(1);
+        let instant4 = instant1 + Duration::from_millis(2);
+
+        assert!(instant1 < instant3);
+        assert!(instant3 < instant4);
+
+        let mut btree = std::collections::BTreeSet::new();
+
+        assert!(btree.insert(instant1));
+        assert!(btree.insert(instant3));
+        assert!(btree.insert(instant4));
+
+        assert_eq!(btree.pop_first(), Some(instant1));
+        assert_eq!(btree.pop_first(), Some(instant3));
+        assert_eq!(btree.pop_first(), Some(instant4));
+    }
 }

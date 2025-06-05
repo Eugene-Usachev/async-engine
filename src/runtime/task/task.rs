@@ -47,7 +47,10 @@ pub struct Task {
 
 impl Task {
     /// Creates and allocates a [`Task`] with the given future.
-    pub(crate) fn allocate_new<F: Future<Output = ()>>(future: F, locality: Locality) -> Self {
+    pub(crate) fn allocate_new<F: Future<Output = ()> + 'static>(
+        future: F,
+        locality: Locality,
+    ) -> Self {
         #[allow(unused_unsafe, reason = "False positive")]
         let future_ptr: *mut F = unsafe { &raw mut *(Box::into_raw(Box::new(future))) };
 
@@ -74,7 +77,10 @@ impl Task {
     ///
     /// - With [`shared locality`](Locality::shared) it is safe if the provided [`Future`] is `Send`.
     #[inline]
-    pub unsafe fn from_future<F: Future<Output = ()>>(future: F, locality: Locality) -> Self {
+    pub unsafe fn from_future<F: Future<Output = ()> + 'static>(
+        future: F,
+        locality: Locality,
+    ) -> Self {
         #[cfg(not(feature = "disable_task_pool"))]
         return crate::runtime::TaskPool::acquire(future, locality);
 
@@ -439,15 +445,16 @@ mod tests {
         let task_to_unpark = Local::new(None);
         let task_to_unpark_clone = task_to_unpark.clone();
         let value = Local::new(0);
+        let value_clone = value.clone();
 
-        local_executor().spawn_local(async {
+        local_executor().spawn_local(async move {
             *task_to_unpark_clone.borrow_mut() = Some(unsafe { Task::get_current().await });
 
-            *value.borrow_mut() += 1;
+            *value_clone.borrow_mut() += 1;
 
             unsafe { Task::park_current_task().await };
 
-            *value.borrow_mut() += 1;
+            *value_clone.borrow_mut() += 1;
         });
 
         loop {

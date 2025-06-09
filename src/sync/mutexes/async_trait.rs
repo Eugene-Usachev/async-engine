@@ -25,8 +25,20 @@ pub trait AsyncMutexGuard<'mutex, T: ?Sized + 'mutex>: Deref<Target = T> + Deref
     ///
     /// # Safety
     ///
-    /// The `mutex` is unlocked by calling [`AsyncMutex::unlock`] later.
+    /// The `mutex` is unlocked by calling [`Unlock::unlock`] later.
     unsafe fn leak(self) -> &'mutex Self::Mutex;
+}
+
+/// Trait that allows to release a lock.
+pub trait Unlock {
+    /// Unlocks the `mutex`.
+    ///
+    /// # Safety
+    ///
+    /// - The `mutex` must be locked.
+    ///
+    /// - No other tasks have ownership of this `lock`.
+    unsafe fn unlock(&self);
 }
 
 /// A mutual exclusion primitive useful for protecting shared (between tasks) data.
@@ -61,7 +73,7 @@ pub trait AsyncMutexGuard<'mutex, T: ?Sized + 'mutex>: Deref<Target = T> + Deref
 ///     // lock is released when `guard` goes out of scope
 /// }
 /// ```
-pub trait AsyncMutex<T: ?Sized>: IsLocal {
+pub trait AsyncMutex<T: ?Sized>: IsLocal + Unlock {
     /// The type of the `guard` that is returned from the [`lock`](Self::lock),
     /// [`try_lock`](Self::try_lock), and [`get_locked`](Self::get_locked) methods.
     ///
@@ -92,15 +104,6 @@ pub trait AsyncMutex<T: ?Sized>: IsLocal {
 
     /// Returns a reference to the underlying data. It is safe because it uses `&mut self`.
     fn get_mut(&mut self) -> &mut T;
-
-    /// Unlocks the `mutex`.
-    ///
-    /// # Safety
-    ///
-    /// - The `mutex` must be locked.
-    ///
-    /// - No other tasks has an ownership of this `lock`.
-    unsafe fn unlock(&self);
 
     /// Returns [`guard`](Self::Guard) associated with the `mutex` without locking.
     ///

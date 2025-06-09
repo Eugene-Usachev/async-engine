@@ -291,9 +291,12 @@ mod tests {
 
         for _ in 0..TIMES {
             stream.poll_recv().await.expect("poll failed");
+
             let mut buf = buffer();
+
             buf.set_len(u32::try_from(REQUEST.len()).unwrap()).unwrap();
             stream.recv_exact(&mut buf).await.expect("recv failed");
+
             assert_eq!(REQUEST, buf.as_bytes());
 
             buf.clear();
@@ -391,7 +394,7 @@ mod tests {
         }
     }
 
-    #[orengine::test::test_local]
+    #[orengine::test::test_local(timeout_ms = 3000)]
     fn test_unix_stream_timeout() {
         const ADDR: &str = "/tmp/orengine_test_unix_stream_timeout";
         const SEND: usize = 0;
@@ -402,10 +405,8 @@ mod tests {
 
         let _ = fs::remove_file(ADDR).await;
 
-        let state = Rc::new(LocalMutex::new(SEND));
-        let state_cond_var = Rc::new(LocalCondVar::new());
+        let state = Rc::new(LocalCondVar::new(LocalMutex::new(SEND)));
         let state_clone = state.clone();
-        let state_cond_var_clone = state_cond_var.clone();
         let wg = Rc::new(LocalWaitGroup::new());
         let wg_clone = wg.clone();
 
@@ -421,7 +422,7 @@ mod tests {
                 {
                     let mut guard = state_clone.lock().await;
                     while *guard != expected_state {
-                        guard = state_cond_var_clone.wait(guard).await;
+                        guard = state_clone.wait(guard).await;
                     }
                 }
 
@@ -443,9 +444,7 @@ mod tests {
         wg.wait().await;
 
         loop {
-            let current_state = *state.lock().await;
-
-            match current_state {
+            match *state.lock().await {
                 SEND => {
                     let mut stream = UnixStream::connect_with_timeout(ADDR, TIMEOUT)
                         .await
@@ -516,8 +515,12 @@ mod tests {
 
                 _ => break,
             }
-            *state.lock().await += 1;
-            state_cond_var.notify_one();
+
+            let mut current_state = state.lock().await;
+
+            *current_state += 1;
+
+            state.notify_one(current_state);
         }
     }
 }

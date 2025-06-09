@@ -4,6 +4,7 @@ use orengine::sync::{
     TryRecvErr, TrySendErr,
 };
 use orengine::{Local, local_executor, yield_now};
+use std::rc::Rc;
 
 #[allow(clippy::future_not_send, reason = "Because it is test")]
 async fn stress_test_local_channel_try(channel: LocalChannel<usize>) {
@@ -11,14 +12,23 @@ async fn stress_test_local_channel_try(channel: LocalChannel<usize>) {
     const COUNT: usize = 100;
 
     let guard = acquire_global_lock();
+    let channel = Rc::new(channel);
 
     for _ in 0..10 {
         let res = Local::new(0);
-        let wg = LocalWaitGroup::new();
+        let wg = Rc::new(LocalWaitGroup::new());
 
         wg.add(PAR * 2);
+
         for i in 0..PAR {
-            local_executor().spawn_local(async {
+            let wg = wg.clone();
+            let wg2 = wg.clone();
+            let channel = channel.clone();
+            let channel2 = channel.clone();
+            let res = res.clone();
+            let res2 = res.clone();
+
+            local_executor().spawn_local(async move {
                 if i % 2 == 0 {
                     for j in 0..COUNT {
                         loop {
@@ -42,13 +52,13 @@ async fn stress_test_local_channel_try(channel: LocalChannel<usize>) {
                 wg.done();
             });
 
-            local_executor().spawn_local(async {
+            local_executor().spawn_local(async move {
                 if i % 2 == 0 {
                     for _ in 0..COUNT {
                         loop {
-                            match channel.try_recv() {
+                            match channel2.try_recv() {
                                 Ok(v) => {
-                                    *res.borrow_mut() += v;
+                                    *res2.borrow_mut() += v;
                                     break;
                                 }
                                 Err(e) => match e {
@@ -62,12 +72,12 @@ async fn stress_test_local_channel_try(channel: LocalChannel<usize>) {
                     }
                 } else {
                     for _ in 0..COUNT {
-                        let r = channel.recv().await.unwrap();
-                        *res.borrow_mut() += r;
+                        let r = channel2.recv().await.unwrap();
+                        *res2.borrow_mut() += r;
                     }
                 }
 
-                wg.done();
+                wg2.done();
             });
         }
 

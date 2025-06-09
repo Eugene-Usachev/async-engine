@@ -196,7 +196,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///
     /// # On close
     ///
-    /// Returns [`RecvInResult::Closed`] if the [`channel`](AsyncChannel) is closed.
+    /// Returns [`RecvErr::Closed`] if the [`channel`](AsyncChannel) is closed.
     ///
     /// # Example
     ///
@@ -233,7 +233,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///
     /// # On close
     ///
-    /// Returns [`RecvInResult::Closed`] if the [`channel`](AsyncChannel) is closed.
+    /// Returns [`RecvErr::Closed`] if the [`channel`](AsyncChannel) is closed.
     ///
     /// # Example
     ///
@@ -268,7 +268,7 @@ pub trait AsyncReceiver<T>: IsLocal {
     ///
     /// # On close
     ///
-    /// Returns [`RecvInResult::Closed`] if the [`channel`](AsyncChannel) is closed.
+    /// Returns [`RecvErr::Closed`] if the [`channel`](AsyncChannel) is closed.
     ///
     /// # Example
     ///

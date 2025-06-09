@@ -1,7 +1,9 @@
 use crate::runtime::Task;
+use crate::sync::{AsyncMutexGuard, Mutex, Unlock};
 use crate::sync_task_queue::SyncTaskList;
 use crossbeam::utils::CachePadded;
 use std::fmt::Debug;
+use std::mem;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -24,7 +26,7 @@ pub enum Call {
     /// Does nothing
     #[default]
     None,
-    /// Pushes the current task to the given `AtomicTaskList`.
+    /// Pushes the provided task to the given `AtomicTaskList`.
     ///
     /// # Safety
     ///
@@ -36,6 +38,22 @@ pub enum Call {
     ///
     /// * calling task must be shared (else you don't need any [`Calls`](Call))
     PushCurrentTaskTo(NonNull<SyncTaskList>),
+    /// Releases the given [`Mutex`].
+    ///
+    /// # Safety
+    ///
+    /// * the pointer must be a valid pointer to [`Mutex`]
+    ///
+    /// * the [`Mutex`] must live at least as long as this state of the task
+    ReleaseMutex(NonNull<Mutex<()>>),
+    /// Unlocks the given `lock`.
+    ///
+    /// # Safety
+    ///
+    /// * the pointer must be a valid pointer to [`Unlock`]
+    ///
+    /// * the `lock` must live at least as long as this state of the task
+    ReleaseDynMutex(NonNull<dyn Unlock>),
     /// Pushes the current task to the given `AtomicTaskList` and removes it if the given `AtomicUsize`
     /// is `0` with given `Ordering` after removing executes it.
     ///
@@ -105,7 +123,7 @@ impl Call {
     /// * task must return [`Poll::Pending`](std::task::Poll::Pending) immediately after calling this function
     ///
     /// * calling task must be shared (else you don't need any [`Calls`](Call))
-    pub fn push_current_task_to(send_to: NonNull<SyncTaskList>) -> Self {
+    pub unsafe fn push_current_task_to(send_to: NonNull<SyncTaskList>) -> Self {
         Self::PushCurrentTaskTo(send_to)
     }
 
@@ -123,7 +141,7 @@ impl Call {
     /// * the references must live at least as long as this state of the task
     ///
     /// * calling task must be shared (else you don't need any [`Calls`](Call))
-    pub fn push_current_task_to_and_remove_it_if_counter_is_zero(
+    pub unsafe fn push_current_task_to_and_remove_it_if_counter_is_zero(
         send_to: NonNull<SyncTaskList>,
         counter: NonNull<AtomicUsize>,
         ordering: Ordering,
@@ -142,7 +160,7 @@ impl Call {
     /// * task must return [`Poll::Pending`](std::task::Poll::Pending) immediately after calling this function
     ///
     /// * calling task must be shared (else you don't need any [`Calls`](Call))
-    pub fn release_atomic_bool(atomic_bool: NonNull<CachePadded<AtomicBool>>) -> Self {
+    pub unsafe fn release_atomic_bool(atomic_bool: NonNull<CachePadded<AtomicBool>>) -> Self {
         Self::ReleaseAtomicBool(atomic_bool)
     }
 
@@ -155,8 +173,29 @@ impl Call {
     /// * task must return [`Poll::Pending`](std::task::Poll::Pending) immediately after calling this function
     ///
     /// * calling task must be shared (else you don't need any [`Calls`](Call))
-    pub fn push_fn_to_thread_pool(f: NonNull<dyn Fn()>) -> Self {
+    pub unsafe fn push_fn_to_thread_pool(f: NonNull<dyn Fn()>) -> Self {
         Self::PushFnToThreadPool(f)
+    }
+
+    /// Releases the `lock`.
+    ///
+    /// # Safety
+    ///
+    /// * the pointer must be a valid pointer to [`Unlock`]
+    ///
+    /// * the `lock` must live at least as long as this state of the task
+    pub unsafe fn release_lock<'mutex, T, G>(guard: G) -> Self
+    where
+        T: 'mutex + ?Sized,
+        G: AsyncMutexGuard<'mutex, T> + 'mutex,
+        G::Mutex: Sized,
+    {
+        let dyn_unlock: &dyn Unlock = guard.mutex();
+        let static_mutex: *mut dyn Unlock = unsafe { mem::transmute(dyn_unlock) };
+
+        mem::forget(guard);
+
+        unsafe { Self::ReleaseDynMutex(NonNull::new_unchecked(static_mutex)) }
     }
 
     /// It is a fallback if [`Call`] don't support necessary action. If you think your action
@@ -178,6 +217,8 @@ impl Debug for Call {
         match self {
             Self::None => write!(f, "Call::None"),
             Self::PushCurrentTaskTo(_) => write!(f, "Call::PushCurrentTaskTo"),
+            Self::ReleaseMutex(_) => write!(f, "Call::ReleaseMutex"),
+            Self::ReleaseDynMutex(_) => write!(f, "Call::ReleaseDynMutex"),
             Self::PushCurrentTaskToAndRemoveItIfCounterIsZero(_, _, _) => {
                 write!(f, "Call::PushCurrentTaskToAndRemoveItIfCounterIsZero")
             }
@@ -192,7 +233,7 @@ impl Eq for Call {}
 
 impl PartialEq for Call {
     fn eq(&self, other: &Self) -> bool {
-        std::mem::discriminant(self) == std::mem::discriminant(other)
+        mem::discriminant(self) == mem::discriminant(other)
     }
 }
 

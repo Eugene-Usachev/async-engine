@@ -4,8 +4,10 @@
 //! ownership-based locking through [`LocalMutexGuard`].
 use crate::runtime::{IsLocal, Task, local_executor};
 use crate::sync::mutexes::AsyncSubscribableMutex;
-use crate::sync::{AsyncMutex, AsyncMutexGuard};
-use crate::utils::{TaskVecFromPool, acquire_task_vec_from_pool, likely, unlikely};
+use crate::sync::{AsyncMutex, AsyncMutexGuard, Unlock};
+use crate::utils::{
+    TaskVecFromPool, acquire_task_vec_from_pool, likely, unlikely, unwrap_or_bug_hint,
+};
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::mem::ManuallyDrop;
@@ -162,7 +164,7 @@ impl<'mutex, T: ?Sized> Future for LocalMutexWait<'mutex, T> {
 ///
 /// # async fn write_to_the_dump_file(key: usize, value: usize) {}
 ///
-/// // Correct usage, because after `write_to_log_file(*key, *value).await` and before the future is resolved
+/// // Correct usage, because after `write_to_log_file(*key, *value).await` and before the future is resolved,
 /// // another task can modify the storage. So, we need to lock the storage.
 /// async fn dump_storage(storage: &LocalMutex<HashMap<usize, usize>>) {
 ///     let mut guard = storage.lock().await;
@@ -197,6 +199,23 @@ impl<T> LocalMutex<T> {
 
 impl<T: ?Sized> IsLocal for LocalMutex<T> {
     const IS_LOCAL: bool = true;
+}
+
+impl<T: ?Sized> Unlock for LocalMutex<T> {
+    unsafe fn unlock(&self) {
+        debug_assert!(unsafe { self.is_locked.get().read() });
+
+        let wait_queue = unsafe { &mut *self.wait_queue.get() };
+        let next = wait_queue.pop();
+
+        if unlikely(next.is_some()) {
+            local_executor().exec_task(unwrap_or_bug_hint(next));
+        } else {
+            let is_locked = unsafe { &mut *self.is_locked.get() };
+
+            *is_locked = false;
+        }
+    }
 }
 
 impl<T: ?Sized> AsyncMutex<T> for LocalMutex<T> {
@@ -243,19 +262,6 @@ impl<T: ?Sized> AsyncMutex<T> for LocalMutex<T> {
         unsafe { &mut *self.value.get() }
     }
 
-    unsafe fn unlock(&self) {
-        debug_assert!(unsafe { self.is_locked.get().read() });
-
-        let wait_queue = unsafe { &mut *self.wait_queue.get() };
-        let next = wait_queue.pop();
-        if unlikely(next.is_some()) {
-            local_executor().exec_task(unsafe { next.unwrap_unchecked() });
-        } else {
-            let is_locked = unsafe { &mut *self.is_locked.get() };
-            *is_locked = false;
-        }
-    }
-
     #[inline]
     unsafe fn get_locked(&self) -> Self::Guard<'_> {
         debug_assert!(
@@ -269,10 +275,17 @@ impl<T: ?Sized> AsyncMutex<T> for LocalMutex<T> {
 
 impl<T: ?Sized> AsyncSubscribableMutex<T> for LocalMutex<T> {
     #[inline]
+    fn subscribe_task(&self, task: Task) {
+        let wait_queue = unsafe { &mut *self.wait_queue.get() };
+
+        wait_queue.push(task);
+    }
+
+    #[inline]
     fn low_level_subscribe(&self, cx: &Context) {
         let task = unsafe { Task::from_context(cx) };
-        let wait_queue = unsafe { &mut *self.wait_queue.get() };
-        wait_queue.push(task);
+
+        self.subscribe_task(task);
     }
 }
 

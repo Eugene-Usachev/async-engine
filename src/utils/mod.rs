@@ -12,6 +12,7 @@ mod task_structures_pool;
 mod array_deque;
 mod backoff;
 mod instant;
+mod paired_with_lock;
 mod progressive_timeout;
 mod sendable_ptr;
 mod shuffle;
@@ -24,6 +25,7 @@ pub(crate) use hints::{
     assert_hint, likely, unlikely, unreachable_hint, unwrap_or_bug_hint, unwrap_or_bug_message_hint,
 };
 pub use instant::OrengineInstant;
+pub(crate) use paired_with_lock::PairedWithLock;
 pub(crate) use progressive_timeout::*;
 pub use ptr::*;
 pub(crate) use sealed::Sealed;

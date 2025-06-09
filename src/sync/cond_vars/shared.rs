@@ -1,97 +1,10 @@
-use std::future::Future;
-use std::panic::{RefUnwindSafe, UnwindSafe};
-use std::pin::Pin;
-use std::ptr::NonNull;
-use std::task::{Context, Poll};
-
-use crate::panic_if_local_in_future;
-use crate::runtime::call::Call;
-use crate::runtime::{IsLocal, local_executor};
+use crate::runtime::{Call, Task, local_executor};
 use crate::sync::{AsyncCondVar, AsyncMutex, AsyncMutexGuard, AsyncSubscribableMutex, Mutex};
-use crate::utils::{SyncTaskListFromPool, acquire_sync_task_list_from_pool};
-
-/// Current state of the [`WaitCondVar`].
-enum WaitState {
-    Sleep,
-    Wake,
-    Lock,
-}
-
-/// `WaitCondVar` represents a future returned by the [`CondVar::wait`] method.
-///
-/// It is used to wait for a notification from a condition variable.
-#[repr(C)]
-pub struct WaitCondVar<'mutex, 'cond_var, T, Guard>
-where
-    T: 'mutex + ?Sized,
-    Guard: AsyncMutexGuard<'mutex, T>,
-    Guard::Mutex: AsyncSubscribableMutex<T>,
-{
-    cond_var: &'cond_var CondVar,
-    mutex: &'mutex Guard::Mutex,
-    state: WaitState,
-}
-
-impl<'mutex, 'cond_var, T, Guard> WaitCondVar<'mutex, 'cond_var, T, Guard>
-where
-    T: 'mutex + ?Sized,
-    Guard: AsyncMutexGuard<'mutex, T>,
-    Guard::Mutex: AsyncSubscribableMutex<T>,
-{
-    /// Creates a new [`WaitCondVar`].
-    #[inline]
-    pub fn new(cond_var: &'cond_var CondVar, mutex: &'mutex Guard::Mutex) -> Self {
-        WaitCondVar {
-            state: WaitState::Sleep,
-            cond_var,
-            mutex,
-        }
-    }
-}
-
-impl<'mutex, T, Guard> Future for WaitCondVar<'mutex, '_, T, Guard>
-where
-    T: 'mutex + ?Sized,
-    Guard: AsyncMutexGuard<'mutex, T>,
-    Guard::Mutex: AsyncSubscribableMutex<T>,
-{
-    type Output = <<Guard as AsyncMutexGuard<'mutex, T>>::Mutex as AsyncMutex<T>>::Guard<'mutex>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let this = &mut *self;
-        panic_if_local_in_future!(cx, "CondVar");
-
-        match this.state {
-            WaitState::Sleep => {
-                this.state = WaitState::Wake;
-                unsafe {
-                    local_executor().invoke_call(Call::push_current_task_to(
-                        NonNull::new_unchecked((&raw const *this.cond_var.wait_queue).cast_mut()),
-                    ));
-                };
-                Poll::Pending
-            }
-            WaitState::Wake => {
-                if let Some(guard) = this.mutex.try_lock() {
-                    Poll::Ready(guard)
-                } else {
-                    this.state = WaitState::Lock;
-                    this.mutex.low_level_subscribe(cx);
-                    Poll::Pending
-                }
-            }
-            WaitState::Lock => Poll::Ready(unsafe { this.mutex.get_locked() }),
-        }
-    }
-}
-
-unsafe impl<'mutex, T, Guard> Send for WaitCondVar<'mutex, '_, T, Guard>
-where
-    T: 'mutex + ?Sized + Send,
-    Guard: AsyncMutexGuard<'mutex, T> + Send,
-    Guard::Mutex: AsyncSubscribableMutex<T>,
-{
-}
+use crate::utils::{
+    PairedWithLock, TaskVecFromPool, acquire_task_vec_from_pool, unlikely, unwrap_or_bug_hint,
+};
+use std::ops::Deref;
+use std::panic::{RefUnwindSafe, UnwindSafe};
 
 /// `CondVar` is a condition variable that allows tasks to wait until
 /// notified by another task.
@@ -99,10 +12,12 @@ where
 /// It is designed to be used in conjunction with a [`Mutex`] to provide a way for tasks
 /// to wait for a specific condition to occur.
 ///
-/// # Attention
+/// # About consuming the [`AsyncMutex`]
 ///
-/// Drop a lock before call [`notify_one`](CondVar::notify_one)
-/// or [`notify_all`](CondVar::notify_all) to improve performance.
+/// Almost always one [`AsyncCondVar`] is used only with one [`AsyncMutex`].
+/// Therefore, this implementation consumes it to prevent misuses and to improve performance.
+///
+/// But [`AsyncCondVar`] can be dereferenced to its [`AsyncMutex`] to get access to the inner value.
 ///
 /// # The difference between `CondVar` and [`LocalCondVar`](crate::sync::LocalCondVar)
 ///
@@ -119,94 +34,121 @@ where
 /// use std::time::Duration;
 ///
 /// # async fn test() {
-/// let cvar = Arc::new(CondVar::new());
-/// let cvar_clone = cvar.clone();
-/// let is_ready = Arc::new(Mutex::new(false));
+/// let is_ready = Arc::new(CondVar::new(Mutex::new(false)));
 /// let is_ready_clone = is_ready.clone();
 ///
 /// local_executor().spawn_shared(async move {
 ///     sleep(Duration::from_secs(1)).await;
 ///
 ///     let mut lock = is_ready_clone.lock().await;
+///
 ///     *lock = true;
 ///
-///     drop(lock);
-///     cvar_clone.notify_one();
+///     is_ready_clone.notify_one(lock);
 /// });
 ///
 /// let mut lock = is_ready.lock().await;
 /// while !*lock {
-///     lock = cvar.wait(lock).await; // wait 1 second
+///     lock = is_ready.wait(lock).await; // wait 1 second
 /// }
 /// # }
 /// ```
-pub struct CondVar {
-    wait_queue: SyncTaskListFromPool,
+pub struct CondVar<T, S: AsyncSubscribableMutex<T> = Mutex<T>> {
+    mutex: S,
+    list: PairedWithLock<TaskVecFromPool, T, S>,
+    phantom: std::marker::PhantomData<T>,
 }
 
-impl CondVar {
+impl<T, S: AsyncSubscribableMutex<T>> CondVar<T, S> {
     /// Creates a new [`CondVar`].
-    #[inline]
-    pub fn new() -> Self {
+    pub fn new(mutex: S) -> Self {
         Self {
-            wait_queue: acquire_sync_task_list_from_pool(),
+            mutex,
+            list: PairedWithLock::new(acquire_task_vec_from_pool()),
+            phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl IsLocal for CondVar {
-    const IS_LOCAL: bool = false;
-}
+impl<T, S> AsyncCondVar<T> for CondVar<T, S>
+where
+    S: AsyncSubscribableMutex<T>,
+{
+    type Mutex = S;
 
-impl AsyncCondVar for CondVar {
-    type SubscribableMutex<T>
-        = Mutex<T>
+    async fn wait<'lock>(
+        &'lock self,
+        guard: <S as AsyncMutex<T>>::Guard<'lock>,
+    ) -> <S as AsyncMutex<T>>::Guard<'lock>
     where
-        T: ?Sized;
-
-    #[allow(
-        clippy::future_not_send,
-        reason = "It is not `Send` only when T is not `Send`, it is fine"
-    )]
-    fn wait<'mutex, T>(
-        &self,
-        guard: <Self::SubscribableMutex<T> as AsyncMutex<T>>::Guard<'mutex>,
-    ) -> impl Future<Output = <Self::SubscribableMutex<T> as AsyncMutex<T>>::Guard<'mutex>>
-    where
-        T: ?Sized + 'mutex,
+        T: 'lock,
     {
-        WaitCondVar::<
-            'mutex,
-            '_,
-            T,
-            <Self::SubscribableMutex<T> as AsyncMutex<T>>::Guard<'mutex>
-        >::new(self, guard.mutex())
+        if cfg!(debug_assertions) {
+            assert_eq!(
+                std::ptr::from_ref(guard.mutex()) as usize,
+                &raw const self.mutex as usize,
+                "Attempt to wait on condvar from different mutex"
+            );
+        }
+
+        let current_task = unsafe { Task::get_current().await };
+
+        let list = self.list.get(&guard);
+        list.push(current_task);
+
+        unsafe {
+            local_executor().invoke_call(Call::release_lock(guard));
+
+            Task::park_current_task().await;
+        };
+
+        unsafe { self.mutex.get_locked() }
     }
 
-    fn notify_one(&self) {
-        if let Some(task) = self.wait_queue.pop() {
+    fn notify_one(&self, guard: <S as AsyncMutex<T>>::Guard<'_>) {
+        let list = self.list.get(&guard);
+
+        if let Some(task) = list.pop() {
+            let _ = unsafe { guard.leak() };
+
             local_executor().spawn_shared_task(task);
         }
     }
 
-    fn notify_all(&self) {
-        let executor = local_executor();
-        while let Some(task) = self.wait_queue.pop() {
-            executor.spawn_shared_task(task);
+    fn notify_all(&self, guard: <S as AsyncMutex<T>>::Guard<'_>) {
+        let list = self.list.get(&guard);
+        let len = list.len();
+
+        if unlikely(len == 0) {
+            return;
         }
+
+        let _ = unsafe { guard.leak() };
+
+        let task = unwrap_or_bug_hint(list.pop());
+
+        for _ in 0..len - 1 {
+            let task = unwrap_or_bug_hint(list.pop());
+
+            self.mutex.subscribe_task(task);
+        }
+
+        local_executor().spawn_shared_task(task);
     }
 }
 
-impl Default for CondVar {
-    fn default() -> Self {
-        Self::new()
+impl<T, S: AsyncSubscribableMutex<T>> Deref for CondVar<T, S> {
+    type Target = S;
+
+    fn deref(&self) -> &Self::Target {
+        &self.mutex
     }
 }
 
-unsafe impl Sync for CondVar {}
-unsafe impl Send for CondVar {}
-impl UnwindSafe for CondVar {}
-impl RefUnwindSafe for CondVar {}
+unsafe impl<T, S: AsyncSubscribableMutex<T>> Sync for CondVar<T, S> {}
+unsafe impl<T: Send, S: AsyncSubscribableMutex<T> + Send> Send for CondVar<T, S> {}
+impl<T, S: AsyncSubscribableMutex<T>> UnwindSafe for CondVar<T, S> {}
+impl<T, S: AsyncSubscribableMutex<T>> RefUnwindSafe for CondVar<T, S> {}
 
 /// ```compile_fail
 /// use orengine::sync::{Mutex, CondVar, AsyncMutex, AsyncCondVar};
@@ -221,16 +163,18 @@ impl RefUnwindSafe for CondVar {}
 /// }
 ///
 /// async fn test() {
-///     let mutex = Mutex::new(NonSend {
+///     let cvar = CondVar::new(Mutex::new(NonSend {
 ///         value: 0,
 ///         no_send_marker: std::marker::PhantomData,
 ///     });
+///     let mut guard = mutex.lock().await;
 ///
-///     let guard = mutex.lock().await;
-///     let cvar = CondVar::new();
-///     let guard = check_send(cvar.wait(guard)).await;
+///     guard = check_send(cvar.wait(guard)).await;
+///
 ///     yield_now().await;
+///
 ///     assert_eq!(guard.value, 0);
+///
 ///     drop(guard);
 /// }
 /// ```
@@ -247,15 +191,15 @@ impl RefUnwindSafe for CondVar {}
 /// }
 ///
 /// async fn test() {
-///     let mutex = Mutex::new(CanSend {
-///         value: 0,
-///     });
+///     let cvar = CondVar::new(Mutex::new(CanSend { value: 0 }));
+///     let mut guard = cvar.lock().await;
 ///
-///     let guard = mutex.lock().await;
-///     let cvar = CondVar::new();
-///     let guard = check_send(cvar.wait(guard)).await;
+///     guard = check_send(cvar.wait(guard)).await;
+///
 ///     yield_now().await;
+///
 ///     assert_eq!(guard.value, 0);
+///
 ///     drop(guard);
 /// }
 /// ```
@@ -275,26 +219,24 @@ mod tests {
     use crate as orengine;
     use crate::test::sched_future_to_another_thread;
 
-    const TIME_TO_SLEEP: Duration = Duration::from_millis(1);
+    const TIME_TO_SLEEP: Duration = Duration::from_millis(10);
 
-    async fn test_notify_one(need_drop: bool) {
+    async fn test_notify_one() {
         let start = Instant::now();
-        let pair = Arc::new((Mutex::new(false), CondVar::new()));
-        let pair2 = pair.clone();
+        let cvar = Arc::new(CondVar::new(Mutex::new(false)));
+        let cvar2 = cvar.clone();
 
         sched_future_to_another_thread(async move {
-            let (lock, cvar) = &*pair2;
-            let mut started = lock.lock().await;
+            let mut started = cvar2.lock().await;
+
             sleep(TIME_TO_SLEEP).await;
+
             *started = true;
-            if need_drop {
-                drop(started);
-            }
-            cvar.notify_one();
+
+            cvar2.notify_one(started);
         });
 
-        let (lock, cvar) = &*pair;
-        let mut started = lock.lock().await;
+        let mut started = cvar.lock().await;
         while !*started {
             started = cvar.wait(started).await;
         }
@@ -302,36 +244,32 @@ mod tests {
         assert!(start.elapsed() >= TIME_TO_SLEEP);
     }
 
-    async fn test_notify_all(need_drop: bool) {
-        const NUMBER_OF_WAITERS: usize = 10;
+    async fn test_notify_all() {
+        const NUMBER_OF_WAITERS: usize = 4;
 
         let start = Instant::now();
-        let pair = Arc::new((Mutex::new(false), CondVar::new()));
-        let pair2 = pair.clone();
-        local_executor().spawn_shared(async move {
-            let (lock, cvar) = &*pair2;
-            let mut started = lock.lock().await;
+        let cvar = Arc::new(CondVar::new(Mutex::new(false)));
+        let cvar2 = cvar.clone();
 
+        local_executor().spawn_shared(async move {
             sleep(TIME_TO_SLEEP).await;
 
-            *started = true;
-            if need_drop {
-                drop(started);
-            }
+            let mut started = cvar2.lock().await;
 
-            cvar.notify_all();
+            *started = true;
+
+            cvar2.notify_all(started);
         });
 
         let wg = Arc::new(WaitGroup::new());
         for _ in 0..NUMBER_OF_WAITERS {
-            let pair = pair.clone();
+            let cvar = cvar.clone();
             let wg = wg.clone();
 
             wg.add(1);
 
             sched_future_to_another_thread(async move {
-                let (lock, cvar) = &*pair;
-                let mut started = lock.lock().await;
+                let mut started = cvar.lock().await;
 
                 while !*started {
                     started = cvar.wait(started).await;
@@ -347,22 +285,12 @@ mod tests {
     }
 
     #[orengine::test::test_shared]
-    fn test_shared_cond_var_notify_one_with_drop_guard() {
-        test_notify_one(true).await;
+    fn test_shared_cond_var_notify_one() {
+        test_notify_one().await;
     }
 
     #[orengine::test::test_shared]
-    fn test_shared_cond_var_notify_all_with_drop_guard() {
-        test_notify_all(true).await;
-    }
-
-    #[orengine::test::test_shared]
-    fn test_shared_cond_var_notify_one_without_drop_guard() {
-        test_notify_one(false).await;
-    }
-
-    #[orengine::test::test_shared]
-    fn test_shared_cond_var_notify_all_without_drop_guard() {
-        test_notify_all(false).await;
+    fn test_shared_cond_var_notify_all() {
+        test_notify_all().await;
     }
 }

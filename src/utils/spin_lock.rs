@@ -5,6 +5,7 @@
 //!
 //! It locks the current __thread__ until it acquires the lock. Use it only for short locks and
 //! only if it is not possible to use asynchronous locking.
+use crate::sync::Unlock;
 use crate::utils::Backoff;
 use crossbeam::utils::CachePadded;
 use std::cell::UnsafeCell;
@@ -124,6 +125,15 @@ pub struct SpinLock<T: ?Sized> {
     value: UnsafeCell<T>,
 }
 
+impl<T: ?Sized> Unlock for SpinLock<T> {
+    #[inline]
+    unsafe fn unlock(&self) {
+        debug_assert!(self.is_locked.load(Acquire));
+
+        self.is_locked.store(false, Release);
+    }
+}
+
 impl<T: ?Sized> SpinLock<T> {
     /// Creates a new [`SpinLock`].
     pub const fn new(value: T) -> Self
@@ -169,19 +179,6 @@ impl<T: ?Sized> SpinLock<T> {
     #[inline]
     pub fn get_mut(&mut self) -> &mut T {
         self.value.get_mut()
-    }
-
-    /// Unlocks the mutex.
-    ///
-    /// # Safety
-    ///
-    /// - The `SpinLock` must be locked.
-    ///
-    /// - No other threads has an ownership of this `lock`.
-    #[inline]
-    pub unsafe fn unlock(&self) {
-        debug_assert!(self.is_locked.load(Acquire));
-        self.is_locked.store(false, Release);
     }
 
     /// Returns a reference to the inner value.

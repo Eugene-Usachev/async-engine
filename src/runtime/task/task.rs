@@ -1,6 +1,8 @@
+use crate::Executor;
+#[cfg(debug_assertions)]
+use crate::local_executor;
 use crate::runtime::Locality;
 use crate::runtime::task::task_data::TaskData;
-use crate::{Executor, local_executor};
 use std::future::Future;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
@@ -170,7 +172,7 @@ impl Task {
     /// # async fn manual_notifier() {
     /// let current_task = unsafe { Task::get_current().await };
     ///
-    /// local_executor().spawn_local(async move { // it is safe only because of `spawning`! It guarantees that the current task will be parked before the spawned task will unpark it.
+    /// local_executor().spawn_local(async move { // it is safe only because of `spawning`! It guarantees that the current task will be parked before the spawned task unparks it.
     ///     sleep(Duration::from_millis(1)).await;
     ///
     ///     local_executor().spawn_local_task(current_task);
@@ -219,7 +221,7 @@ impl Task {
     ///
     /// # Panics
     ///
-    /// Panics if the provided [`Task`] is already executing or if it is `local` and has been moved
+    /// It panics if the provided [`Task`] is already executing or if it is `local` and has been moved
     /// to another executor.
     #[cfg(debug_assertions)]
     pub fn check_safety(&mut self) {
@@ -365,8 +367,7 @@ macro_rules! panic_if_shared_in_future {
     };
 }
 
-/// Update the current [`Task`] locality via [`calling`](Executor::invoke_call)
-/// [`ChangeCurrentTaskLocality`](Call::ChangeCurrentTaskLocality).
+/// Update the current [`Task`] locality.
 ///
 /// It is unsafe because you have to think about making sure
 /// that the current [`Task`] can have provided locality.
@@ -404,7 +405,7 @@ pub async unsafe fn update_current_task_locality(locality: Locality) {
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::{Local, yield_now};
+    use crate::{Local, local_executor, yield_now};
     use std::ptr;
 
     #[orengine::test::test_local]

@@ -10,7 +10,7 @@ use crate::sync::channels::{SelectReceiver, SelectSender};
 use crate::sync::mutexes::naive_shared::NaiveMutex;
 use crate::sync::{
     AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, RecvErr, RecvTimeoutErr, SendErr,
-    SendTimeoutErr, TryRecvErr, TrySendErr,
+    SendTimeoutErr, TryRecvErr, TrySendErr, Unlock,
 };
 use crate::utils::{OrengineInstant, Ptr};
 use crate::utils::{unlikely, unreachable_hint};
@@ -41,7 +41,7 @@ unsafe impl<T: Send> Send for Inner<T> {}
 
 // region futures
 
-/// Returns `Poll::Pending` and releases the lock by invokes
+/// Returns `Poll::Pending` and releases the lock by invoking [`Call::release_atomic_bool`].
 /// [`release_atomic_bool`](crate::Executor::release_atomic_bool).
 macro_rules! return_pending_and_release_lock {
     ($ex:expr, $lock:expr) => {

@@ -177,29 +177,29 @@ mod tests {
 
     #[orengine::test_local]
     fn test_task_with_deadline() {
-        use std::rc::Rc;
-
         macro_rules! generate_test_task_with_deadline {
             ($option:pat, $assert_failure_message:expr, $deadline_ident:ident, $wake_block:block, $task_name:ident) => {
                 let result = Local::new(0);
-                let wg = Rc::new(LocalWaitGroup::new());
+                let wg = std::rc::Rc::new(LocalWaitGroup::new());
                 let wg_clone = wg.clone();
                 let mut woken_result = CallState::FirstCall;
                 let woken_result_ptr = CallStatePtr::new(&mut woken_result);
-                let task = Rc::new(LocalMutex::new(None));
+                let task = std::rc::Rc::new(LocalCondVar::new(LocalMutex::new(None)));
                 let task_clone = task.clone();
-                let cond_var = Rc::new(LocalCondVar::new());
-                let cond_var_clone = cond_var.clone();
                 let start = OrengineInstant::now();
                 let $deadline_ident = start + Duration::from_millis(1000);
 
                 wg.inc();
 
                 local_executor().exec_local_future(async move {
-                    *task_clone.lock().await = Some(unsafe { Task::get_current().await });
+                    let mut guard = task_clone.lock().await;
+
+                    *guard = Some(unsafe { Task::get_current().await });
+
+                    drop(guard);
 
                     local_executor().spawn_local(async move {
-                        cond_var_clone.notify_one();
+                        task_clone.notify_one(task_clone.lock().await);
                     });
 
                     unsafe { Task::park_current_task().await };
@@ -214,9 +214,7 @@ mod tests {
                     wg_clone.done();
                 });
 
-                let mut task_guard = cond_var
-                    .wait_while(task.lock().await, |v| v.is_none())
-                    .await;
+                let mut task_guard = task.wait_while(task.lock().await, |v| v.is_none()).await;
 
                 let $task_name = TaskWithDeadline::create_new_and_register(
                     task_guard.take().unwrap(),

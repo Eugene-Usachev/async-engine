@@ -437,7 +437,7 @@ mod tests {
         }
     }
 
-    #[orengine::test::test_local]
+    #[orengine::test::test_local(timeout_ms = 3000)]
     fn test_tcp_timeout() {
         const ADDR: &str = "127.0.0.1:6083";
 
@@ -447,13 +447,12 @@ mod tests {
         const PEEK: usize = 3;
         const TIMEOUT: Duration = Duration::from_millis(100);
 
-        let state = Rc::new(LocalMutex::new(SEND));
-        let state_cond_var = Rc::new(LocalCondVar::new());
+        let state = Rc::new(LocalCondVar::new(LocalMutex::new(SEND)));
         let state_clone = state.clone();
-        let state_cond_var_clone = state_cond_var.clone();
         let wg = Rc::new(LocalWaitGroup::new());
-        wg.inc();
         let wg_clone = wg.clone();
+
+        wg.inc();
 
         local_executor().spawn_local(async move {
             let mut listener = TcpListener::bind_with_config(ADDR, &BindConfig::new())
@@ -466,7 +465,7 @@ mod tests {
             loop {
                 let mut guard = state_clone.lock().await;
                 while *guard != expected_state {
-                    guard = state_cond_var_clone.wait(guard).await;
+                    guard = state_clone.wait(guard).await;
                 }
 
                 drop(guard);
@@ -482,6 +481,7 @@ mod tests {
                     }
                     _ => break,
                 }
+
                 expected_state += 1;
             }
         });
@@ -489,14 +489,11 @@ mod tests {
         wg.wait().await;
 
         loop {
-            let current_state = *state.lock().await;
-
-            match current_state {
+            match *state.lock().await {
                 SEND => {
                     let mut stream = TcpStream::connect_with_timeout(ADDR, TIMEOUT)
                         .await
                         .expect("connect with timeout failed");
-
                     let buf = vec![0u8; 1 << 24];
                     let res = stream
                         .send_all_bytes_with_deadline(
@@ -504,6 +501,7 @@ mod tests {
                             Instant::now().checked_sub(Duration::from_secs(10)).unwrap(),
                         )
                         .await;
+
                     match res {
                         Ok(()) => panic!("send with timeout should failed"),
                         Err(err) if err.kind() != io::ErrorKind::TimedOut => {
@@ -517,8 +515,8 @@ mod tests {
                     let stream = TcpStream::connect_with_timeout(ADDR, TIMEOUT)
                         .await
                         .expect("connect with timeout failed");
-
                     let res = stream.poll_recv_with_timeout(TIMEOUT).await;
+
                     match res {
                         Ok(()) => panic!("poll with timeout should failed"),
                         Err(err) if err.kind() != io::ErrorKind::TimedOut => {
@@ -532,9 +530,9 @@ mod tests {
                     let mut stream = TcpStream::connect_with_timeout(ADDR, TIMEOUT)
                         .await
                         .expect("connect with timeout failed");
-
                     let mut buf = vec![0u8; REQUEST.len()];
                     let res = stream.recv_bytes_with_timeout(&mut buf, TIMEOUT).await;
+
                     match res {
                         Ok(_) => panic!("recv with timeout should failed"),
                         Err(err) if err.kind() != io::ErrorKind::TimedOut => {
@@ -548,9 +546,9 @@ mod tests {
                     let mut stream = TcpStream::connect_with_timeout(ADDR, TIMEOUT)
                         .await
                         .expect("connect with timeout failed");
-
                     let mut buf = vec![0u8; REQUEST.len()];
                     let res = stream.peek_bytes_with_timeout(&mut buf, TIMEOUT).await;
+
                     match res {
                         Ok(_) => panic!("peek with timeout should failed"),
                         Err(err) if err.kind() != io::ErrorKind::TimedOut => {
@@ -562,8 +560,12 @@ mod tests {
 
                 _ => break,
             }
-            *state.lock().await += 1;
-            state_cond_var.notify_one();
+
+            let mut current_state = state.lock().await;
+
+            *current_state += 1;
+
+            state.notify_one(current_state);
         }
     }
 }

@@ -299,14 +299,15 @@ mod tests {
         let _ = fs::remove_file(SERVER_ADDR).await;
         let _ = fs::remove_file(CLIENT_ADDR).await;
 
-        let is_server_ready = Rc::new((LocalMutex::new(false), LocalCondVar::new()));
+        let is_server_ready = Rc::new(LocalCondVar::new(LocalMutex::new(false)));
         let is_server_ready_clone = is_server_ready.clone();
 
         local_executor().spawn_local(async move {
             let mut server = UnixDatagram::bind(SERVER_ADDR).await.expect("bind failed");
+            let mut guard = is_server_ready_clone.lock().await;
 
-            *is_server_ready_clone.0.lock().await = true;
-            is_server_ready_clone.1.notify_one();
+            *guard = true;
+            is_server_ready_clone.notify_one(guard);
 
             for _ in 0..TIMES {
                 server
@@ -331,9 +332,9 @@ mod tests {
             }
         });
 
-        let mut is_server_ready_guard = is_server_ready.0.lock().await;
-        while !*is_server_ready_guard {
-            is_server_ready_guard = is_server_ready.1.wait(is_server_ready_guard).await;
+        let mut guard = is_server_ready.lock().await;
+        while !*guard {
+            guard = is_server_ready.wait(guard).await;
         }
 
         let mut socket = UnixDatagram::bind(CLIENT_ADDR)
@@ -369,17 +370,18 @@ mod tests {
         let _ = fs::remove_file(SERVER_ADDR).await;
         let _ = fs::remove_file(CLIENT_ADDR).await;
 
-        let is_server_ready = Rc::new((LocalMutex::new(false), LocalCondVar::new()));
-        let is_server_ready_server_clone = is_server_ready.clone();
+        let is_server_ready = Rc::new(LocalCondVar::new(LocalMutex::new(false)));
+        let is_server_ready_clone = is_server_ready.clone();
 
         local_executor().exec_local_future(async move {
             let mut server = UnixDatagram::bind(SERVER_ADDR).await.expect("bind failed");
 
             {
-                let (is_ready_mu, condvar) = &*is_server_ready;
-                let mut is_ready = is_ready_mu.lock().await;
-                *is_ready = true;
-                condvar.notify_one();
+                let mut guard = is_server_ready_clone.lock().await;
+
+                *guard = true;
+
+                is_server_ready_clone.notify_one(guard);
             }
 
             for _ in 0..TIMES {
@@ -403,17 +405,16 @@ mod tests {
         });
 
         {
-            let (is_server_ready_mu, condvar) = &*is_server_ready_server_clone;
-            let mut is_server_ready = is_server_ready_mu.lock().await;
-            while !(*is_server_ready) {
-                is_server_ready = condvar.wait(is_server_ready).await;
+            let mut guard = is_server_ready.lock().await;
+            while !(*guard) {
+                guard = is_server_ready.wait(guard).await;
             }
         }
 
         let mut datagram = UnixDatagram::bind(CLIENT_ADDR).await.expect("bind failed");
 
         assert_eq!(
-            datagram
+            &datagram
                 .local_addr()
                 .expect("Failed to get local addr")
                 .as_pathname()

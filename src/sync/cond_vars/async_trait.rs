@@ -2,26 +2,27 @@ use crate::runtime::IsLocal;
 use crate::sync::AsyncMutex;
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use std::future::Future;
+use std::ops::Deref;
 
 /// `AsyncCondVar` is a `condition variable` that allows tasks to wait until
 /// notified by another task.
 ///
+/// # About consuming the [`AsyncMutex`]
+///
+/// Almost always one [`AsyncCondVar`] is used only with one [`AsyncMutex`].
+/// Therefore, this implementation consumes it to prevent misuses and to improve performance.
+///
+/// But [`AsyncCondVar`] can be dereferenced to its [`AsyncMutex`] to get access to the inner value.
+///
 /// It is designed to be used in conjunction with a [`AsyncSubscribableMutex`] to provide
 /// a way for tasks to wait for a specific condition to occur.
-///
-/// # Attention
-///
-/// Drop a lock before call [`notify_one`](AsyncCondVar::notify_one)
-/// or [`notify_all`](AsyncCondVar::notify_all) to improve performance.
 ///
 /// # Examples
 ///
 /// Read the documentation of [`LocalCondVar`](crate::sync::LocalCondVar)
 /// and [`CondVar`](crate::sync::CondVar) for examples.
-pub trait AsyncCondVar: IsLocal {
-    type SubscribableMutex<T>: ?Sized + AsyncSubscribableMutex<T>
-    where
-        T: ?Sized;
+pub trait AsyncCondVar<T>: IsLocal + Deref<Target = Self::Mutex> {
+    type Mutex: AsyncSubscribableMutex<T>;
 
     /// Wait for a notification.
     ///
@@ -34,34 +35,31 @@ pub trait AsyncCondVar: IsLocal {
     /// use std::time::Duration;
     ///
     /// # async fn test() {
-    /// let cvar = Rc::new(LocalCondVar::new());
-    /// let cvar_clone = cvar.clone();
-    /// let is_ready = Rc::new(LocalMutex::new(false));
+    /// let is_ready = Rc::new(LocalCondVar::new(LocalMutex::new(false)));
     /// let is_ready_clone = is_ready.clone();
     ///
     /// local_executor().spawn_local(async move {
     ///     sleep(Duration::from_secs(1)).await;
     ///
     ///     let mut lock = is_ready_clone.lock().await;
+    ///
     ///     *lock = true;
     ///
-    ///     drop(lock);
-    ///
-    ///     cvar_clone.notify_one();
+    ///     is_ready_clone.notify_one(lock);
     /// });
     ///
     /// let mut lock = is_ready.lock().await;
     /// while !*lock {  
-    ///     lock = cvar.wait(lock).await; // wait 1 second
+    ///     lock = is_ready.wait(lock).await; // wait 1 second
     /// }
     /// # }
     /// ```
-    fn wait<'mutex, T>(
-        &self,
-        guard: <Self::SubscribableMutex<T> as AsyncMutex<T>>::Guard<'mutex>,
-    ) -> impl Future<Output = <Self::SubscribableMutex<T> as AsyncMutex<T>>::Guard<'mutex>>
+    fn wait<'lock>(
+        &'lock self,
+        guard: <Self::Mutex as AsyncMutex<T>>::Guard<'lock>,
+    ) -> impl Future<Output = <Self::Mutex as AsyncMutex<T>>::Guard<'lock>>
     where
-        T: ?Sized + 'mutex;
+        T: 'lock;
 
     /// Blocks the current [`Task`] until the provided condition becomes false.
     ///
@@ -89,35 +87,32 @@ pub trait AsyncCondVar: IsLocal {
     ///
     /// # async fn test() {
     ///
-    /// let cvar = Rc::new(LocalCondVar::new());
-    /// let cvar_clone = cvar.clone();
-    /// let is_ready = Rc::new(LocalMutex::new(false));
+    /// let is_ready = Rc::new(LocalCondVar::new(LocalMutex::new(false)));
     /// let is_ready_clone = is_ready.clone();
     ///
     /// local_executor().spawn_local(async move {
     ///     sleep(Duration::from_secs(1)).await;
     ///
     ///     let mut lock = is_ready_clone.lock().await;
+    ///
     ///     *lock = true;
     ///
-    ///     drop(lock);
-    ///
-    ///     cvar_clone.notify_one();
+    ///     is_ready_clone.notify_one(lock);
     /// });
     ///
-    /// let mut is_ready_lock = cvar.wait_while(
+    /// let mut is_ready_lock = is_ready.wait_while(
     ///     is_ready.lock().await,
     ///     |lock| !*lock
     /// ).await; // wait 1 second
     /// # }
     /// ```
-    async fn wait_while<'mutex, T>(
-        &self,
-        guard: <Self::SubscribableMutex<T> as AsyncMutex<T>>::Guard<'mutex>,
+    async fn wait_while<'lock>(
+        &'lock self,
+        guard: <Self::Mutex as AsyncMutex<T>>::Guard<'lock>,
         predicate: impl Fn(&mut T) -> bool,
-    ) -> <Self::SubscribableMutex<T> as AsyncMutex<T>>::Guard<'mutex>
+    ) -> <Self::Mutex as AsyncMutex<T>>::Guard<'lock>
     where
-        T: ?Sized + 'mutex,
+        T: 'lock,
     {
         let mut guard = guard;
         while predicate(&mut guard) {
@@ -129,51 +124,43 @@ pub trait AsyncCondVar: IsLocal {
 
     /// Notifies one waiting task.
     ///
-    /// # Attention
-    ///
-    /// Release a lock before call [`notify_one`](Self::notify_one).
-    ///
     /// # Example
     ///
     /// ```rust
-    /// use orengine::sync::{AsyncSubscribableMutex, AsyncCondVar};
+    /// use orengine::sync::{AsyncSubscribableMutex, AsyncCondVar, AsyncMutex};
     ///
-    /// async fn inc_counter_and_notify_one<'mutex, Mutex, CondVar>(counter: &Mutex, cvar: &CondVar)
+    /// async fn inc_counter_and_notify_one<'mutex, CondVar>(counter: &CondVar)
     /// where
-    ///     Mutex: AsyncSubscribableMutex<i32>,
-    ///     CondVar: AsyncCondVar
+    ///     CondVar: AsyncCondVar<i32>
     /// {
     ///     let mut lock = counter.lock().await;
+    ///
     ///     *lock += 1;
-    ///     drop(lock);
-    ///     cvar.notify_one();
+    ///
+    ///     counter.notify_one(lock);
     /// }
     /// ```
-    fn notify_one(&self);
+    fn notify_one(&self, guard: <Self::Mutex as AsyncMutex<T>>::Guard<'_>);
 
     /// Notifies all waiting tasks.
     ///
-    /// # Attention
-    ///
-    /// Release a lock before call [`notify_all`](Self::notify_all).
-    ///
     /// # Example
     ///
     /// ```rust
-    /// use orengine::sync::{AsyncSubscribableMutex, AsyncCondVar};
+    /// use orengine::sync::{AsyncSubscribableMutex, AsyncCondVar, AsyncMutex};
     ///
-    /// async fn inc_counter_and_notify_all<'mutex, Mutex, CondVar>(counter: &Mutex, cvar: &CondVar)
+    /// async fn inc_counter_and_notify_all<'mutex, CondVar>(counter: &CondVar)
     /// where
-    ///     Mutex: AsyncSubscribableMutex<i32>,
-    ///     CondVar: AsyncCondVar
+    ///     CondVar: AsyncCondVar<i32>
     /// {
     ///     let mut lock = counter.lock().await;
+    ///
     ///     *lock += 1;
-    ///     drop(lock);
-    ///     cvar.notify_all();
+    ///
+    ///     counter.notify_all(lock);
     /// }
     /// ```
-    fn notify_all(&self);
+    fn notify_all(&self, guard: <Self::Mutex as AsyncMutex<T>>::Guard<'_>);
 }
 
 #[cfg(test)]
@@ -186,9 +173,7 @@ mod tests {
 
     #[orengine::test::test_local]
     fn test_cond_var_wait_while() {
-        let cvar = Rc::new(LocalCondVar::new());
-        let cvar_clone = cvar.clone();
-        let is_ready = Rc::new(LocalMutex::new(false));
+        let is_ready = Rc::new(LocalCondVar::new(LocalMutex::new(false)));
         let is_ready_clone = is_ready.clone();
 
         local_executor().spawn_local(async move {
@@ -197,12 +182,12 @@ mod tests {
             let mut lock = is_ready_clone.lock().await;
             *lock = true;
 
-            drop(lock);
-
-            cvar_clone.notify_one();
+            is_ready_clone.notify_one(lock);
         });
 
-        let is_ready_lock = cvar.wait_while(is_ready.lock().await, |lock| !*lock).await; // wait 1 second
+        let is_ready_lock = is_ready
+            .wait_while(is_ready.lock().await, |lock| !*lock)
+            .await; // wait 1 second
 
         assert!(*is_ready_lock);
     }

@@ -1,3 +1,4 @@
+use crate::runtime::Task;
 use crate::sync::AsyncMutex;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -7,7 +8,7 @@ use std::task::{Context, Poll};
 /// `WaitLockOfSubscribableMutex` implements [`Future`] that waits for a `lock`
 /// with `subscription`.
 ///
-/// For more details read the documentation of the trait [`AsyncSubscribableMutex`].
+/// For more details, read the documentation of the trait [`AsyncSubscribableMutex`].
 pub struct WaitLockOfSubscribableMutex<'mutex, T, Mutex>
 where
     T: 'mutex + ?Sized,
@@ -45,6 +46,7 @@ where
 
         if !this.was_called {
             this.was_called = true;
+
             this.mutex.low_level_subscribe(cx);
 
             Poll::Pending
@@ -60,19 +62,32 @@ where
 /// For more details read [`subscribe`](Self::subscribe) and
 /// [`low_level_subscribe`](Self::low_level_subscribe).
 pub trait AsyncSubscribableMutex<T: ?Sized>: AsyncMutex<T> {
-    /// Subscribing allow you to wait for the following [`unlock`](AsyncMutex::unlock) call.
+    /// Subscribing allows you to wait for the following [`unlock`] call.
     ///
-    /// It means that one of the following calls [`unlock`](AsyncMutex::unlock) will wake
-    /// current task up. It doesn't guarantee that [`unlock`](AsyncMutex::unlock) will be called
+    /// It means that one of the following calls [`unlock`] will wake
+    /// the provided task up. It doesn't guarantee that [`unlock`] will be called
     /// or that the task will not wait if [`mutex`](AsyncMutex) is unlocked.
     ///
-    /// This method a bit efficient than [`subscribe`](Self::subscribe).
+    /// This method is a bit efficient than [`subscribe`](Self::subscribe).
+    ///
+    /// [`unlock`]: crate::sync::mutexes::Unlock::unlock
+    fn subscribe_task(&self, task: Task);
+
+    /// Subscribing allows you to wait for the following [`unlock`] call.
+    ///
+    /// It means that one of the following calls [`unlock`] will wake
+    /// the current task up. It doesn't guarantee that [`unlock`] will be called
+    /// or that the task will not wait if [`mutex`](AsyncMutex) is unlocked.
+    ///
+    /// This method is a bit efficient than [`subscribe`](Self::subscribe).
+    ///
+    /// [`unlock`]: crate::sync::mutexes::Unlock::unlock
     fn low_level_subscribe(&self, cx: &Context);
 
-    /// Subscribing allow you to wait for the following [`unlock`](AsyncMutex::unlock) call.
+    /// Subscribing allows you to wait for the following [`unlock`] call.
     ///
-    /// It means that one of the following calls [`unlock`](AsyncMutex::unlock) will wake
-    /// current task up. It doesn't guarantee that [`unlock`](AsyncMutex::unlock) will be called
+    /// It means that one of the following calls [`unlock`] will wake
+    /// the current task up. It doesn't guarantee that [`unlock`] will be called
     /// or that the task will not wait if [`mutex`](AsyncMutex) is unlocked.
     ///
     /// __Code below is incorrect__:
@@ -91,19 +106,21 @@ pub trait AsyncSubscribableMutex<T: ?Sized>: AsyncMutex<T> {
     ///         return;
     ///     }
     ///
-    ///     // 2 - here other thread can unlock the mutex
+    ///     // 2 - here another thread can unlock the mutex
     ///
     ///     let mut guard = mutex.subscribe().await; // 3
     ///     func(&mut *guard);
     /// }
     /// ```
     ///
-    /// Because between 1 and 3 [`mutex`](AsyncMutex) can be unlocked. Use
+    /// Because between 1 and 3 the [`mutex`](AsyncMutex) can be unlocked. Use
     /// [`lock`](AsyncMutex::lock) instead, because it is valid and more likely implemented via
     /// [`low_level_subscribe`](Self::low_level_subscribe) under the hood.
     ///
     /// [`subscribe`](Self::subscribe) is a bit more expensive than
     /// [`low_level_subscribe`](Self::low_level_subscribe).
+    ///
+    /// [`unlock`]: crate::sync::mutexes::Unlock::unlock
     fn subscribe<'mutex>(&'mutex self) -> impl Future<Output = Self::Guard<'mutex>>
     where
         Self: 'mutex,

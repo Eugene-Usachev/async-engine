@@ -139,7 +139,9 @@ impl ExecutorPoolJoinHandle {
     /// If test fn was panicked. It is used to `should_panic`.
     pub async fn join(mut self) {
         self.was_joined = true;
+
         let res = self.channel.recv().await.unwrap();
+
         self.pool.senders_to_executors.push(res.sender);
 
         if let Err(err) = res.future_result {

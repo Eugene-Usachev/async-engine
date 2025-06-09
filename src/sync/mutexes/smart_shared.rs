@@ -1,7 +1,7 @@
 //! This module provides an asynchronous mutex (e.g. [`std::sync::Mutex`]) type [`Mutex`].
 //! It allows for asynchronous locking and unlocking, and provides
 //! ownership-based locking through [`MutexGuard`].
-use std::cell::{Cell, UnsafeCell};
+use std::cell::UnsafeCell;
 use std::future::Future;
 use std::hint::spin_loop;
 use std::mem::ManuallyDrop;
@@ -13,15 +13,14 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::task::{Context, Poll};
 
-use crossbeam::utils::CachePadded;
-
 use crate::panic_if_local_in_future;
 use crate::runtime::call::Call;
 use crate::runtime::{IsLocal, Task, local_executor};
 use crate::sync::mutexes::AsyncSubscribableMutex;
-use crate::sync::{AsyncMutex, AsyncMutexGuard};
+use crate::sync::{AsyncMutex, AsyncMutexGuard, Unlock};
 use crate::utils::{Backoff, likely};
-use crate::utils::{SyncTaskListFromPool, acquire_sync_task_list_from_pool};
+use crate::utils::{PairedWithLock, SyncTaskListFromPool, acquire_sync_task_list_from_pool};
+use crossbeam::utils::CachePadded;
 
 /// An RAII implementation of a "scoped lock" of a mutex. When this structure is
 /// dropped (falls out of scope), the lock will be unlocked.
@@ -109,7 +108,7 @@ impl<'mutex, T: ?Sized> Future for MutexWait<'mutex, T> {
                 return Poll::Ready(guard);
             }
 
-            if this.mutex.counter.fetch_add(1, Acquire) == 0 {
+            if this.mutex.counter.fetch_add(1, Acquire) == DEFAULT_COUNTER {
                 return Poll::Ready(MutexGuard::new(this.mutex));
             }
 
@@ -126,6 +125,17 @@ impl<'mutex, T: ?Sized> Future for MutexWait<'mutex, T> {
         }
     }
 }
+
+/// The expected count can be less than 0, but I don't want to use `isize`.
+///
+/// So, it starts from `usize::MAX / 4` and goes down.
+/// You can count it as 1;
+const DEFAULT_EXPECTED_COUNT: usize = usize::MAX / 4;
+/// The expected count can be less than 0, but I don't want to use `isize`.
+///
+/// So, it starts from `usize::MAX / 4` - 1 and goes down.
+/// You can count it as 0;
+const DEFAULT_COUNTER: usize = DEFAULT_EXPECTED_COUNT - 1;
 
 /// A mutual exclusion primitive useful for protecting shared data.
 ///
@@ -177,7 +187,10 @@ impl<'mutex, T: ?Sized> Future for MutexWait<'mutex, T> {
 #[repr(C)]
 pub struct Mutex<T: ?Sized> {
     counter: CachePadded<AtomicUsize>,
-    expected_count: Cell<usize>,
+    /// We can release lock only when `expected_count` is equal to `counter` - `DEFAULT_EXPECTED_COUNT`.
+    /// It guarantees that we processed all tasks in the queue.
+    /// It allows not using atomics in the `subscribe` method.
+    expected_count: PairedWithLock<usize, T, Mutex<T>>,
     wait_queue: SyncTaskListFromPool,
     value: UnsafeCell<T>,
 }
@@ -189,10 +202,10 @@ impl<T: ?Sized> Mutex<T> {
         T: Sized,
     {
         Self {
-            counter: CachePadded::new(AtomicUsize::new(0)),
+            counter: CachePadded::new(AtomicUsize::new(DEFAULT_COUNTER)),
             wait_queue: acquire_sync_task_list_from_pool(),
             value: UnsafeCell::new(value),
-            expected_count: Cell::new(1),
+            expected_count: PairedWithLock::new(DEFAULT_EXPECTED_COUNT),
         }
     }
 
@@ -207,11 +220,16 @@ impl<T: ?Sized> Mutex<T> {
     #[inline]
     pub fn try_lock_with_spinning(&self) -> Option<MutexGuard<T>> {
         for step in 0..=6 {
-            let lock_res = self.counter.compare_exchange(0, 1, Acquire, Acquire);
+            let lock_res = self.counter.compare_exchange(
+                DEFAULT_COUNTER,
+                DEFAULT_COUNTER + 1,
+                Acquire,
+                Acquire,
+            );
             return match lock_res {
                 Ok(_) => Some(MutexGuard::new(self)),
                 Err(count) => {
-                    if count == 1 {
+                    if count == DEFAULT_COUNTER + 1 {
                         for _ in 0..1 << step {
                             spin_loop();
                         }
@@ -232,6 +250,47 @@ impl<T: ?Sized> IsLocal for Mutex<T> {
     const IS_LOCAL: bool = false;
 }
 
+impl<T: ?Sized> Unlock for Mutex<T> {
+    #[inline]
+    unsafe fn unlock(&self) {
+        debug_assert!(
+            self.counter.load(Acquire) != DEFAULT_COUNTER,
+            "Mutex is already unlocked"
+        );
+
+        let expected_count = self.expected_count.get_by_mutex(self);
+        // fast path
+        let was_swapped = self
+            .counter
+            .compare_exchange(*expected_count, DEFAULT_COUNTER, Release, Relaxed)
+            .is_ok();
+        if likely(was_swapped) {
+            *expected_count = DEFAULT_EXPECTED_COUNT;
+
+            return;
+        }
+
+        *expected_count += 1;
+
+        if let Some(next) = self.wait_queue.pop() {
+            local_executor().exec_task(next);
+        } else {
+            // Another task failed to acquire a lock, but it is not yet in the queue
+            let backoff = Backoff::new();
+
+            loop {
+                backoff.spin();
+
+                if let Some(next) = self.wait_queue.pop() {
+                    local_executor().exec_task(next);
+
+                    break;
+                }
+            }
+        }
+    }
+}
+
 impl<T: ?Sized> AsyncMutex<T> for Mutex<T> {
     type Guard<'mutex>
         = MutexGuard<'mutex, T>
@@ -240,7 +299,7 @@ impl<T: ?Sized> AsyncMutex<T> for Mutex<T> {
 
     #[inline]
     fn is_locked(&self) -> bool {
-        self.counter.load(Acquire) != 0
+        self.counter.load(Acquire) != DEFAULT_COUNTER
     }
 
     #[inline]
@@ -259,7 +318,7 @@ impl<T: ?Sized> AsyncMutex<T> for Mutex<T> {
     fn try_lock(&self) -> Option<Self::Guard<'_>> {
         if self
             .counter
-            .compare_exchange(0, 1, Acquire, Relaxed)
+            .compare_exchange(DEFAULT_COUNTER, DEFAULT_COUNTER + 1, Acquire, Relaxed)
             .is_ok()
         {
             Some(MutexGuard::new(self))
@@ -274,41 +333,9 @@ impl<T: ?Sized> AsyncMutex<T> for Mutex<T> {
     }
 
     #[inline]
-    unsafe fn unlock(&self) {
-        debug_assert!(self.counter.load(Acquire) != 0, "Mutex is already unlocked");
-        // fast path
-        let was_swapped = self
-            .counter
-            .compare_exchange(self.expected_count.get(), 0, Release, Relaxed)
-            .is_ok();
-        if likely(was_swapped) {
-            self.expected_count.set(1);
-
-            return;
-        }
-
-        self.expected_count.set(self.expected_count.get() + 1);
-        let next = self.wait_queue.pop();
-        if next.is_some() {
-            unsafe { local_executor().exec_task(next.unwrap_unchecked()) };
-        } else {
-            // Another task failed to acquire a lock, but it is not yet in the queue
-            let backoff = Backoff::new();
-            loop {
-                backoff.spin();
-                let next = self.wait_queue.pop();
-                if next.is_some() {
-                    unsafe { local_executor().exec_task(next.unwrap_unchecked()) };
-                    break;
-                }
-            }
-        }
-    }
-
-    #[inline]
     unsafe fn get_locked(&self) -> Self::Guard<'_> {
         debug_assert!(
-            self.counter.load(Acquire) != 0,
+            self.counter.load(Acquire) != DEFAULT_COUNTER,
             "Mutex is unlocked, but calling get_locked it must be locked"
         );
 
@@ -316,15 +343,25 @@ impl<T: ?Sized> AsyncMutex<T> for Mutex<T> {
     }
 }
 
-impl<T: ?Sized> AsyncSubscribableMutex<T> for Mutex<T> {
+impl<T> AsyncSubscribableMutex<T> for Mutex<T> {
+    #[inline]
+    fn subscribe_task(&self, task: Task) {
+        debug_assert!(self.is_locked());
+
+        let expected_count = self.expected_count.get_by_mutex(self);
+
+        *expected_count -= 1;
+
+        unsafe {
+            self.wait_queue.push(task);
+        }
+    }
+
     #[inline]
     fn low_level_subscribe(&self, cx: &Context) {
         let task = unsafe { Task::from_context(cx) };
 
-        self.expected_count.set(self.expected_count.get() - 1);
-        unsafe {
-            self.wait_queue.push(task);
-        }
+        self.subscribe_task(task);
     }
 }
 

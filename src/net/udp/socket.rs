@@ -301,7 +301,7 @@ mod tests {
         client_addr_str: String,
         config: BindConfig,
     ) {
-        let is_server_ready = Rc::new((LocalMutex::new(false), LocalCondVar::new()));
+        let is_server_ready = Rc::new(LocalCondVar::new(LocalMutex::new(false)));
         let is_server_ready_clone = is_server_ready.clone();
         let addr_clone = server_addr_str.clone();
 
@@ -309,9 +309,11 @@ mod tests {
             let mut server = UdpSocket::bind_with_config(addr_clone, &config)
                 .await
                 .expect("bind failed");
+            let mut guard = is_server_ready_clone.lock().await;
 
-            *is_server_ready_clone.0.lock().await = true;
-            is_server_ready_clone.1.notify_one();
+            *guard = true;
+
+            is_server_ready_clone.notify_one(guard);
 
             for _ in 0..TIMES {
                 server
@@ -332,9 +334,9 @@ mod tests {
             }
         });
 
-        let mut is_server_ready_guard = is_server_ready.0.lock().await;
+        let mut is_server_ready_guard = is_server_ready.lock().await;
         while !*is_server_ready_guard {
-            is_server_ready_guard = is_server_ready.1.wait(is_server_ready_guard).await;
+            is_server_ready_guard = is_server_ready.wait(is_server_ready_guard).await;
         }
 
         let mut socket = UdpSocket::bind(client_addr_str)
@@ -402,17 +404,18 @@ mod tests {
         const CLIENT_ADDR: &str = "127.0.0.1:10091";
         const TIMEOUT: Duration = Duration::from_secs(3);
 
-        let is_server_ready = Rc::new((LocalMutex::new(false), LocalCondVar::new()));
+        let is_server_ready = Rc::new(LocalCondVar::new(LocalMutex::new(false)));
         let is_server_ready_server_clone = is_server_ready.clone();
 
         local_executor().exec_local_future(async move {
             let mut server = UdpSocket::bind(SERVER_ADDR).await.expect("bind failed");
 
             {
-                let (is_ready_mu, condvar) = &*is_server_ready;
-                let mut is_ready = is_ready_mu.lock().await;
+                let mut is_ready = is_server_ready_server_clone.lock().await;
+
                 *is_ready = true;
-                condvar.notify_one();
+
+                is_server_ready_server_clone.notify_one(is_ready);
             }
 
             for _ in 0..TIMES {
@@ -420,6 +423,7 @@ mod tests {
                     .poll_recv_with_timeout(TIMEOUT)
                     .await
                     .expect("poll failed");
+
                 let mut buf = vec![0u8; REQUEST.len()];
                 let (n, src) = server
                     .recv_bytes_from_with_timeout(&mut buf, TIMEOUT)
@@ -435,10 +439,9 @@ mod tests {
         });
 
         {
-            let (is_server_ready_mu, condvar) = &*is_server_ready_server_clone;
-            let mut is_server_ready = is_server_ready_mu.lock().await;
-            while !(*is_server_ready) {
-                is_server_ready = condvar.wait(is_server_ready).await;
+            let mut guard = is_server_ready.lock().await;
+            while !(*guard) {
+                guard = is_server_ready.wait(guard).await;
             }
         }
 

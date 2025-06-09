@@ -17,6 +17,7 @@ use crate::runtime::waker::create_waker;
 use crate::runtime::{
     ExecutorSharedTaskList, Locality, TaskWithDeadline, get_core_id_for_executor,
 };
+use crate::sync::Unlock;
 use crate::sync::channels::CallStatePtr;
 use crate::sync::channels::waiting_task::TaskInSelectBranch;
 use crate::utils::{
@@ -459,9 +460,17 @@ impl Executor {
     /// to allow the compiler to decide whether to inline this function.
     #[inline(never)]
     fn handle_call(&mut self, task: Task) {
-        match mem::take(&mut self.current_call) {
+        let prev = mem::take(&mut self.current_call);
+
+        match prev {
             Call::None => {}
             Call::PushCurrentTaskTo(task_list) => unsafe { task_list.as_ref().push(task) },
+            Call::ReleaseMutex(mutex) => unsafe {
+                mutex.as_ref().unlock();
+            },
+            Call::ReleaseDynMutex(mutex) => unsafe {
+                mutex.as_ref().unlock();
+            },
             Call::PushCurrentTaskToAndRemoveItIfCounterIsZero(task_list, counter, order) => {
                 unsafe {
                     let list = task_list.as_ref();

@@ -9,7 +9,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
 use crate::runtime::IsLocal;
-use crate::sync::{AsyncMutex, AsyncMutexGuard};
+use crate::sync::{AsyncMutex, AsyncMutexGuard, Unlock};
 use crate::yield_now;
 use crossbeam::utils::CachePadded;
 
@@ -173,6 +173,18 @@ impl<T: ?Sized> IsLocal for NaiveMutex<T> {
     const IS_LOCAL: bool = false;
 }
 
+impl<T: ?Sized> Unlock for NaiveMutex<T> {
+    #[inline]
+    unsafe fn unlock(&self) {
+        debug_assert!(
+            self.is_locked.load(Acquire),
+            "NaiveMutex is unlocked, but calling unlock it must be locked"
+        );
+
+        self.is_locked.store(false, Release);
+    }
+}
+
 impl<T: ?Sized> AsyncMutex<T> for NaiveMutex<T> {
     type Guard<'mutex>
         = NaiveMutexGuard<'mutex, T>
@@ -224,16 +236,6 @@ impl<T: ?Sized> AsyncMutex<T> for NaiveMutex<T> {
     #[inline]
     fn get_mut(&mut self) -> &mut T {
         self.value.get_mut()
-    }
-
-    #[inline]
-    unsafe fn unlock(&self) {
-        debug_assert!(
-            self.is_locked.load(Acquire),
-            "NaiveMutex is unlocked, but calling unlock it must be locked"
-        );
-
-        self.is_locked.store(false, Release);
     }
 
     #[inline]

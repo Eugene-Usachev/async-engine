@@ -1,9 +1,16 @@
 pub mod async_trait;
 pub mod local;
-pub mod lock_status;
+pub(crate) mod lock_status;
 pub mod naive_shared;
+#[cfg(target_has_atomic = "64")]
+pub mod shared;
 
 pub use async_trait::*;
 pub use local::*;
 pub use lock_status::*;
-pub use naive_shared::*;
+
+#[cfg(not(target_has_atomic = "64"))]
+pub use naive_shared::{RWLock, ReadLockGuard, WriteLockGuard};
+
+#[cfg(target_has_atomic = "64")]
+pub use shared::{RWLock, ReadLockGuard, WriteLockGuard};

@@ -21,7 +21,9 @@ fn stress_test_shared_mutex() {
     for _ in 0..20 {
         let mutex = Arc::new(Mutex::new(0));
         let wg = Arc::new(WaitGroup::new());
+
         wg.add(PAR * TRIES);
+
         for _ in 1..PAR {
             let wg = wg.clone();
             let mutex = mutex.clone();
@@ -62,7 +64,9 @@ fn stress_test_naive_mutex() {
     for _ in 0..20 {
         let mutex = Arc::new(NaiveMutex::new(0));
         let wg = Arc::new(WaitGroup::new());
+
         wg.add(PAR * TRIES);
+
         for _ in 1..PAR {
             let wg = wg.clone();
             let mutex = mutex.clone();

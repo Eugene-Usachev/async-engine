@@ -5,7 +5,6 @@ use crate::sync::wait_groups::AsyncWaitGroup;
 use crate::utils::{
     SyncTaskListFromPool, acquire_sync_task_list_from_pool, acquire_task_vec_from_pool,
 };
-use crossbeam::utils::CachePadded;
 use std::future::Future;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
@@ -58,7 +57,7 @@ impl Future for WaitSharedWaitGroup<'_> {
                         NonNull::new_unchecked(
                             (&raw const *this.wait_group.waited_tasks).cast_mut(),
                         ),
-                        NonNull::new_unchecked((&raw const *this.wait_group.counter).cast_mut()),
+                        NonNull::new_unchecked((&raw const this.wait_group.counter).cast_mut()),
                         Acquire,
                     ),
                 );
@@ -111,7 +110,7 @@ impl Future for WaitSharedWaitGroup<'_> {
 /// # }
 /// ```
 pub struct WaitGroup {
-    counter: CachePadded<AtomicUsize>,
+    counter: AtomicUsize,
     waited_tasks: SyncTaskListFromPool,
 }
 
@@ -144,7 +143,7 @@ impl WaitGroup {
     /// ```
     pub fn new_with_count(count: usize) -> Self {
         Self {
-            counter: CachePadded::new(AtomicUsize::new(count)),
+            counter: AtomicUsize::new(count),
             waited_tasks: acquire_sync_task_list_from_pool(),
         }
     }

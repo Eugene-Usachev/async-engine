@@ -3,11 +3,10 @@
 //! It allows for __blocking__ locking and unlocking and provides
 //! ownership-based locking through [`SpinLockGuard`].
 //!
-//! It locks the current __thread__ until it acquires the lock. Use it only for short locks and
+//! It locks the current __thread__ until it acquires the lock. Use it only for short locks, and
 //! only if it is not possible to use asynchronous locking.
 use crate::sync::Unlock;
 use crate::utils::Backoff;
-use crossbeam::utils::CachePadded;
 use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
@@ -60,11 +59,11 @@ impl<'spin_lock, T: ?Sized> SpinLockGuard<'spin_lock, T> {
     ///
     /// The mutex is unlocked by calling [`SpinLock::unlock`] later.
     #[inline]
-    pub unsafe fn leak(self) -> *const CachePadded<AtomicBool> {
+    pub unsafe fn leak(self) -> *const AtomicBool {
         &ManuallyDrop::new(self).spin_lock.is_locked
     }
 
-    /// Returns a reference to the [`CachePadded<AtomicBool>`]
+    /// Returns a reference to the [`AtomicBool`]
     /// associated with the original [`SpinLock`] to
     /// [`call`](crate::Executor::invoke_call)
     /// [`ReleaseAtomicBool`](crate::runtime::call::Call::ReleaseAtomicBool).
@@ -75,7 +74,7 @@ impl<'spin_lock, T: ?Sized> SpinLockGuard<'spin_lock, T> {
     /// or by [calling](crate::Executor::invoke_call)
     /// [`ReleaseAtomicBool`](crate::runtime::call::Call::ReleaseAtomicBool).
     #[inline]
-    pub unsafe fn leak_to_atomic(self) -> NonNull<CachePadded<AtomicBool>> {
+    pub unsafe fn leak_to_atomic(self) -> NonNull<AtomicBool> {
         debug_assert!(self.spin_lock.is_locked.load(Acquire));
 
         unsafe {
@@ -121,7 +120,7 @@ impl<T: ?Sized> Drop for SpinLockGuard<'_, T> {
 /// It locks the current __thread__ until it acquires the lock. Use it only for short locks, and
 /// only if it is not possible to use asynchronous locking.
 pub struct SpinLock<T: ?Sized> {
-    is_locked: CachePadded<AtomicBool>,
+    is_locked: AtomicBool,
     value: UnsafeCell<T>,
 }
 
@@ -141,7 +140,7 @@ impl<T: ?Sized> SpinLock<T> {
         T: Sized,
     {
         Self {
-            is_locked: CachePadded::new(AtomicBool::new(false)),
+            is_locked: AtomicBool::new(false),
             value: UnsafeCell::new(value),
         }
     }

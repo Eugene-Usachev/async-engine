@@ -15,7 +15,7 @@ use std::sync::atomic::Ordering::{Acquire, Release};
 
 /// Inner value of [`GlobalState`](crate::runtime::global_state::GlobalState).
 struct Inner {
-    current_version: CachePadded<AtomicUsize>,
+    current_version: AtomicUsize,
     processed_version: usize,
     is_stopped: bool,
     tasks_lists: Option<Vec<Arc<ExecutorSharedTaskList>>>,
@@ -25,13 +25,13 @@ struct Inner {
 }
 
 /// `SubscribedState` contains the image of the [`shared state`](crate::runtime::global_state::global_state::GLOBAL_STATE)
-/// and the version. Before use the image, it checks the version and updates it if needed.
+/// and the version. Before using the image, it checks the version and updates it if needed.
 ///
-/// It allows to avoid lock contention, because almost always it can read the image without locking.
+/// It allows avoiding lock contention because it can almost always read the image without locking.
 ///
-/// It contains `is_stopped` and `tasks_lists` of all alive executors with work-sharing.
+/// It contains `is_stopped` and `tasks_lists` of all live executors with work-sharing.
 pub(crate) struct SubscribedState {
-    inner: UnsafeCell<Inner>,
+    inner: CachePadded<UnsafeCell<Inner>>,
 }
 
 impl SubscribedState {
@@ -41,14 +41,14 @@ impl SubscribedState {
     /// [`register_local_executor`](crate::runtime::global_state::GlobalState::register_local_executor).
     pub(crate) const fn new() -> Self {
         Self {
-            inner: UnsafeCell::new(Inner {
-                current_version: CachePadded::new(AtomicUsize::new(1)),
+            inner: CachePadded::new(UnsafeCell::new(Inner {
+                current_version: AtomicUsize::new(1),
                 processed_version: usize::MAX,
                 is_stopped: false,
                 tasks_lists: None,
                 #[cfg(not(feature = "disable_send_task_to"))]
                 executors_task_lists: VecMap::new(),
-            }),
+            })),
         }
     }
 

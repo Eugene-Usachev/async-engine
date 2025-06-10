@@ -4,7 +4,6 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
 use crate::runtime::IsLocal;
 use crate::sync::{AsyncOnce, CallOnceResult, OnceState};
-use crossbeam::utils::CachePadded;
 
 /// `Once` is an asynchronous [`std::Once`](std::sync::Once).
 ///
@@ -40,14 +39,14 @@ use crossbeam::utils::CachePadded;
 /// ```
 #[repr(C)]
 pub struct Once {
-    state: CachePadded<AtomicIsize>,
+    state: AtomicIsize,
 }
 
 impl Once {
     /// Creates a new `Once`.
     pub const fn new() -> Self {
         Self {
-            state: CachePadded::new(AtomicIsize::new(OnceState::not_called())),
+            state: AtomicIsize::new(OnceState::not_called()),
         }
     }
 }

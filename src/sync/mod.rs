@@ -8,12 +8,16 @@ pub use mutexes::{
     subscribable_trait::AsyncSubscribableMutex,
 };
 pub use onces::{async_trait::*, local::LocalOnce, shared::Once, state::*};
+#[cfg(not(target_has_atomic = "64"))]
+pub use rw_locks::naive_shared::{RWLock, ReadLockGuard, WriteLockGuard};
+#[cfg(target_has_atomic = "64")]
+pub use rw_locks::shared::{RWLock, ReadLockGuard, WriteLockGuard};
 pub use rw_locks::{
     async_trait::*,
     local::{LocalRWLock, LocalReadLockGuard, LocalWriteLockGuard},
     lock_status::*,
-    naive_shared::{RWLock, ReadLockGuard, WriteLockGuard},
 };
+
 pub use wait_groups::{async_trait::*, local::LocalWaitGroup, shared::WaitGroup};
 
 pub mod channels;

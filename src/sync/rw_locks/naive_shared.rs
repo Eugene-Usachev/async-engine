@@ -12,7 +12,6 @@ use crate::runtime::IsLocal;
 use crate::sync::{AsyncRWLock, AsyncReadLockGuard, AsyncWriteLockGuard, LockStatus};
 use crate::utils::likely;
 use crate::yield_now;
-use crossbeam::utils::CachePadded;
 
 // region guards
 
@@ -167,7 +166,7 @@ unsafe impl<T: ?Sized + Send> Send for WriteLockGuard<'_, T> {}
 /// ```
 #[repr(C)]
 pub struct RWLock<T: ?Sized> {
-    number_of_readers: CachePadded<AtomicIsize>,
+    number_of_readers: AtomicIsize,
     value: UnsafeCell<T>,
 }
 
@@ -178,7 +177,7 @@ impl<T: ?Sized> RWLock<T> {
         T: Sized,
     {
         Self {
-            number_of_readers: CachePadded::new(AtomicIsize::new(0)),
+            number_of_readers: AtomicIsize::new(0),
             value: UnsafeCell::new(value),
         }
     }
@@ -447,7 +446,7 @@ unsafe impl<T: ?Sized + Send> Send for RWLock<T> {}
 /// }
 /// ```
 #[allow(dead_code, reason = "It is used only in compile tests")]
-fn test_compile_shared_rw_lock() {}
+fn test_compile_naive_shared_rw_lock() {}
 
 #[cfg(test)]
 mod tests {

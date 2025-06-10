@@ -275,6 +275,7 @@ impl PartialEq for Task {
 }
 
 unsafe impl Send for Task {}
+unsafe impl Sync for Task {}
 impl UnwindSafe for Task {}
 impl RefUnwindSafe for Task {}
 

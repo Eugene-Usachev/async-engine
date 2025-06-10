@@ -3,6 +3,8 @@ mod local_channel;
 #[cfg(test)]
 mod mutex;
 #[cfg(test)]
+mod rw_lock;
+#[cfg(test)]
 mod select;
 #[cfg(test)]
 mod shared_channel;

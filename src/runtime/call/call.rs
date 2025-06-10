@@ -1,7 +1,6 @@
 use crate::runtime::Task;
 use crate::sync::{AsyncMutexGuard, Mutex, Unlock};
 use crate::sync_task_queue::SyncTaskList;
-use crossbeam::utils::CachePadded;
 use std::fmt::Debug;
 use std::mem;
 use std::ptr::NonNull;
@@ -84,7 +83,7 @@ pub enum Call {
     /// * task must return [`Poll::Pending`](std::task::Poll::Pending) immediately after calling this function
     ///
     /// * calling task must be shared (else you don't need any [`Calls`](Call))
-    ReleaseAtomicBool(NonNull<CachePadded<AtomicBool>>),
+    ReleaseAtomicBool(NonNull<AtomicBool>),
     /// Pushes `f` to the blocking pool.
     ///
     /// # Safety
@@ -160,7 +159,7 @@ impl Call {
     /// * task must return [`Poll::Pending`](std::task::Poll::Pending) immediately after calling this function
     ///
     /// * calling task must be shared (else you don't need any [`Calls`](Call))
-    pub unsafe fn release_atomic_bool(atomic_bool: NonNull<CachePadded<AtomicBool>>) -> Self {
+    pub unsafe fn release_atomic_bool(atomic_bool: NonNull<AtomicBool>) -> Self {
         Self::ReleaseAtomicBool(atomic_bool)
     }
 

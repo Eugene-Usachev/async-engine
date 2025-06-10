@@ -11,7 +11,6 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use crate::runtime::IsLocal;
 use crate::sync::{AsyncMutex, AsyncMutexGuard, Unlock};
 use crate::yield_now;
-use crossbeam::utils::CachePadded;
 
 /// An RAII implementation of a "scoped lock" of a mutex. When this structure is
 /// dropped (falls out of scope), the lock will be unlocked.
@@ -32,7 +31,7 @@ impl<'mutex, T: ?Sized> NaiveMutexGuard<'mutex, T> {
         Self { mutex }
     }
 
-    /// Returns a pointer to the [`CachePadded<AtomicBool>`]
+    /// Returns a pointer to the [`AtomicBool`]
     /// associated with the original [`NaiveMutex`] to
     /// [`call`](crate::Executor::invoke_call)
     /// [`ReleaseAtomicBool`](crate::runtime::call::Call::ReleaseAtomicBool).
@@ -43,7 +42,7 @@ impl<'mutex, T: ?Sized> NaiveMutexGuard<'mutex, T> {
     /// [calling](crate::Executor::invoke_call)
     /// [`ReleaseAtomicBool`](crate::runtime::call::Call::ReleaseAtomicBool).
     #[inline]
-    pub unsafe fn leak_to_atomic(self) -> NonNull<CachePadded<AtomicBool>> {
+    pub unsafe fn leak_to_atomic(self) -> NonNull<AtomicBool> {
         debug_assert!(self.mutex.is_locked.load(Acquire));
 
         unsafe {
@@ -152,7 +151,7 @@ unsafe impl<T: ?Sized + Send> Send for NaiveMutexGuard<'_, T> {}
 /// }
 /// ```
 pub struct NaiveMutex<T: ?Sized> {
-    is_locked: CachePadded<AtomicBool>,
+    is_locked: AtomicBool,
     value: UnsafeCell<T>,
 }
 
@@ -163,7 +162,7 @@ impl<T: ?Sized> NaiveMutex<T> {
         T: Sized,
     {
         Self {
-            is_locked: CachePadded::new(AtomicBool::new(false)),
+            is_locked: AtomicBool::new(false),
             value: UnsafeCell::new(value),
         }
     }

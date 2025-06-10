@@ -20,7 +20,6 @@ use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncMutex, AsyncMutexGuard, Unlock};
 use crate::utils::{Backoff, likely};
 use crate::utils::{PairedWithLock, SyncTaskListFromPool, acquire_sync_task_list_from_pool};
-use crossbeam::utils::CachePadded;
 
 /// An RAII implementation of a "scoped lock" of a mutex. When this structure is
 /// dropped (falls out of scope), the lock will be unlocked.
@@ -186,7 +185,7 @@ const DEFAULT_COUNTER: usize = DEFAULT_EXPECTED_COUNT - 1;
 /// ```
 #[repr(C)]
 pub struct Mutex<T: ?Sized> {
-    counter: CachePadded<AtomicUsize>,
+    counter: AtomicUsize,
     /// We can release lock only when `expected_count` is equal to `counter` - `DEFAULT_EXPECTED_COUNT`.
     /// It guarantees that we processed all tasks in the queue.
     /// It allows not using atomics in the `subscribe` method.
@@ -202,7 +201,7 @@ impl<T: ?Sized> Mutex<T> {
         T: Sized,
     {
         Self {
-            counter: CachePadded::new(AtomicUsize::new(DEFAULT_COUNTER)),
+            counter: AtomicUsize::new(DEFAULT_COUNTER),
             wait_queue: acquire_sync_task_list_from_pool(),
             value: UnsafeCell::new(value),
             expected_count: PairedWithLock::new(DEFAULT_EXPECTED_COUNT),

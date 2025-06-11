@@ -10,3 +10,17 @@ orengine = { path = "../../../orengine-rs" }
 tokio = { version = "1.45.1", features = ["full"] }
 smol = "2.0.0"
 async-std = "1.13.0"
+
+[[bin]]
+name = "orengine"
+path = "src/orengine.rs"
+doc = false
+
+[[bin]]
+name = "tokio"
+path = "src/tokio.rs"
+doc = false
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true

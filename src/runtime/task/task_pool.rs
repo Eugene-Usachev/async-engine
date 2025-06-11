@@ -4,7 +4,6 @@ use crate::runtime::{Locality, Task};
 use ahash::AHashMap;
 use std::future::Future;
 use std::mem::size_of;
-use std::sync::atomic::AtomicUsize;
 
 /// A pool of tasks.
 #[derive(Default)]

@@ -1,13 +1,6 @@
 #![allow(internal_features)]
-
-use crate::orengine::OrengineRuntime;
-use crate::runtime::Runtime;
-use crate::tokio::TokioRuntime;
-
-mod tools;
-mod runtime;
-mod orengine;
-mod tokio;
+use std::thread;
+use std::time::Duration;
 // use orengine::runtime::{local_executor, stop_all_executors};
 // use orengine::sync::{AsyncMutex, AsyncRWLock, AsyncWaitGroup, LocalWaitGroup};
 // use orengine::Executor;
@@ -548,6 +541,7 @@ mod tokio;
 //     });
 // }
 
+// TODO remove the whole file
 fn main() {
     // bench_create_task_and_yield();
     // bench_mutex();
@@ -555,5 +549,8 @@ fn main() {
     // bench_rw_lock();
 
     TokioRuntime::bench_and_print();
+
+    thread::sleep(Duration::from_secs(2));
+
     OrengineRuntime::bench_and_print();
 }

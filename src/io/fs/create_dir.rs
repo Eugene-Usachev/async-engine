@@ -1,7 +1,8 @@
 use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
-use crate::io::sys::{OsPath, get_os_path_ptr};
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::sys::{get_os_path_ptr, OsPath};
+use crate::io::worker::{local_worker, IoWorker};
+use crate::utils::unwrap_or_bug_hint;
 use orengine_macros::poll_for_io_request;
 use std::future::Future;
 use std::io::Result;
@@ -38,9 +39,11 @@ impl Future for CreateDir {
         let ret;
 
         poll_for_io_request!((
-            local_worker().create_dir(get_os_path_ptr(&this.os_path), this.mode, unsafe {
-                IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked())
-            }),
+            local_worker().create_dir(
+                get_os_path_ptr(&this.os_path),
+                this.mode,
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
+            ),
             ()
         ));
     }

@@ -46,7 +46,7 @@ impl<'spin_lock, T: ?Sized> SpinLockGuard<'spin_lock, T> {
     ///
     /// # Attention
     ///
-    /// Even if you doesn't call `guard.unlock()`,
+    /// Even if you don't call `guard.unlock()`,
     /// the [`spin_lock`](SpinLock) will be unlocked after the `guard` is dropped.
     #[inline]
     pub fn unlock(self) {}
@@ -146,9 +146,17 @@ impl<T: ?Sized> SpinLock<T> {
     }
 
     /// Blocks the current __thread__ until it acquires the lock.
+    ///
+    /// # Panics
+    ///
+    /// With `debug_assertions` enabled, panics if the lock is not available in
+    /// less than 1 second.
     #[inline]
     pub fn lock(&self) -> SpinLockGuard<T> {
         let backoff = Backoff::new();
+        #[cfg(debug_assertions)]
+        let start = std::time::Instant::now();
+
         loop {
             if let Some(guard) = self.try_lock() {
                 atomic::fence(Acquire);
@@ -156,10 +164,22 @@ impl<T: ?Sized> SpinLock<T> {
                 return guard;
             }
             backoff.spin();
+
+            #[cfg(debug_assertions)]
+            {
+                let time_ms = start.elapsed().as_millis();
+                let trace = std::backtrace::Backtrace::force_capture();
+
+                if time_ms < 1000 && time_ms > 100 {
+                    println!("spin lock blocked for {time_ms} ms at \n{trace:?}");
+                } else if time_ms >= 1000 {
+                    panic!("spin lock blocked for {time_ms} ms at \n{trace:?}");
+                }
+            }
         }
     }
 
-    /// If `SpinLock` is unlocked, returns [`SpinLockGuard`] that allows access to the inner value,
+    /// If `SpinLock` is unlocked, returns [`SpinLockGuard`] that allows access to the inner value;
     /// otherwise returns [`None`].
     #[inline]
     pub fn try_lock(&self) -> Option<SpinLockGuard<T>> {

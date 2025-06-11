@@ -5,8 +5,8 @@ use crate::sync::channels::waiting_task::sender_receiver_deque::{
     SenderReceiverQueue, SenderReceiverQueueOption,
 };
 use crate::sync::channels::waiting_task::{PopIfAcquiredResult, TaskInSelectBranch};
-use crate::utils::assert_hint;
 use crate::utils::unreachable_hint;
+use crate::utils::{assert_hint, unwrap_or_bug_hint};
 use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
 use std::panic::{RefUnwindSafe, UnwindSafe};
@@ -301,9 +301,9 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
         );
 
         let data = if IS_RECEIVER_POP {
-            unsafe { self.queue.pop_receiver().unwrap_unchecked() }
+            unwrap_or_bug_hint(self.queue.pop_receiver())
         } else {
-            unsafe { self.queue.pop_sender().unwrap_unchecked() }
+            unwrap_or_bug_hint(self.queue.pop_sender())
         };
 
         match data {
@@ -365,9 +365,9 @@ impl<T> WaitingTaskLocalDequeGuard<T> {
                 && matches!(self.queue.option(), SenderReceiverQueueOption::Sender))
         {
             let data = if IS_RECEIVER_POP {
-                unsafe { self.queue.pop_receiver().unwrap_unchecked() }
+                unwrap_or_bug_hint(self.queue.pop_receiver())
             } else {
-                unsafe { self.queue.pop_sender().unwrap_unchecked() }
+                unwrap_or_bug_hint(self.queue.pop_sender())
             };
 
             match data {
@@ -520,9 +520,9 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
         );
 
         let data = if IS_RECEIVER_POP {
-            unsafe { self.queue.pop_receiver().unwrap_unchecked() }
+            unwrap_or_bug_hint(self.queue.pop_receiver())
         } else {
-            unsafe { self.queue.pop_sender().unwrap_unchecked() }
+            unwrap_or_bug_hint(self.queue.pop_sender())
         };
 
         match data {
@@ -576,9 +576,9 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
                 && matches!(self.queue.option(), SenderReceiverQueueOption::Sender))
         {
             let data = if IS_RECEIVER_POP {
-                unsafe { self.queue.pop_receiver().unwrap_unchecked() }
+                unwrap_or_bug_hint(self.queue.pop_receiver())
             } else {
-                unsafe { self.queue.pop_sender().unwrap_unchecked() }
+                unwrap_or_bug_hint(self.queue.pop_sender())
             };
 
             match data {

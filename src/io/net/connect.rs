@@ -11,12 +11,12 @@ use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys;
 use crate::io::sys::{AsRawSocket, FromRawSocket, IntoRawSocket, RawSocket};
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::worker::{local_worker, IoWorker};
 use crate::local_executor;
 use crate::net::addr::{IntoSockAddr, ToSockAddrs};
 use crate::net::{ConnectedDatagram, Socket};
-use crate::utils::OrengineInstant;
 use crate::utils::each_addr::each_addr;
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant};
 
 /// `connect` io operation.
 #[repr(C)]
@@ -54,7 +54,7 @@ impl Future for Connect<'_> {
                 this.raw_fd,
                 this.addr.as_ptr().cast::<sys::os_sockaddr>(),
                 this.addr.len(),
-                unsafe { IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked()) }
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
             ),
             ()
         ));
@@ -102,7 +102,7 @@ impl Future for ConnectWithDeadline<'_> {
                 this.raw_fd,
                 this.addr.as_ptr().cast::<sys::os_sockaddr>(),
                 this.addr.len(),
-                unsafe { IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked()) },
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
                 &mut this.deadline
             ),
             ()

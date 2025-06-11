@@ -1,8 +1,9 @@
 use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::{AsRawFile, RawFile};
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::worker::{local_worker, IoWorker};
 use crate::io::{Buffer, FixedBufferMut};
+use crate::utils::unwrap_or_bug_hint;
 use orengine_macros::poll_for_io_request;
 use std::future::Future;
 use std::io::Result;
@@ -45,7 +46,7 @@ impl Future for ReadBytes<'_> {
                 this.raw_file,
                 this.buf.as_mut_ptr(),
                 this.buf.len() as u32,
-                unsafe { IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked()) }
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
             ),
             ret
         ));
@@ -96,7 +97,7 @@ impl Future for ReadFixed<'_> {
                 this.ptr,
                 this.len,
                 this.fixed_index,
-                unsafe { IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked()) }
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
             ),
             ret as u32
         ));
@@ -148,7 +149,7 @@ impl Future for PositionedReadBytes<'_> {
                 this.buf.as_mut_ptr(),
                 this.buf.len() as u32,
                 this.offset,
-                unsafe { IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked()) }
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
             ),
             ret
         ));
@@ -207,7 +208,7 @@ impl Future for PositionedReadFixed<'_> {
                 this.len,
                 this.fixed_index,
                 this.offset,
-                unsafe { IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked()) }
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
             ),
             ret as u32
         ));

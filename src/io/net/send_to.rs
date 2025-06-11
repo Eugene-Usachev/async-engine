@@ -1,12 +1,12 @@
 use crate as orengine;
-use crate::io::FixedBuffer;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::{AsRawSocket, MessageSendHeader, RawSocket};
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::worker::{local_worker, IoWorker};
+use crate::io::FixedBuffer;
 use crate::local_executor;
-use crate::net::Socket;
 use crate::net::addr::{FromSockAddr, IntoSockAddr, ToSockAddrs};
-use crate::utils::OrengineInstant;
+use crate::net::Socket;
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant};
 use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use socket2::SockAddr;
 use std::future::Future;
@@ -52,9 +52,11 @@ impl Future for SendTo<'_> {
             .get_os_message_header_ptr(this.addr, this.bufs);
 
         poll_for_io_request!((
-            local_worker().send_to(this.raw_socket, os_message_header_ptr, unsafe {
-                IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked())
-            }),
+            local_worker().send_to(
+                this.raw_socket,
+                os_message_header_ptr,
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
+            ),
             ret
         ));
     }
@@ -115,7 +117,7 @@ impl Future for SendToWithDeadline<'_> {
             worker.send_to_with_deadline(
                 this.raw_socket,
                 os_message_header_ptr,
-                unsafe { IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked()) },
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
                 &mut this.deadline
             ),
             ret

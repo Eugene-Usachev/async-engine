@@ -7,8 +7,8 @@ use crate::local_executor;
 use crate::runtime::{Call, IsLocal, Task};
 use crate::sync::{AsyncRWLock, AsyncReadLockGuard, AsyncWriteLockGuard, LockStatus};
 use crate::utils::{
-    Backoff, SpinLock, TaskVecFromPool, acquire_task_vec_from_pool, likely, unlikely,
-    unwrap_or_bug_hint,
+    acquire_task_vec_from_pool, likely, unlikely, unwrap_or_bug_hint, Backoff, SpinLock,
+    TaskVecFromPool,
 };
 use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
@@ -358,6 +358,15 @@ impl<T: ?Sized> AsyncRWLock<T> for RWLock<T> {
     where
         T: 'rw_lock,
     {
+        #[cfg(debug_assertions)]
+        {
+            let task = unsafe { Task::get_current().await };
+            assert!(
+                !task.is_local(),
+                "Cannot use `local` task in `shared` RWLock"
+            );
+        }
+
         let mut prev = self.state.load(Acquire);
 
         loop {
@@ -413,6 +422,15 @@ impl<T: ?Sized> AsyncRWLock<T> for RWLock<T> {
     where
         T: 'rw_lock,
     {
+        #[cfg(debug_assertions)]
+        {
+            let task = unsafe { Task::get_current().await };
+            assert!(
+                !task.is_local(),
+                "Cannot use `local` task in `shared` RWLock"
+            );
+        }
+
         let mut prev = self.state.load(Acquire);
 
         loop {
@@ -707,7 +725,6 @@ fn test_compile_shared_rw_lock() {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate as orengine;
     use crate::{local_executor, yield_now};
     use std::sync::Arc;

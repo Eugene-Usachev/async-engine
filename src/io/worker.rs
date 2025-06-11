@@ -1,12 +1,12 @@
-use crate::BUG_MESSAGE;
 use crate::io::config::IoWorkerConfig;
 use crate::io::io_request_data::IoRequestDataPtr;
 use crate::io::sys;
 use crate::io::sys::{
-    MessageRecvHeader, OsMessageHeader, OsOpenOptions, OsPathPtr, RawFile, RawSocket, WorkerSys,
-    os_sockaddr,
+    os_sockaddr, MessageRecvHeader, OsMessageHeader, OsOpenOptions, OsPathPtr, RawFile, RawSocket,
+    WorkerSys,
 };
-use crate::utils::OrengineInstant;
+use crate::utils::{unwrap_or_bug_message_hint, OrengineInstant};
+use crate::BUG_MESSAGE;
 use std::cell::UnsafeCell;
 use std::net::Shutdown;
 use std::time::Duration;
@@ -41,14 +41,11 @@ pub(crate) unsafe fn init_local_worker(config: IoWorkerConfig) {
 /// If the thread-local worker has not been initialized in `release` mode.
 #[inline]
 pub(crate) fn local_worker() -> &'static mut WorkerSys {
-    if cfg!(debug_assertions) {
-        get_local_worker_ref().as_mut().expect(
-            "An attempt to call io-operation has failed, \
-             because an Executor has no io-worker. Look at the config of the Executor.",
-        )
-    } else {
-        unsafe { get_local_worker_ref().as_mut().unwrap_unchecked() }
-    }
+    unwrap_or_bug_message_hint(
+        get_local_worker_ref().as_mut(),
+        "An attempt to call io-operation has failed, \
+        because an Executor has no io-worker. Look at the config of the Executor.",
+    )
 }
 
 /// A worker for async I/O operations.

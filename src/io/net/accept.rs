@@ -1,13 +1,13 @@
 use crate as orengine;
-use crate::BUG_MESSAGE;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys;
-use crate::io::sys::{AsRawSocket, FromRawSocket, RawSocket, os_sockaddr};
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::sys::{os_sockaddr, AsRawSocket, FromRawSocket, RawSocket};
+use crate::io::worker::{local_worker, IoWorker};
 use crate::local_executor;
 use crate::net::addr::FromSockAddr;
 use crate::net::{Socket, Stream};
-use crate::utils::{OrengineInstant, unwrap_or_bug_hint};
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant};
+use crate::BUG_MESSAGE;
 use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use socket2::SockAddr;
 use std::future::Future;
@@ -85,7 +85,7 @@ impl<S: FromRawSocket> Future for Accept<S> {
                 this.raw_socket,
                 (&raw mut this.addr.storage).cast::<os_sockaddr>(),
                 &raw mut this.addr.len,
-                unsafe { IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked()) },
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
             ),
             unsafe {
                 (
@@ -139,7 +139,7 @@ impl<S: FromRawSocket> Future for AcceptWithDeadline<S> {
                 this.raw_socket,
                 (&raw mut this.addr.storage).cast::<os_sockaddr>(),
                 &raw mut this.addr.len,
-                unsafe { IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked()) },
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
                 &mut this.deadline
             ),
             unsafe {

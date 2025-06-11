@@ -1,7 +1,8 @@
 use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
-use crate::io::sys::{OsPath, get_os_path_ptr};
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::sys::{get_os_path_ptr, OsPath};
+use crate::io::worker::{local_worker, IoWorker};
+use crate::utils::unwrap_or_bug_hint;
 use orengine_macros::poll_for_io_request;
 use std::future::Future;
 use std::io::Result;
@@ -34,9 +35,10 @@ impl Future for RemoveDir {
         let ret;
 
         poll_for_io_request!((
-            local_worker().remove_dir(get_os_path_ptr(&this.path), unsafe {
-                IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked())
-            }),
+            local_worker().remove_dir(
+                get_os_path_ptr(&this.path),
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
+            ),
             ()
         ));
     }

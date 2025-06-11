@@ -1,37 +1,34 @@
 use crate::bug_message::BUG_MESSAGE;
 use crate::io::sys::WorkerSys;
-use crate::io::worker::{IoWorker, get_local_worker_ref, init_local_worker};
+use crate::io::worker::{get_local_worker_ref, init_local_worker, IoWorker};
 use crate::io::{init_local_buf_pool, uninit_local_buf_pool};
-#[cfg(not(feature = "disable_task_pool"))]
-use crate::runtime::TaskPool;
 use crate::runtime::call::Call;
 use crate::runtime::config::{Config, ValidConfig};
 use crate::runtime::executor::end_local_thread_and_write_into_ptr::EndLocalThreadAndWriteIntoPtr;
 use crate::runtime::executor::sleeping_manager::SleepingManager;
-use crate::runtime::global_state::{SubscribedState, register_local_executor};
+use crate::runtime::global_state::{register_local_executor, SubscribedState};
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::runtime::interaction_between_executors::{ExecutorIsNotRegisteredErr, Interactor};
 use crate::runtime::local_thread_pool::LocalThreadWorkerPool;
 use crate::runtime::task::Task;
 use crate::runtime::waker::create_waker;
+#[cfg(not(feature = "disable_task_pool"))]
+use crate::runtime::TaskPool;
 use crate::runtime::{
-    ExecutorSharedTaskList, Locality, TaskWithDeadline, get_core_id_for_executor,
+    get_core_id_for_executor, ExecutorSharedTaskList, Locality, TaskWithDeadline,
 };
-use crate::sync::Unlock;
-use crate::sync::channels::CallStatePtr;
 use crate::sync::channels::waiting_task::TaskInSelectBranch;
-use crate::utils::{
-    CoreId, OrengineInstant, ProgressiveTimeout, assert_hint, likely, unlikely,
-    unwrap_or_bug_message_hint,
-};
+use crate::sync::channels::CallStatePtr;
+use crate::sync::Unlock;
+use crate::utils::{assert_hint, likely, unlikely, unwrap_or_bug_hint, unwrap_or_bug_message_hint, CoreId, OrengineInstant, ProgressiveTimeout};
 use fastrand::Rng;
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::Ordering::{AcqRel, Release};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{mem, ptr, thread};
@@ -670,13 +667,12 @@ impl Executor {
     #[inline]
     fn spawn_shared_task_<const PUT_IN_THE_START_OF_QUEUE: bool>(&mut self, task: Task) {
         fn try_flush(executor: &mut Executor) {
-            if let Some(mut shared_tasks_list) = unsafe {
-                executor
+            if let Some(mut shared_tasks_list) =
+                unwrap_or_bug_hint(executor
                     .shared_tasks_list
-                    .as_ref()
-                    .unwrap_unchecked()
+                    .as_ref())
                     .try_lock_and_return_as_vec()
-            } {
+            {
                 let number_of_shared = (executor.shared_tasks.len() >> 1) + 1;
                 for task in executor.shared_tasks.drain(..number_of_shared) {
                     shared_tasks_list.push(task);
@@ -1083,14 +1079,15 @@ impl Executor {
                 "number_of_local_tasks_in_this_round is invalid",
             );
 
-            task = unsafe { self.local_tasks.pop_back().unwrap_unchecked() };
-            self.exec_task(task);
+            task = unwrap_or_bug_hint(self.local_tasks.pop_back());
+
+            self.exec_task_now(task);
         }
 
         let number_of_shared_tasks_in_this_round = self.shared_tasks.len();
         for _ in 0..number_of_shared_tasks_in_this_round {
             if let Some(task) = self.shared_tasks.pop_back() {
-                self.exec_task(task);
+                self.exec_task_now(task);
             } else {
                 // The executor shared its tasks with another one.
                 break;
@@ -1210,7 +1207,7 @@ impl Executor {
             // has io work and has sleeping tasks
             let has_cpu_work = self.number_of_spawned_tasks() > 0;
             if self.local_worker.is_some() {
-                let worker = unsafe { self.local_worker.as_mut().unwrap_unchecked() };
+                let worker = unwrap_or_bug_hint(self.local_worker.as_mut());
                 if worker.has_work() {
                     if !has_cpu_work {
                         let max_timeout = self.progressive_timeout.timeout_with_shift(2);

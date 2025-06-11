@@ -1,9 +1,9 @@
-use crate::BUG_MESSAGE;
 use crate::io::IoWorkerConfig;
 use crate::utils::SpinLock;
+use crate::BUG_MESSAGE;
 use std::mem::discriminant;
 
-/// A shared config of state of the all runtime.
+/// A shared config of the state of the all runtime.
 /// It is used to prevent unsafe behavior in the runtime.
 ///
 /// For example, when the task that uses an IO worker is
@@ -28,7 +28,7 @@ impl ConfigStats {
     }
 }
 
-/// A shared config of state of the all runtime.
+/// A shared config of the state of the all runtime.
 static GLOBAL_CONFIG_STATS: SpinLock<ConfigStats> = SpinLock::new(ConfigStats::new());
 
 /// The default [`buffers`](crate::io::Buffer) capacity.
@@ -50,7 +50,7 @@ impl ValidConfig {
         self.work_sharing_level != usize::MAX
     }
 
-    /// Returns whether the thread pool is enabled.
+    /// Returns whether the blocking pool is enabled.
     pub const fn is_thread_pool_enabled(&self) -> bool {
         self.number_of_thread_workers != 0
     }
@@ -81,16 +81,17 @@ impl Drop for ValidConfig {
 }
 
 /// `Config` is a configuration struct used for controlling various parameters
-/// related to buffers, I/O workers, thread workers, and work-sharing behavior.
+/// related to buffers, I/O workers, blocking workers, and work-sharing behavior.
 ///
 /// # Fields
+///
 /// - `buffer_cap`: The size of the [`buffers`](crate::io::Buffer).
 ///
 /// - `io_worker_config`: An optional configuration for I/O workers. If none is provided,
 ///   the IO worker will be disabled.
 ///
-/// - `number_of_thread_workers`: The number of thread workers to spawn. If zero is provided,
-///   the thread pool will be disabled.
+/// - `number_of_blocking_workers`: The number of blocking workers to spawn. If zero is provided,
+///   the blocking pool will be disabled.
 ///
 /// - `work_sharing_level`: The level of work sharing between threads. It is responsible for
 ///   how many tasks the [`Executor`](crate::runtime::executor::Executor) can hold before assigning
@@ -103,9 +104,9 @@ pub struct Config {
     /// An optional configuration for I/O workers. If none is provided,
     /// the IO worker will be disabled.
     io_worker_config: Option<IoWorkerConfig>,
-    /// The number of thread workers to spawn. If zero is provided,
-    /// the thread pool will be disabled.
-    number_of_thread_workers: usize,
+    /// The number of blocking workers to spawn. If zero is provided,
+    /// the blocking pool will be disabled.
+    number_of_blocking_workers: usize,
     /// The level of work sharing between threads. It is responsible for
     /// how many tasks the [`Executor`](crate::runtime::executor::Executor) can hold before assigning
     /// them to the shared queue.
@@ -129,17 +130,17 @@ const AN_ATTEMPT_TO_CREATE_EXECUTOR_WITH_WORK_SHARING_AND_WITHOUT_IO_WORKER: &st
 
 const AN_ATTEMPT_TO_CREATE_EXECUTOR_WITH_WORK_SHARING_AND_THREAD_POOL: &str = "\
     An attempt to create an Executor with work sharing and with a \
-    thread pool enabled has failed because another Executor was created with \
-    work sharing enabled and without a thread pool enabled. \
+    blocking pool enabled has failed because another Executor was created with \
+    work sharing enabled and without a blocking pool enabled. \
     This is unacceptable because an Executor who does not have a \
-    thread pool cannot take on a task that requires a thread pool.";
+    blocking pool cannot take on a task that requires a blocking pool.";
 
 const AN_ATTEMPT_TO_CREATE_EXECUTOR_WITH_WORK_SHARING_AND_WITHOUT_THREAD_POOL: &str = "\
     An attempt to create an Executor with work sharing and without a \
-    thread pool enabled has failed because another Executor was created with \
-    both a thread pool and work sharing enabled. \
+    blocking pool enabled has failed because another Executor was created with \
+    both a blocking pool and work sharing enabled. \
     This is unacceptable because an Executor who does not have a \
-    thread pool cannot take on a task that requires a thread pool.";
+    blocking pool cannot take on a task that requires a blocking pool.";
 
 impl Config {
     /// Returns a default [`Config`].
@@ -147,7 +148,7 @@ impl Config {
         Self {
             buffer_cap: DEFAULT_BUF_CAP,
             io_worker_config: Some(IoWorkerConfig::default()),
-            number_of_thread_workers: 1,
+            number_of_blocking_workers: 1,
             work_sharing_level: 7,
         }
     }
@@ -201,21 +202,21 @@ impl Config {
         self
     }
 
-    /// Returns the number of thread workers to spawn. If zero is returned,
-    /// the thread pool is disabled.
-    pub const fn number_of_thread_workers(&self) -> usize {
-        self.number_of_thread_workers
+    /// Returns the number of blocking workers to spawn. If zero is returned,
+    /// the blocking pool is disabled.
+    pub const fn number_of_blocking_workers(&self) -> usize {
+        self.number_of_blocking_workers
     }
 
-    /// Returns whether the thread pool is enabled.
+    /// Returns whether the blocking pool is enabled.
     pub const fn is_thread_pool_enabled(&self) -> bool {
-        self.number_of_thread_workers != 0
+        self.number_of_blocking_workers != 0
     }
 
     /// Sets the number of blocking workers to spawn. If zero is provided,
-    /// the thread pool will be disabled.
+    /// the blocking pool will be disabled.
     ///
-    /// This applies only to the thread pool of each executor that is
+    /// This applies only to the blocking pool of each executor that is
     /// used in [`asyncify`](crate::asyncify). This has nothing to do with
     /// the `fallback_thread_pool` feature.
     #[must_use]
@@ -223,7 +224,7 @@ impl Config {
         mut self,
         number_of_thread_workers: usize,
     ) -> Self {
-        self.number_of_thread_workers = number_of_thread_workers;
+        self.number_of_blocking_workers = number_of_thread_workers;
 
         self
     }
@@ -320,7 +321,7 @@ impl Config {
         ValidConfig {
             buffer_cap: self.buffer_cap,
             io_worker_config: self.io_worker_config,
-            number_of_thread_workers: self.number_of_thread_workers,
+            number_of_thread_workers: self.number_of_blocking_workers,
             work_sharing_level: self.work_sharing_level,
         }
     }
@@ -331,7 +332,7 @@ impl From<&ValidConfig> for Config {
         Self {
             buffer_cap: config.buffer_cap,
             io_worker_config: config.io_worker_config,
-            number_of_thread_workers: config.number_of_thread_workers,
+            number_of_blocking_workers: config.number_of_thread_workers,
             work_sharing_level: config.work_sharing_level,
         }
     }
@@ -341,7 +342,7 @@ impl PartialEq for Config {
     fn eq(&self, other: &Self) -> bool {
         self.buffer_cap == other.buffer_cap
             && discriminant(&self.io_worker_config) == discriminant(&other.io_worker_config)
-            && self.number_of_thread_workers == other.number_of_thread_workers
+            && self.number_of_blocking_workers == other.number_of_blocking_workers
             && self.work_sharing_level == other.work_sharing_level
     }
 }
@@ -350,7 +351,6 @@ impl Eq for Config {}
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
     use crate as orengine;
     use std::panic;
     use std::sync::atomic;
@@ -428,8 +428,8 @@ pub(crate) mod tests {
     // 4 cases for panic
     // 1 - first config with io worker and task, next with work sharing and without io worker
     // 2 - first config with work sharing and without io worker, next with io worker and work sharing
-    // 3 - first config with work sharing and without thread pool, next with thread pool and work sharing
-    // 4 - first config with thread pool and work sharing, next with work sharing and without thread pool
+    // 3 - first config with work sharing and without blocking pool, next with blocking pool and work sharing
+    // 4 - first config with blocking pool and work sharing, next with work sharing and without blocking pool
     #[orengine::test::test_local]
     #[allow(
         clippy::should_panic_without_expect,
@@ -473,7 +473,7 @@ pub(crate) mod tests {
     )]
     #[should_panic]
     fn test_config_third_case_panic() {
-        // with work sharing and without thread pool
+        // with work sharing and without blocking pool
         handle_panic_in_config_test(|| {
             let _first_config = Config::default()
                 .set_numbers_of_blocking_workers(0)
@@ -490,7 +490,7 @@ pub(crate) mod tests {
     )]
     #[should_panic]
     fn test_config_fourth_case_panic() {
-        // with thread pool and work sharing
+        // with blocking pool and work sharing
         handle_panic_in_config_test(|| {
             let _first_config = Config::default().validate();
             let _second_config = Config::default()

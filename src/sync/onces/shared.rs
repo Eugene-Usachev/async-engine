@@ -4,6 +4,7 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed};
 
 use crate::runtime::IsLocal;
 use crate::sync::{AsyncOnce, CallOnceResult, OnceState};
+use crate::utils::unwrap_or_bug_hint;
 
 /// `Once` is an asynchronous [`std::Once`](std::sync::Once).
 ///
@@ -101,13 +102,7 @@ impl AsyncOnce for Once {
 
     #[inline]
     fn state(&self) -> OnceState {
-        if cfg!(debug_assertions) {
-            use crate::bug_message::BUG_MESSAGE;
-
-            OnceState::try_from(self.state.load(Acquire)).expect(BUG_MESSAGE)
-        } else {
-            unsafe { OnceState::try_from(self.state.load(Acquire)).unwrap_unchecked() }
-        }
+        unwrap_or_bug_hint(OnceState::try_from(self.state.load(Acquire)))
     }
 }
 
@@ -136,14 +131,13 @@ fn test_compile_shared_once() {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate as orengine;
     use crate::sleep;
     use crate::sync::{AsyncWaitGroup, WaitGroup};
     use crate::test::sched_future_to_another_thread;
-    use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::Arc;
     use std::time::Duration;
 
     #[orengine::test::test_shared]

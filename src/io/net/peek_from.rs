@@ -8,14 +8,14 @@ use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use socket2::SockAddr;
 
 use crate as orengine;
-use crate::io::FixedBufferMut;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::{AsRawSocket, MessageRecvHeader, RawSocket};
-use crate::io::worker::{IoWorker, local_worker};
-use crate::net::Socket;
+use crate::io::worker::{local_worker, IoWorker};
+use crate::io::FixedBufferMut;
 use crate::net::addr::FromSockAddr;
-use crate::utils::OrengineInstant;
-use crate::{BUG_MESSAGE, local_executor};
+use crate::net::Socket;
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant};
+use crate::{local_executor, BUG_MESSAGE};
 
 /// `peek_from` io operation.
 #[repr(C)]
@@ -50,9 +50,11 @@ impl Future for PeekFrom<'_> {
         let ret;
 
         poll_for_io_request!((
-            local_worker().peek_from(this.raw_socket, &mut this.msg_header, unsafe {
-                IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked())
-            }),
+            local_worker().peek_from(
+                this.raw_socket,
+                &mut this.msg_header,
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
+            ),
             {
                 unsafe { this.sock_addr.set_length(this.msg_header.get_addr_len()) };
                 ret
@@ -107,7 +109,7 @@ impl Future for PeekFromWithDeadline<'_> {
             worker.peek_from_with_deadline(
                 this.raw_socket,
                 &mut this.msg_header,
-                unsafe { IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked()) },
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
                 &mut this.deadline
             ),
             {

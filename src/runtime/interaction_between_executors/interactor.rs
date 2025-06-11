@@ -1,7 +1,7 @@
-use crate::runtime::Task;
 use crate::runtime::interaction_between_executors::SyncBatchOptimizedTaskQueue;
-use crate::utils::OrengineInstant;
+use crate::runtime::Task;
 use crate::utils::vec_map::VecMap;
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant};
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display};
 use std::mem;
@@ -128,7 +128,7 @@ impl Interactor {
     /// It doesn't guarantee that the tasks will be flushed, but the chance is very high.
     fn retry_flush(&mut self) {
         for id in self.id_to_retry.drain(..) {
-            let shared_task_list = unsafe { self.all.get_mut(id).unwrap_unchecked() };
+            let shared_task_list = unwrap_or_bug_hint(self.all.get_mut(id));
 
             #[cfg(not(debug_assertions))]
             {

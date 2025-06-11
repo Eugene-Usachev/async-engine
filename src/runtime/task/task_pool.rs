@@ -4,6 +4,7 @@ use crate::runtime::{Locality, Task};
 use ahash::AHashMap;
 use std::future::Future;
 use std::mem::size_of;
+use std::sync::atomic::AtomicUsize;
 
 /// A pool of tasks.
 #[derive(Default)]
@@ -54,7 +55,7 @@ impl TaskPool {
     /// Puts a task into the pool.
     #[inline]
     pub fn put(&mut self, task: Task) {
-        if self.bytes_allocated >= 128 * 1024 * 1024 {
+        if self.bytes_allocated >= 256 * 1024 * 1024 {
             unsafe { drop(Box::from_raw(task.future_ptr())) };
 
             return;

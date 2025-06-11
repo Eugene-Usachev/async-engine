@@ -1,7 +1,7 @@
 use crate::panic_if_local_in_future;
 use crate::runtime::call::Call;
 use crate::runtime::waiting_task::WaitingTask;
-use crate::runtime::{IsLocal, Task, TaskWithDeadline, local_executor};
+use crate::runtime::{local_executor, IsLocal, Task, TaskWithDeadline};
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
 use crate::sync::channels::state::{CallState, CallStatePtr};
 use crate::sync::channels::waiting_task::waiting_select_task_deque::WaitingTaskSharedDequeGuard;
@@ -12,13 +12,13 @@ use crate::sync::{
     AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, RecvErr, RecvTimeoutErr, SendErr,
     SendTimeoutErr, TryRecvErr, TrySendErr, Unlock,
 };
-use crate::utils::{OrengineInstant, Ptr};
 use crate::utils::{unlikely, unreachable_hint};
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant, Ptr};
 use std::collections::VecDeque;
 use std::future::Future;
 use std::mem::ManuallyDrop;
 use std::panic::{RefUnwindSafe, UnwindSafe};
-use std::ptr::{NonNull, copy_nonoverlapping};
+use std::ptr::{copy_nonoverlapping, NonNull};
 use std::task::{Context, Poll};
 use std::{mem, ptr};
 
@@ -362,7 +362,7 @@ impl<T> Future for WaitRecv<'_, T> {
 
                 unsafe {
                     this.slot
-                        .write(inner_lock.storage.pop_front().unwrap_unchecked());
+                        .write(unwrap_or_bug_hint(inner_lock.storage.pop_front()));
                 }
 
                 let storage_ref = &mut inner_lock.get_mut().storage;
@@ -472,7 +472,7 @@ impl<T> Future for WaitRecvWithDeadline<'_, T> {
 
                 unsafe {
                     this.slot
-                        .write(inner_lock.storage.pop_front().unwrap_unchecked());
+                        .write(unwrap_or_bug_hint(inner_lock.storage.pop_front()));
                 }
 
                 let storage_ref = &mut inner_lock.get_mut().storage;
@@ -749,7 +749,7 @@ macro_rules! generate_try_recv_in {
                     }
 
                     unsafe {
-                        slot.write(inner_lock.storage.pop_front().unwrap_unchecked());
+                        slot.write(unwrap_or_bug_hint(inner_lock.storage.pop_front()));
                     }
 
                     let storage_ref = &mut inner_lock.get_mut().storage;
@@ -851,7 +851,7 @@ macro_rules! generate_recv_or_subscribe {
 
             match task_in_select_branch.acquire_once() {
                 Some(task) => {
-                    unsafe { slot.write(inner_lock.storage.pop_front().unwrap_unchecked()) };
+                    unsafe { slot.write(unwrap_or_bug_hint(inner_lock.storage.pop_front())) };
 
                     let storage_ref = &mut inner_lock.get_mut().storage;
 

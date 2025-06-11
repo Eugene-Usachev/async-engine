@@ -7,7 +7,8 @@ use std::task::{Context, Poll};
 use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::{AsRawFile, RawFile};
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::worker::{local_worker, IoWorker};
+use crate::utils::unwrap_or_bug_hint;
 
 /// `fallocate` io operation which allows to allocate space in a file from a given offset.
 #[repr(C)]
@@ -46,7 +47,7 @@ impl Future for Fallocate {
                 this.offset as u64,
                 this.len as u64,
                 this.flags,
-                unsafe { IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked()) }
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
             ),
             ()
         ));

@@ -3,9 +3,9 @@
 //!
 //! It allows for asynchronous read or write locking and unlocking, and provides
 //! ownership-based locking through [`LocalReadLockGuard`] and [`LocalWriteLockGuard`].
-use crate::runtime::{IsLocal, Task, local_executor};
+use crate::runtime::{local_executor, IsLocal, Task};
 use crate::sync::{AsyncRWLock, AsyncReadLockGuard, AsyncWriteLockGuard, LockStatus};
-use crate::utils::{TaskVecFromPool, acquire_task_vec_from_pool};
+use crate::utils::{acquire_task_vec_from_pool, unwrap_or_bug_hint, TaskVecFromPool};
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::mem::ManuallyDrop;
@@ -428,7 +428,7 @@ impl<T: ?Sized> AsyncRWLock<T> for LocalRWLock<T> {
             let task = inner.wait_queue_write.pop();
             if task.is_some() {
                 inner.number_of_readers = -1;
-                local_executor().exec_task(unsafe { task.unwrap_unchecked() });
+                local_executor().exec_task(unwrap_or_bug_hint(task));
             }
         }
     }
@@ -461,11 +461,11 @@ impl<T: ?Sized> AsyncRWLock<T> for LocalRWLock<T> {
 
             while readers_count > 0 {
                 let task = inner.wait_queue_read.pop();
-                local_executor().exec_task(unsafe { task.unwrap_unchecked() });
+                local_executor().exec_task(unwrap_or_bug_hint(task));
                 readers_count -= 1;
             }
         } else {
-            local_executor().exec_task(unsafe { task.unwrap_unchecked() });
+            local_executor().exec_task(unwrap_or_bug_hint(task));
         }
     }
 
@@ -545,7 +545,6 @@ fn test_compile_local_rw_lock() {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate as orengine;
     use crate::runtime::Locality;
     use crate::sync::{AsyncWaitGroup, LocalWaitGroup};

@@ -1,7 +1,8 @@
 use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::RawSocket;
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::worker::{local_worker, IoWorker};
+use crate::utils::unwrap_or_bug_hint;
 use orengine_macros::poll_for_io_request;
 use socket2::{Domain, Protocol, Type};
 use std::future::Future;
@@ -37,9 +38,12 @@ impl Future for Socket {
         let ret;
 
         poll_for_io_request!((
-            local_worker().socket(this.domain, this.socket_type, this.protocol, unsafe {
-                IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked())
-            }),
+            local_worker().socket(
+                this.domain,
+                this.socket_type,
+                this.protocol,
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
+            ),
             ret as RawSocket
         ));
     }

@@ -9,8 +9,8 @@ use crate::sync::{
     AsyncChannel, AsyncReceiver, AsyncSender, RecvErr, RecvTimeoutErr, SendErr, SendTimeoutErr,
     TryRecvErr, TrySendErr,
 };
-use crate::utils::{OrengineInstant, Ptr};
 use crate::utils::{unlikely, unreachable_hint};
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant, Ptr};
 use crate::{local_executor, panic_if_shared_in_future};
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
@@ -311,7 +311,7 @@ impl<T> Future for WaitLocalRecv<'_, T> {
 
                 unsafe {
                     this.slot
-                        .write(this.inner.storage.pop_front().unwrap_unchecked());
+                        .write(unwrap_or_bug_hint(this.inner.storage.pop_front()));
                 }
 
                 this.inner
@@ -407,7 +407,7 @@ impl<T> Future for WaitLocalRecvWithDeadline<'_, T> {
 
                 unsafe {
                     this.slot
-                        .write(this.inner.storage.pop_front().unwrap_unchecked());
+                        .write(unwrap_or_bug_hint(this.inner.storage.pop_front()));
                 }
 
                 this.inner
@@ -639,7 +639,7 @@ macro_rules! generate_try_recv_in_ptr {
             }
 
             unsafe {
-                slot.write(inner.storage.pop_front().unwrap_unchecked());
+                slot.write(unwrap_or_bug_hint(inner.storage.pop_front()));
             };
 
             inner
@@ -707,7 +707,7 @@ macro_rules! generate_recv_or_subscribe {
 
             match task_in_select_branch.acquire_once() {
                 Some(task) => {
-                    unsafe { slot.write(inner.storage.pop_front().unwrap_unchecked()) };
+                    unsafe { slot.write(unwrap_or_bug_hint(inner.storage.pop_front())); };
 
                     local_executor().exec_task(task);
 
@@ -959,11 +959,10 @@ fn test_compile_local_channel() {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate as orengine;
     use crate::sync::{RecvErr, TryRecvErr};
-    use crate::utils::SpinLock;
     use crate::utils::droppable_element::DroppableElement;
+    use crate::utils::SpinLock;
     use crate::yield_now;
     use std::rc::Rc;
     use std::sync::Arc;

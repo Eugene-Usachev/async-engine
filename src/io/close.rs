@@ -1,8 +1,9 @@
 use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::worker::{local_worker, IoWorker};
 
 use crate::io::sys::{AsRawFile, AsRawSocket, RawFile, RawSocket};
+use crate::utils::unwrap_or_bug_hint;
 use orengine_macros::poll_for_io_request;
 use std::future::Future;
 use std::io::Result;
@@ -35,9 +36,10 @@ impl Future for CloseSocket {
         let ret;
 
         poll_for_io_request!((
-            local_worker().close_socket(this.raw_socket, unsafe {
-                IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked())
-            }),
+            local_worker().close_socket(
+                this.raw_socket,
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
+            ),
             ()
         ));
     }
@@ -88,9 +90,10 @@ impl Future for CloseFile {
         let ret;
 
         poll_for_io_request!((
-            local_worker().close_file(this.raw_file, unsafe {
-                IoRequestDataPtr::new(this.io_request_data.as_mut().unwrap_unchecked())
-            }),
+            local_worker().close_file(
+                this.raw_file,
+                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
+            ),
             ()
         ));
     }

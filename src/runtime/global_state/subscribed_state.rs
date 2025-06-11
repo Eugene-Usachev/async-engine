@@ -1,17 +1,17 @@
-use crate::BUG_MESSAGE;
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::runtime::interaction_between_executors::{
     Interactor, SharedTaskListForSendTo, SyncBatchOptimizedTaskQueue,
 };
-use crate::runtime::{ExecutorSharedTaskList, lock_and_get_global_state};
-use crate::utils::unlikely;
+use crate::runtime::{lock_and_get_global_state, ExecutorSharedTaskList};
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::utils::vec_map::VecMap;
+use crate::utils::{unlikely, unwrap_or_bug_hint};
+use crate::BUG_MESSAGE;
 use crossbeam::utils::CachePadded;
 use std::cell::UnsafeCell;
-use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Release};
+use std::sync::Arc;
 
 /// Inner value of [`GlobalState`](crate::runtime::global_state::GlobalState).
 struct Inner {
@@ -184,7 +184,7 @@ impl SubscribedState {
         F: FnOnce(&Vec<Arc<ExecutorSharedTaskList>>),
     {
         self.with_inner(|inner| {
-            f(unsafe { inner.tasks_lists.as_ref().unwrap_unchecked() });
+            f(unwrap_or_bug_hint(inner.tasks_lists.as_ref()));
         });
     }
 }

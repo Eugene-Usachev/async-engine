@@ -1,0 +1,20 @@
+<svg width="1651" height="993" xmlns="http://www.w3.org/2000/svg"
+     xml:space="preserve" overflow="hidden"><defs><clipPath id="clip0"><rect x="13905" y="2067" width="1651" height="993"/></clipPath></defs>
+    <g clip-path="url(#clip0)" transform="translate(-13905 -2067)"><rect x="13906" y="2068" width="1648" height="990" fill="#FFFFFF"/>
+        <g><path d="M14036.5 2832.59 15503.5 2832.59M14036.5 2713.59 15503.5 2713.59M14036.5 2594.59 15503.5 2594.59M14036.5 2475.58 15503.5 2475.58M14036.5 2357.58 15503.5 2357.58M14036.5 2238.5 15503.5 2238.5" stroke="#D9D9D9" stroke-width="3.4375" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/></g>
+        <g><path d="M14162.5 2340.08 14277.5 2340.08 14277.5 2952 14162.5 2952ZM14529.5 2486.08 14644.5 2486.08 14644.5 2952 14529.5 2952ZM14895.5 2561.08 15010.5 2561.08 15010.5 2952 14895.5 2952ZM15262.5 2854.09 15377.5 2854.09 15377.5 2952 15262.5 2952Z" fill="#4472C4"/></g>
+        <g><path d="M14036.5 2951.5 15503.5 2951.5" stroke="#D9D9D9" stroke-width="3.4375" stroke-linejoin="round" stroke-miterlimit="10" fill="none" fill-rule="evenodd"/></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 13977.5 2963)">0</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 13935.7 2844)">100</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 13935.7 2726)">200</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 13935.7 2607)">300</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 13935.7 2488)">400</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 13935.7 2369)">500</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 13935.7 2250)">600</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 14141 3017)">async-std</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 14543.9 3017)">tokio</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 14913.3 3017)">smol</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 15245.4 3017)">orengine</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="64" transform="matrix(1 0 0 1 14214.5 2164)">Bytes for a sleeping task (favorites only)</text></g>
+        <rect x="13906.5" y="2068.5" width="1648" height="990" stroke="#D9D9D9" stroke-width="3.4375"
+              stroke-linejoin="round" stroke-miterlimit="10" fill="none"/></g></svg>

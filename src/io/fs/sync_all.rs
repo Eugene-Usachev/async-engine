@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::{AsRawFile, RawFile};
-use crate::io::worker::{local_worker, IoWorker};
+use crate::io::worker::{IoWorker, local_worker};
 use crate::utils::unwrap_or_bug_hint;
 
 /// `sync_all` io operation.

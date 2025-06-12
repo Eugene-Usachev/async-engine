@@ -1,6 +1,6 @@
 # This directory contains the results of the cpu_bound benchmarks
 
-## Create task and yield
+## Create a task and yield
 
 This benchmark measures the overhead of creating a task, returning from it and yielding.
 This shows well how expensive asynchronous abstractions of the engine are.
@@ -12,18 +12,18 @@ __Less is better__
 
 __All__
 
-![create_task_and_yield.png](images/create_task_and_yield.png)
+![create_task_and_yield.svg](images/create_task_and_yield.svg)
 
 __Favorites only__
 
-![images/create_task_and_yield_favorites.png](images/create_task_and_yield_favorites.png)
+![images/create_task_and_yield_favorites.svg](images/create_task_and_yield_favorites.svg)
 
 ## Task switch
 
 This benchmark measures the overhead of switching between tasks.
 __Less is better__
 
-![images/task_switch.png](images/task_switch.png)
+![images/task_switch.svg](images/task_switch.svg)
 
 ## Mutex lock and unlock
 
@@ -32,20 +32,18 @@ This test shows that an asynchronous Mutex can run just as fast as a
 synchronous one. So don't be afraid to use `orengine::sync::Mutex` in your tasks!
 __Less is better__
 
-![images/mutex_lock_unlock.png](images/mutex_lock_unlock.png)
+![images/mutex_lock_unlock.svg](images/mutex_lock_unlock.svg)
 
 ## Memory usage per task
 
-This benchmark measures the memory usage per task. This was measured by creating 10,000,000 sleeping tasks,
-so the result cannot be less than 16 bytes (required for `std::time::Instant`).
-In fact, it cannot be less than 32 bytes, since you need to keep at least a `wide pointer` to the `Future`
-or even the `Layout`.
+This benchmark measures the memory usage per task.
+Because it is sleeping, it stores the task in the sleeping manager with their deadlines.
 __Less is better__
 
 __All__
 
-![images/memory_usage_per_10m_tasks_all.png](images/memory_usage_per_10m_tasks_all.png)
+![images/memory_usage_per_10m_tasks_all.svg](images/memory_usage_per_10m_tasks_all.svg)
 
 __Favorites only__
 
-![images/memory_usage_per_10m_tasks_favorites_only.png](images/memory_usage_per_10m_tasks_favorites_only.png)
+![images/memory_usage_per_10m_tasks_favorites_only.svg](images/memory_usage_per_10m_tasks_favorites_only.svg)

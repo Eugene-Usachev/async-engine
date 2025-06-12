@@ -1,0 +1,23 @@
+<svg width="1653" height="993" xmlns="http://www.w3.org/2000/svg"
+     xml:space="preserve" overflow="hidden"><defs><clipPath id="clip0"><rect x="11649" y="1033" width="1653" height="993"/></clipPath></defs>
+    <g clip-path="url(#clip0)" transform="translate(-11649 -1033)"><rect x="11650" y="1034" width="1650" height="990" fill="#FFFFFF"/>
+        <g><path d="M11780.5 1815.56 13249.5 1815.56M11780.5 1713.56 13249.5 1713.56M11780.5 1611.55 13249.5 1611.55M11780.5 1509.55 13249.5 1509.55M11780.5 1407.55 13249.5 1407.55M11780.5 1305.54 13249.5 1305.54M11780.5 1203.5 13249.5 1203.5" stroke="#D9D9D9" stroke-width="3.4375" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/></g>
+        <g><path d="M11864.4 1277.04 11941.4 1277.04 11941.4 1918 11864.4 1918ZM12109.4 1591.05 12186.4 1591.05 12186.4 1918 12109.4 1918ZM12354.4 1666.05 12430.4 1666.05 12430.4 1918 12354.4 1918ZM12598.4 1770.06 12675.4 1770.06 12675.4 1918 12598.4 1918ZM12843.4 1797.06 12920.4 1797.06 12920.4 1918 12843.4 1918ZM13088.4 1886.06 13165.4 1886.06 13165.4 1918 13088.4 1918Z" fill="#4472C4"/></g>
+        <g><path d="M11780.5 1917.5 13249.5 1917.5" stroke="#D9D9D9" stroke-width="3.4375" stroke-linejoin="round" stroke-miterlimit="10" fill="none" fill-rule="evenodd"/></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 11721.3 1929)">0</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 11700.4 1827)">50</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 11679.5 1725)">100</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 11679.5 1623)">150</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 11679.5 1521)">200</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 11679.5 1419)">250</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 11679.5 1317)">300</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 11679.5 1215)">350</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 11877.1 1983)">std</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 12068.7 1983)">async-std</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 12352.3 1983)">smol</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 12594.5 1983)">tokio</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 12846.4 1983)">may</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 13052.2 1983)">orengine</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="64" transform="matrix(1 0 0 1 12208.1 1129)">Nanoseconds/task switch</text></g>
+        <rect x="11650.5" y="1034.5" width="1650" height="990" stroke="#D9D9D9" stroke-width="3.4375"
+              stroke-linejoin="round" stroke-miterlimit="10" fill="none"/></g></svg>

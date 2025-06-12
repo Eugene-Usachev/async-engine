@@ -1,7 +1,7 @@
 use crate::panic_if_local_in_future;
 use crate::runtime::call::Call;
 use crate::runtime::waiting_task::WaitingTask;
-use crate::runtime::{local_executor, IsLocal, Task, TaskWithDeadline};
+use crate::runtime::{IsLocal, Task, TaskWithDeadline, local_executor};
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
 use crate::sync::channels::state::{CallState, CallStatePtr};
 use crate::sync::channels::waiting_task::waiting_select_task_deque::WaitingTaskSharedDequeGuard;
@@ -12,13 +12,13 @@ use crate::sync::{
     AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, RecvErr, RecvTimeoutErr, SendErr,
     SendTimeoutErr, TryRecvErr, TrySendErr, Unlock,
 };
+use crate::utils::{OrengineInstant, Ptr, unwrap_or_bug_hint};
 use crate::utils::{unlikely, unreachable_hint};
-use crate::utils::{unwrap_or_bug_hint, OrengineInstant, Ptr};
 use std::collections::VecDeque;
 use std::future::Future;
 use std::mem::ManuallyDrop;
 use std::panic::{RefUnwindSafe, UnwindSafe};
-use std::ptr::{copy_nonoverlapping, NonNull};
+use std::ptr::{NonNull, copy_nonoverlapping};
 use std::task::{Context, Poll};
 use std::{mem, ptr};
 

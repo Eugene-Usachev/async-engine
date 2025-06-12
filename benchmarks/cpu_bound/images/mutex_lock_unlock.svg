@@ -1,0 +1,24 @@
+<svg width="1651" height="993" xmlns="http://www.w3.org/2000/svg"
+     xml:space="preserve" overflow="hidden"><defs><clipPath id="clip0"><rect x="9611" y="1030" width="1651" height="993"/></clipPath></defs>
+    <g clip-path="url(#clip0)" transform="translate(-9611 -1030)"><rect x="9612" y="1031" width="1648" height="990" fill="#FFFFFF"/>
+        <g><path d="M9721.5 1753.56 11209.5 1753.56M9721.5 1643.55 11209.5 1643.55M9721.5 1532.55 11209.5 1532.55M9721.5 1422.55 11209.5 1422.55M9721.5 1311.54 11209.5 1311.54M9721.5 1200.5 11209.5 1200.5" stroke="#D9D9D9" stroke-width="3.4375" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/></g>
+        <g><path d="M9794.32 1234.04 9861.32 1234.04 9861.32 1864 9794.32 1864ZM10007.3 1394.05 10073.3 1394.05 10073.3 1864 10007.3 1864ZM10219.3 1462.05 10286.3 1462.05 10286.3 1864 10219.3 1864ZM10432.3 1471.05 10498.3 1471.05 10498.3 1864 10432.3 1864ZM10644.3 1704.06 10711.4 1704.06 10711.4 1864 10644.3 1864ZM10857.4 1732.06 10924.4 1732.06 10924.4 1864 10857.4 1864ZM11069.4 1759.06 11136.4 1759.06 11136.4 1864 11069.4 1864Z" fill="#4472C4"/></g>
+        <g><path d="M9721.5 1864.5 11209.5 1864.5" stroke="#D9D9D9" stroke-width="3.4375" stroke-linejoin="round" stroke-miterlimit="10" fill="none" fill-rule="evenodd"/></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 9662.45 1876)">0</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 9641.55 1765)">10</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 9641.55 1655)">20</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 9641.55 1544)">30</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 9641.55 1434)">40</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 9641.55 1323)">50</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 9641.55 1212)">60</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 9792.2 1929)">may</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 9997.67 1929)">tokio</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 10212.8 1929)">smol</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 10386.6 1929)">async-std</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 10603.3 1929)">orengine</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 10864.8 1929)">std</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 11028.4 1929)">orengine</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 11045.6 1980)">(naive)</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="64" transform="matrix(1 0 0 1 9956.87 1126)">Nanoseconds/lock and unlock mutex</text></g>
+        <rect x="9612.5" y="1031.5" width="1648" height="990" stroke="#D9D9D9" stroke-width="3.4375"
+              stroke-linejoin="round" stroke-miterlimit="10" fill="none"/></g></svg>

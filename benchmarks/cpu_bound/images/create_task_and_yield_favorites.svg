@@ -1,0 +1,25 @@
+<svg width="1655" height="993" xmlns="http://www.w3.org/2000/svg"
+     xml:space="preserve" overflow="hidden"><defs><clipPath id="clip0"><rect x="7869" y="2599" width="1655" height="993"/></clipPath></defs>
+    <g clip-path="url(#clip0)" transform="translate(-7869 -2599)"><rect x="7870" y="2600" width="1652" height="990" fill="#FFFFFF"/>
+        <g><path d="M8042.5 3272.61 9471.5 3272.61M8042.5 3166.6 9471.5 3166.6M8042.5 3060.6 9471.5 3060.6M8042.5 2954.6 9471.5 2954.6M8042.5 2848.5 9471.5 2848.5" stroke="#D9D9D9" stroke-width="3.4375" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/></g>
+        <g><path d="M8130.27 3335.11 8210.27 3335.11 8210.27 3379 8130.27 3379ZM8487.28 3341.11 8567.28 3341.11 8567.28 3379 8487.28 3379ZM8844.29 3344.11 8925.29 3344.11 8925.29 3379 8844.29 3379ZM9202.3 3372.11 9282.3 3372.11 9282.3 3379 9202.3 3379Z" fill="#4472C4"/></g>
+        <g><path d="M8231.27 3335.11 8312.27 3335.11 8312.27 3379 8231.27 3379ZM8589.28 2958.1 8669.28 2958.1 8669.28 3379 8589.28 3379ZM8946.29 3009.1 9026.3 3009.1 9026.3 3379 8946.29 3379ZM9304.3 3254.11 9384.31 3254.11 9384.31 3379 9304.3 3379Z" fill="#ED7D31"/></g>
+        <g><path d="M8042.5 3379.5 9471.5 3379.5" stroke="#D9D9D9" stroke-width="3.4375" stroke-linejoin="round" stroke-miterlimit="10" fill="none" fill-rule="evenodd"/></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7982.92 3391)">0</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7920.22 3285)">5000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7899.32 3178)">10000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7899.32 3072)">15000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7899.32 2966)">20000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7899.32 2860)">25000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 8185.12 3444)">may</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 8499.29 3444)">async-std</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 8895.56 3444)">smol</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 9250.4 3444)">tokio</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="64" transform="matrix(1 0 0 1 8213.47 2691)">Nanoseconds to create one task and yield </text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="64" transform="matrix(1 0 0 1 8559.7 2769)">(favorites only)</text></g>
+        <g><rect x="8500" y="3513" width="22" height="22" fill="#4472C4"/></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 8532.03 3536)">1 bytes</text></g>
+        <g><rect x="8693" y="3513" width="22" height="22" fill="#ED7D31"/></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 8724.78 3536)">9000 bytes</text></g>
+        <rect x="7870.5" y="2600.5" width="1652" height="990" stroke="#D9D9D9" stroke-width="3.4375"
+              stroke-linejoin="round" stroke-miterlimit="10" fill="none"/></g></svg>

@@ -1,0 +1,30 @@
+<svg width="1656" height="993" xmlns="http://www.w3.org/2000/svg"
+     xml:space="preserve" overflow="hidden"><defs><clipPath id="clip0"><rect x="7855" y="895" width="1656" height="993"/></clipPath></defs>
+    <g clip-path="url(#clip0)" transform="translate(-7855 -895)"><rect x="7856" y="896" width="1653" height="990" fill="#FFFFFF"/>
+        <g><path d="M8028.5 1607.55 9458.5 1607.55M8028.5 1539.55 9458.5 1539.55M8028.5 1472.55 9458.5 1472.55M8028.5 1404.55 9458.5 1404.55M8028.5 1336.54 9458.5 1336.54M8028.5 1269.54 9458.5 1269.54M8028.5 1201.54 9458.5 1201.54M8028.5 1134.54 9458.5 1134.54M8028.5 1066.5 9458.5 1066.5" stroke="#D9D9D9" stroke-width="3.4375" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/></g>
+        <g><path d="M8087.27 1141.04 8141.27 1141.04 8141.27 1675 8087.27 1675ZM8325.27 1661.05 8379.28 1661.05 8379.28 1675 8325.27 1675ZM8564.28 1663.05 8617.28 1663.05 8617.28 1675 8564.28 1675ZM8802.29 1664.05 8855.29 1664.05 8855.29 1675 8802.29 1675ZM9040.3 1673.05 9094.3 1673.05 9094.3 1675 9040.3 1675ZM9278.3 1674 9332.31 1674 9332.31 1675 9278.3 1675Z" fill="#4472C4"/></g>
+        <g><path d="M8155.27 1146.04 8208.27 1146.04 8208.27 1675 8155.27 1675ZM8393.28 1661.05 8447.28 1661.05 8447.28 1675 8393.28 1675ZM8631.28 1541.05 8685.29 1541.05 8685.29 1675 8631.28 1675ZM8870.29 1557.05 8923.29 1557.05 8923.29 1675 8870.29 1675ZM9108.3 1635.05 9161.3 1635.05 9161.3 1675 9108.3 1675ZM9346.31 1673.05 9400.31 1673.05 9400.31 1675 9346.31 1675Z" fill="#ED7D31"/></g>
+        <g><path d="M8028.5 1675.5 9458.5 1675.5" stroke="#D9D9D9" stroke-width="3.4375" stroke-linejoin="round" stroke-miterlimit="10" fill="none" fill-rule="evenodd"/></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7969.68 1687)">0</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7886.08 1619)">10000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7886.08 1552)">20000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7886.08 1484)">30000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7886.08 1416)">40000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7886.08 1349)">50000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7886.08 1281)">60000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7886.08 1213)">70000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7886.08 1146)">80000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 7886.08 1078)">90000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 8122.16 1740)">std</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 8350.55 1740)">may</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 8545.54 1740)">async-std</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 8822.62 1740)">smol</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 9058.27 1740)">tokio</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 9264.58 1740)">orengine</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="64" transform="matrix(1 0 0 1 8141.38 992)">Nanoseconds to create one task and yield</text></g>
+        <g><rect x="8486" y="1809" width="23" height="22.9996" fill="#4472C4"/></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 8518.69 1832)">1 bytes</text></g>
+        <g><rect x="8679" y="1809" width="23" height="22.9996" fill="#ED7D31"/></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 8711.43 1832)">9000 bytes</text></g>
+        <rect x="7856.5" y="896.5" width="1653" height="990" stroke="#D9D9D9" stroke-width="3.4375"
+              stroke-linejoin="round" stroke-miterlimit="10" fill="none"/></g></svg>

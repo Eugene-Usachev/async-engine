@@ -15,6 +15,7 @@ use std::task::{Context, Poll};
 struct WaitLocalCondVar<'cond_var, T: 'cond_var, M: AsyncSubscribableMutex<T> + 'cond_var> {
     cond_var: &'cond_var LocalCondVar<T, M>,
     was_called: bool,
+    _non_send: PhantomData<*const ()>,
 }
 
 impl<'cond_var, T: 'cond_var, M: AsyncSubscribableMutex<T> + 'cond_var>
@@ -27,6 +28,7 @@ impl<'cond_var, T: 'cond_var, M: AsyncSubscribableMutex<T> + 'cond_var>
         Self {
             cond_var,
             was_called: false,
+            _non_send: PhantomData,
         }
     }
 }

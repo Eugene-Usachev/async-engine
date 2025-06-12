@@ -1,10 +1,75 @@
+use crate::panic_if_local_in_future;
 use crate::runtime::{Call, Task, local_executor};
 use crate::sync::{AsyncCondVar, AsyncMutex, AsyncMutexGuard, AsyncSubscribableMutex, Mutex};
 use crate::utils::{
     PairedWithLock, TaskVecFromPool, acquire_task_vec_from_pool, unlikely, unwrap_or_bug_hint,
 };
+use std::mem;
 use std::ops::Deref;
 use std::panic::{RefUnwindSafe, UnwindSafe};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+/// `WaitCondVar` is a future that waits until the [`CondVar`] is notified.
+#[repr(C)]
+struct WaitCondVar<'cond_var, T: 'cond_var, M: AsyncSubscribableMutex<T> + 'cond_var> {
+    cond_var: &'cond_var CondVar<T, M>,
+    was_called: bool,
+}
+
+impl<'cond_var, T: 'cond_var, M: AsyncSubscribableMutex<T> + 'cond_var>
+    WaitCondVar<'cond_var, T, M>
+{
+    /// Creates a new [`WaitCondVar`] instant.
+    fn new(cond_var: &'cond_var CondVar<T, M>) -> Self {
+        debug_assert!(cond_var.is_locked());
+
+        Self {
+            cond_var,
+            was_called: false,
+        }
+    }
+}
+
+impl<'cond_var, T: 'cond_var, M: AsyncSubscribableMutex<T> + 'cond_var> Future
+    for WaitCondVar<'cond_var, T, M>
+{
+    type Output = M::Guard<'cond_var>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        panic_if_local_in_future!(cx, "CondVar");
+
+        let this = &mut *self;
+
+        if !this.was_called {
+            this.was_called = true;
+
+            let list = this.cond_var.list.get_by_mutex(this.cond_var);
+
+            unsafe {
+                list.push(Task::from_context(cx));
+
+                local_executor().invoke_call(Call::release_lock(&this.cond_var.mutex));
+            }
+
+            return Poll::Pending;
+        }
+
+        Poll::Ready(unsafe { self.cond_var.get_locked() })
+    }
+}
+
+#[cfg(debug_assertions)]
+impl<'cond_var, T: 'cond_var, M: AsyncSubscribableMutex<T> + 'cond_var> Drop
+    for WaitCondVar<'cond_var, T, M>
+{
+    fn drop(&mut self) {
+        debug_assert!(
+            self.was_called,
+            "WaitCondVar was not awaited. It can lead to deadlocks."
+        );
+    }
+}
 
 /// `CondVar` is a condition variable that allows tasks to wait until
 /// notified by another task.
@@ -76,10 +141,10 @@ where
 {
     type Mutex = S;
 
-    async fn wait<'lock>(
+    fn wait<'lock>(
         &'lock self,
         guard: <S as AsyncMutex<T>>::Guard<'lock>,
-    ) -> <S as AsyncMutex<T>>::Guard<'lock>
+    ) -> impl Future<Output = <S as AsyncMutex<T>>::Guard<'lock>>
     where
         T: 'lock,
     {
@@ -91,18 +156,9 @@ where
             );
         }
 
-        let current_task = unsafe { Task::get_current().await };
+        mem::forget(guard);
 
-        let list = self.list.get(&guard);
-        list.push(current_task);
-
-        unsafe {
-            local_executor().invoke_call(Call::release_lock(guard));
-
-            Task::park_current_task().await;
-        };
-
-        unsafe { self.mutex.get_locked() }
+        WaitCondVar::new(self)
     }
 
     fn notify_one(&self, guard: <S as AsyncMutex<T>>::Guard<'_>) {

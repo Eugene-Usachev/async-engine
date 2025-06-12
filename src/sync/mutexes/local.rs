@@ -105,11 +105,15 @@ impl<'mutex, T: ?Sized> Future for LocalMutexWait<'mutex, T> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
+
         if !this.was_called {
             let task = unsafe { Task::from_context(cx) };
             let wait_queue = unsafe { &mut *this.local_mutex.wait_queue.get() };
+
             wait_queue.push(task);
+
             this.was_called = true;
+
             return Poll::Pending;
         }
 

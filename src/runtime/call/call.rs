@@ -1,5 +1,5 @@
 use crate::runtime::Task;
-use crate::sync::{AsyncMutexGuard, Mutex, Unlock};
+use crate::sync::{AsyncMutex, AsyncMutexGuard, Mutex, Unlock};
 use crate::sync_task_queue::SyncTaskList;
 use std::fmt::Debug;
 use std::mem;
@@ -183,7 +183,25 @@ impl Call {
     /// * the pointer must be a valid pointer to [`Unlock`]
     ///
     /// * the `lock` must live at least as long as this state of the task
-    pub unsafe fn release_lock<'mutex, T, G>(guard: G) -> Self
+    pub unsafe fn release_lock<'mutex, T, M>(mutex: &M) -> Self
+    where
+        T: 'mutex + ?Sized,
+        M: AsyncMutex<T> + Sized,
+    {
+        let dyn_unlock: &dyn Unlock = mutex;
+        let static_mutex: *mut dyn Unlock = unsafe { mem::transmute(dyn_unlock) };
+
+        unsafe { Self::ReleaseDynMutex(NonNull::new_unchecked(static_mutex)) }
+    }
+
+    /// Releases the `lock` associated with the `guard`.
+    ///
+    /// # Safety
+    ///
+    /// * the pointer must be a valid pointer to [`Unlock`]
+    ///
+    /// * the `guard` must live at least as long as this state of the task
+    pub unsafe fn release_lock_with_guard<'mutex, T, G>(guard: G) -> Self
     where
         T: 'mutex + ?Sized,
         G: AsyncMutexGuard<'mutex, T> + 'mutex,

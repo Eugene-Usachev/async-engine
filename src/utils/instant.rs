@@ -15,6 +15,18 @@ pub struct OrengineInstant {
 }
 
 impl OrengineInstant {
+    /// Creates a new `OrengineInstant` from a `u64`.
+    #[cfg(unix)]
+    pub(crate) fn from_u64(instant: u64) -> Self {
+        Self { instant }
+    }
+
+    /// Converts the `OrengineInstant` into a `u64`.
+    #[cfg(unix)]
+    pub(crate) fn into_u64(self) -> u64 {
+        self.instant
+    }
+
     /// Returns the current `monotonic` instant.
     pub fn now() -> Self {
         #[cfg(not(unix))]

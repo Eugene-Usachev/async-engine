@@ -6,14 +6,20 @@ edition = "2021"
 [dependencies]
 # orengine = "0.7.0-alpha.0" // TODO
 memory-stats = "1.0.0"
+crossbeam = "0.8.4"
 orengine = { path = "../../../orengine-rs" }
 tokio = { version = "1.45.1", features = ["full"] }
 smol = "2.0.0"
-async-std = "1.13.0"
+async-std = "1.13.1"
 
 [[bin]]
 name = "orengine"
 path = "src/orengine.rs"
+doc = false
+
+[[bin]]
+name = "smol"
+path = "src/smol.rs"
 doc = false
 
 [[bin]]

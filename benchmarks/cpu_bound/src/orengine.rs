@@ -1,5 +1,4 @@
 mod runtime;
-
 use memory_stats::memory_stats;
 use orengine::runtime::Config;
 use orengine::sync::{AsyncMutex, AsyncRWLock, AsyncWaitGroup, LocalWaitGroup, Mutex, RWLock};
@@ -23,10 +22,10 @@ macro_rules! generate_create_task_and_yield {
                 let wg = Rc::new(LocalWaitGroup::new());
 
                 for _ in 0..$number_of_repetitions / BATCH_SIZE {
+                    wg.add(BATCH_SIZE);
+
                     for _ in 0..BATCH_SIZE {
                         let wg_clone = wg.clone();
-
-                        wg.inc();
 
                         ex.exec_local_future(async move {
                             let a = [MaybeUninit::<u8>::uninit(); $size];
@@ -157,12 +156,27 @@ impl Runtime for OrengineRuntime {
         const REPETITIONS: usize = 10_000_000;
 
         init_executor()
-            .run_and_block_on_shared(async {
-                let start = Instant::now();
+            .run_and_block_on_local(async {
+                const BATCH_SIZE: usize = 50;
 
-                for _ in 0..REPETITIONS {
-                    yield_now().await;
+                let start = Instant::now();
+                let wg = Rc::new(LocalWaitGroup::new());
+
+                wg.add(BATCH_SIZE);
+
+                for _ in 0..BATCH_SIZE {
+                    let wg = wg.clone();
+
+                    local_executor().spawn_local(async move {
+                        for _ in 0..REPETITIONS / BATCH_SIZE {
+                            yield_now().await;
+                        }
+
+                        wg.done();
+                    });
                 }
+
+                wg.wait().await;
 
                 println!("yield_task passed");
 
@@ -175,7 +189,7 @@ impl Runtime for OrengineRuntime {
     }
 
     fn spawn_many_tasks(&mut self) -> Option<SpawnManyTaskResult> {
-        const MANY_TASKS: usize = 15_000_000;
+        const MANY_TASKS: usize = 10_000_000;
 
         init_executor()
             .run_and_block_on_local(async {
@@ -188,8 +202,7 @@ impl Runtime for OrengineRuntime {
                     });
                 }
 
-                sleep(Duration::from_millis(500)).await; // TODO
-                sleep(Duration::from_millis(500)).await;
+                sleep(Duration::from_secs(1)).await;
 
                 let end_mem = memory_stats().unwrap().physical_mem;
 
@@ -224,10 +237,5 @@ impl Runtime for OrengineRuntime {
 }
 
 fn main() {
-    // TODO
     OrengineRuntime::bench_and_print();
-
-    // OrengineRuntime {}.create_large_task_and_yield();
-    // OrengineRuntime {}.create_large_task_and_yield();
-    // OrengineRuntime {}.create_large_task_and_yield();
 }

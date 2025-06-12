@@ -1,6 +1,6 @@
+use crate::BUG_MESSAGE;
 use crate::io::IoWorkerConfig;
 use crate::utils::SpinLock;
-use crate::BUG_MESSAGE;
 use std::mem::discriminant;
 
 /// A shared config of the state of the all runtime.
@@ -352,6 +352,8 @@ impl Eq for Config {}
 #[cfg(test)]
 pub(crate) mod tests {
     use crate as orengine;
+    use crate::bug_message::BUG_MESSAGE;
+    use crate::runtime::{Config, DEFAULT_BUF_CAP};
     use std::panic;
     use std::sync::atomic;
     use std::sync::{Condvar as STDCvar, Mutex as STDMutex};

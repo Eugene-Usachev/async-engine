@@ -1,5 +1,73 @@
 use std::time::Duration;
 
+fn format_with_commas(n: u64) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let mut result = Vec::with_capacity(s.len() + (s.len() - 1) / 3);
+    let first_group_len = bytes.len() % 3;
+
+    if first_group_len != 0 {
+        for &b in &bytes[..first_group_len] {
+            result.push(b);
+        }
+        if bytes.len() > 3 {
+            result.push(b',');
+        }
+    }
+
+    for (i, &b) in bytes[first_group_len..].iter().enumerate() {
+        result.push(b);
+        if (i + 1) % 3 == 0 && (i + 1) != bytes[first_group_len..].len() {
+            result.push(b',');
+        }
+    }
+    String::from_utf8(result).unwrap()
+}
+
+fn print_duration(name: &str, duration_res: Option<DurationResult>) {
+    if let Some(duration_res) = duration_res {
+        let (number, dimension) = match duration_res.duration.as_nanos() {
+            ..1_000 => (duration_res.duration.as_nanos() as f64, "ns"),
+            1_000..1_000_000 => ((duration_res.duration.as_nanos() as f64) / 1_000.0, "us"),
+            1_000_000..1_000_000_000 => (
+                (duration_res.duration.as_nanos() as f64) / 1_000_000.0,
+                "ms",
+            ),
+            _ => (
+                (duration_res.duration.as_nanos() as f64) / 1_000_000_000.0,
+                "s",
+            ),
+        };
+
+        // Calculate ops/s with better precision
+        let ops_per_second = duration_res.number_of_repetitions as f64 * 1_000_000_000.0
+            / duration_res.duration.as_nanos() as f64;
+
+        // Calculate duration per op with better precision and choose the appropriate unit
+        let duration_per_op_nanos =
+            duration_res.duration.as_nanos() as f64 / duration_res.number_of_repetitions as f64;
+
+        let (duration_per_op_value, duration_per_op_dimension) = match duration_per_op_nanos {
+            ..1_000.0 => (duration_per_op_nanos, "ns"),
+            1_000.0..1_000_000.0 => (duration_per_op_nanos / 1_000.0, "us"),
+            1_000_000.0..1_000_000_000.0 => (duration_per_op_nanos / 1_000_000.0, "ms"),
+            _ => (duration_per_op_nanos / 1_000_000_000.0, "s"),
+        };
+        let repetitions_str = format_with_commas(duration_res.number_of_repetitions as u64);
+        let time_str = format!("{:.2}{}", number, dimension);
+        let op = format!("{:.2}", duration_per_op_value);
+        let op_time_str = format!("{:>6} {}/op", op, duration_per_op_dimension);
+        let ops_per_sec_str = format_with_commas(ops_per_second as u64);
+
+        println!(
+            "{:<50} {:<12} in {:<15} | {:<18} | {:<12} ops/s",
+            name, repetitions_str, time_str, op_time_str, ops_per_sec_str,
+        );
+    } else {
+        println!("{}: N/A", name);
+    }
+}
+
 pub(crate) struct SpawnManyTaskResult {
     pub task_count: usize,
     pub memory_usage_in_bytes: u64,
@@ -42,75 +110,6 @@ pub(crate) trait Runtime: Sized {
         const KB: u64 = 1024;
         const MB: u64 = KB * 1024;
         const GB: u64 = MB * 1024;
-
-        fn format_with_commas(n: u64) -> String {
-            let s = n.to_string();
-            let bytes = s.as_bytes();
-            let mut result = Vec::with_capacity(s.len() + (s.len() - 1) / 3);
-            let first_group_len = bytes.len() % 3;
-
-            if first_group_len != 0 {
-                for &b in &bytes[..first_group_len] {
-                    result.push(b);
-                }
-                if bytes.len() > 3 {
-                    result.push(b',');
-                }
-            }
-
-            for (i, &b) in bytes[first_group_len..].iter().enumerate() {
-                result.push(b);
-                if (i + 1) % 3 == 0 && (i + 1) != bytes[first_group_len..].len() {
-                    result.push(b',');
-                }
-            }
-            String::from_utf8(result).unwrap()
-        }
-
-        fn print_duration(name: &str, duration_res: Option<DurationResult>) {
-            if let Some(duration_res) = duration_res {
-                let (number, dimension) = match duration_res.duration.as_nanos() {
-                    ..1_000 => (duration_res.duration.as_nanos() as f64, "ns"),
-                    1_000..1_000_000 => ((duration_res.duration.as_nanos() as f64) / 1_000.0, "us"),
-                    1_000_000..1_000_000_000 => (
-                        (duration_res.duration.as_nanos() as f64) / 1_000_000.0,
-                        "ms",
-                    ),
-                    _ => (
-                        (duration_res.duration.as_nanos() as f64) / 1_000_000_000.0,
-                        "s",
-                    ),
-                };
-
-                // Calculate ops/s with better precision
-                let ops_per_second = duration_res.number_of_repetitions as f64 * 1_000_000_000.0
-                    / duration_res.duration.as_nanos() as f64;
-
-                // Calculate duration per op with better precision and choose appropriate unit
-                let duration_per_op_nanos = duration_res.duration.as_nanos() as f64
-                    / duration_res.number_of_repetitions as f64;
-
-                let (duration_per_op_value, duration_per_op_dimension) = match duration_per_op_nanos
-                {
-                    ..1_000.0 => (duration_per_op_nanos, "ns"),
-                    1_000.0..1_000_000.0 => (duration_per_op_nanos / 1_000.0, "us"),
-                    1_000_000.0..1_000_000_000.0 => (duration_per_op_nanos / 1_000_000.0, "ms"),
-                    _ => (duration_per_op_nanos / 1_000_000_000.0, "s"),
-                };
-                let repetitions_str = format_with_commas(duration_res.number_of_repetitions as u64);
-                let time_str = format!("{:.2}{}", number, dimension);
-                let op = format!("{:.2}", duration_per_op_value);
-                let op_time_str = format!("{:>6} {}/op", op, duration_per_op_dimension);
-                let ops_per_sec_str = format_with_commas(ops_per_second as u64);
-
-                println!(
-                    "{:<50} {:<12} in {:<15} | {:<18} | {:<12} ops/s",
-                    name, repetitions_str, time_str, op_time_str, ops_per_sec_str,
-                );
-            } else {
-                println!("{}: N/A", name);
-            }
-        }
 
         let results = Self::bench();
 

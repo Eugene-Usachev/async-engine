@@ -1,6 +1,48 @@
 use crate::runtime::{Task, local_executor};
 use crate::utils::OrengineInstant;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
+
+#[repr(C)]
+struct Sleep {
+    deadline: OrengineInstant,
+    #[cfg(not(unix))]
+    was_called: bool,
+}
+
+impl Future for Sleep {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
+
+        #[cfg(unix)]
+        let was_called = this.deadline.into_u64() == 0;
+
+        #[cfg(not(unix))]
+        let was_called = this.was_called;
+
+        if was_called {
+            Poll::Ready(())
+        } else {
+            local_executor()
+                .register_sleeping_task(unsafe { Task::from_context(cx) }, this.deadline);
+
+            #[cfg(unix)]
+            {
+                this.deadline = OrengineInstant::from_u64(0);
+            }
+
+            #[cfg(not(unix))]
+            {
+                this.was_called = true;
+            }
+
+            Poll::Pending
+        }
+    }
+}
 
 /// Sleeps for a given duration or more. It works only in `orengine` runtime.
 ///
@@ -27,15 +69,10 @@ use std::time::Duration;
 ///
 /// [`start_round_time_for_deadlines`]: crate::Executor::start_round_time_for_deadlines
 #[inline]
-pub async fn sleep(duration: Duration) {
-    let task = unsafe { Task::get_current().await };
-
-    local_executor().register_sleeping_task(
-        task,
-        local_executor().start_round_time_for_deadlines() + duration,
-    );
-
-    unsafe { Task::park_current_task().await }
+pub fn sleep(duration: Duration) -> impl Future<Output = ()> {
+    Sleep {
+        deadline: local_executor().start_round_time_for_deadlines() + duration,
+    }
 }
 
 /// Sleeps until a given instant or more. It works only in `orengine` runtime.
@@ -55,12 +92,10 @@ pub async fn sleep(duration: Duration) {
 /// });
 /// ```
 #[inline]
-pub async fn sleep_until(instant: impl Into<OrengineInstant>) {
-    let task = unsafe { Task::get_current().await };
-
-    local_executor().register_sleeping_task(task, instant.into());
-
-    unsafe { Task::park_current_task().await }
+pub fn sleep_until(instant: impl Into<OrengineInstant>) -> impl Future<Output = ()> {
+    Sleep {
+        deadline: instant.into(),
+    }
 }
 
 #[cfg(test)]

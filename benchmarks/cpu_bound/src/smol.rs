@@ -1,65 +1,60 @@
 mod runtime;
 
+use crate::runtime::{Results, SpawnManyTaskResult};
 use memory_stats::memory_stats;
-use runtime::{DurationResult, Results, Runtime, SpawnManyTaskResult};
+use runtime::{DurationResult, Runtime};
+use smol::{block_on, future, LocalExecutor};
 use std::hint::black_box;
 use std::mem::MaybeUninit;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Release};
-use std::time::Duration;
-use tokio::time::{sleep, sleep_until, Instant};
+use std::time::{Duration, Instant};
 
-pub(crate) struct TokioRuntime;
+pub(crate) struct SmolRuntime;
 
 macro_rules! generate_create_task_and_yield {
     ($name:expr, $number_of_repetitions:expr, $size:expr) => {{
         const BATCH_SIZE: usize = 50;
 
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap()
-            .block_on(async move {
-                let start = std::time::Instant::now();
-                let mut handles = Vec::with_capacity(BATCH_SIZE);
+        block_on(LocalExecutor::new().run(async move {
+            let start = std::time::Instant::now();
+            let mut handles = Vec::with_capacity(BATCH_SIZE);
 
-                for _ in 0..$number_of_repetitions / BATCH_SIZE {
-                    for _ in 0..BATCH_SIZE {
-                        handles.push(tokio::spawn(async {
-                            let a = [MaybeUninit::<u8>::uninit(); $size];
+            for _ in 0..$number_of_repetitions / BATCH_SIZE {
+                for _ in 0..BATCH_SIZE {
+                    handles.push(smol::spawn(async {
+                        let a = [MaybeUninit::<u8>::uninit(); $size];
 
-                            tokio::task::yield_now().await;
+                        future::yield_now().await;
 
-                            black_box(a);
-                        }));
-                    }
-
-                    for handle in handles.drain(..) {
-                        handle.await.unwrap();
-                    }
+                        black_box(a);
+                    }));
                 }
 
-                println!("{} passed", $name);
+                for handle in handles.drain(..) {
+                    handle.await;
+                }
+            }
 
-                Some(DurationResult {
-                    duration: start.elapsed(),
-                    number_of_repetitions: $number_of_repetitions,
-                })
+            println!("{} passed", $name);
+
+            Some(DurationResult {
+                duration: start.elapsed(),
+                number_of_repetitions: $number_of_repetitions,
             })
+        }))
     }};
 }
 
-fn new_tokio_runtime() -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .build()
-        .unwrap()
-}
+impl Runtime for SmolRuntime {
+    fn name() -> &'static str {
+        "Smol"
+    }
 
-impl Runtime for TokioRuntime {
     fn create_small_task_and_yield(&mut self) -> Option<DurationResult> {
         generate_create_task_and_yield!(
             "create_small_task_and_yield",
-            5_000_000,
+            1_000_000,
             Self::SMALL_TASK_SIZE
         )
     }
@@ -67,18 +62,18 @@ impl Runtime for TokioRuntime {
     fn create_large_task_and_yield(&mut self) -> Option<DurationResult> {
         generate_create_task_and_yield!(
             "create_large_task_and_yield",
-            1_000_000,
+            500_000,
             Self::LARGE_TASK_SIZE
         )
     }
 
     fn lock_and_update_and_unlock_mutex(&mut self) -> Option<DurationResult> {
-        const REPETITIONS: usize = 50_000_000;
+        const REPETITIONS: usize = 10_000_000;
 
-        new_tokio_runtime().block_on(async move {
+        block_on(LocalExecutor::new().run(async move {
             let start = Instant::now();
 
-            let mutex = tokio::sync::Mutex::new(0);
+            let mutex = smol::lock::Mutex::new(0);
 
             for _ in 0..REPETITIONS {
                 let mut lock = mutex.lock().await;
@@ -92,42 +87,40 @@ impl Runtime for TokioRuntime {
                 duration: start.elapsed(),
                 number_of_repetitions: REPETITIONS,
             })
-        })
+        }))
     }
 
     fn lock_for_read_and_unlock_rwlock(&mut self) -> Option<DurationResult> {
-        const REPETITIONS: usize = 50_000_000;
+        const REPETITIONS: usize = 10_000_000;
 
-        new_tokio_runtime().block_on(async move {
+        block_on(LocalExecutor::new().run(async move {
             let start = Instant::now();
-            let rwlock = tokio::sync::RwLock::new(0);
+
+            let mutex = smol::lock::RwLock::new(0);
 
             for _ in 0..REPETITIONS {
-                let lock = rwlock.read().await;
+                let lock = mutex.read().await;
 
                 black_box(*lock);
             }
 
-            println!("lock_for_read_and_unlock_rwlock passed");
+            println!("lock_and_update_and_unlock_mutex passed");
 
             Some(DurationResult {
                 duration: start.elapsed(),
                 number_of_repetitions: REPETITIONS,
             })
-        })
+        }))
     }
 
     fn lock_for_write_and_read_and_unlock_rwlock(&mut self) -> Option<DurationResult> {
-        const REPETITIONS: usize = 50_000_000;
+        const REPETITIONS: usize = 10_000_000;
 
-        new_tokio_runtime().block_on(async move {
+        block_on(LocalExecutor::new().run(async move {
             let start = Instant::now();
-            let rwlock = tokio::sync::RwLock::new(0);
 
             for _ in 0..REPETITIONS {
-                let lock = rwlock.write().await;
-
-                black_box(*lock);
+                future::yield_now().await;
             }
 
             println!("lock_for_write_and_read_and_unlock_rwlock passed");
@@ -136,27 +129,27 @@ impl Runtime for TokioRuntime {
                 duration: start.elapsed(),
                 number_of_repetitions: REPETITIONS,
             })
-        })
+        }))
     }
 
     fn yield_task(&mut self) -> Option<DurationResult> {
         const REPETITIONS: usize = 10_000_000;
         const BATCH_SIZE: usize = 50;
 
-        new_tokio_runtime().block_on(async move {
+        block_on(LocalExecutor::new().run(async move {
             let start = Instant::now();
             let mut handles = Vec::with_capacity(BATCH_SIZE);
 
             for _ in 0..BATCH_SIZE {
-                handles.push(tokio::spawn(async {
+                handles.push(smol::spawn(async {
                     for _ in 0..REPETITIONS / BATCH_SIZE {
-                        tokio::task::yield_now().await;
+                        future::yield_now().await;
                     }
                 }));
             }
 
             for handle in handles.drain(..) {
-                handle.await.unwrap();
+                handle.await;
             }
 
             println!("yield_task passed");
@@ -165,27 +158,28 @@ impl Runtime for TokioRuntime {
                 duration: start.elapsed(),
                 number_of_repetitions: REPETITIONS,
             })
-        })
+        }))
     }
 
     fn spawn_many_tasks(&mut self) -> Option<SpawnManyTaskResult> {
         const MANY_TASKS: usize = 10_000_000;
 
-        new_tokio_runtime().block_on(async move {
+        block_on(LocalExecutor::new().run(async move {
             static SPAWNED: AtomicUsize = AtomicUsize::new(0);
 
             let start_mem = memory_stats().unwrap().physical_mem;
 
             for _ in 0..MANY_TASKS {
-                tokio::spawn(async {
+                smol::spawn(async {
                     SPAWNED.fetch_add(1, Release);
 
-                    sleep_until(Instant::now() + Duration::from_secs(100)).await;
-                });
+                    smol::Timer::after(Duration::from_secs(100)).await;
+                })
+                .detach();
             }
 
             while SPAWNED.load(Acquire) < MANY_TASKS {
-                sleep(Duration::from_millis(200)).await;
+                smol::Timer::after(Duration::from_millis(200)).await;
             }
 
             let end_mem = memory_stats().unwrap().physical_mem;
@@ -196,11 +190,11 @@ impl Runtime for TokioRuntime {
                 task_count: MANY_TASKS,
                 memory_usage_in_bytes: (end_mem - start_mem) as u64,
             })
-        })
+        }))
     }
 
     fn bench() -> Results {
-        let mut runtime = TokioRuntime;
+        let mut runtime = SmolRuntime;
 
         Results {
             create_small_task_and_yield: Self::create_small_task_and_yield(&mut runtime),
@@ -213,12 +207,8 @@ impl Runtime for TokioRuntime {
             spawn_many_tasks: Self::spawn_many_tasks(&mut runtime),
         }
     }
-
-    fn name() -> &'static str {
-        "Tokio"
-    }
 }
 
 fn main() {
-    TokioRuntime::bench_and_print();
+    SmolRuntime::bench_and_print();
 }

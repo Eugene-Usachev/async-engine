@@ -3,9 +3,9 @@
 //!
 //! It allows for asynchronous read or write locking and unlocking, and provides
 //! ownership-based locking through [`LocalReadLockGuard`] and [`LocalWriteLockGuard`].
-use crate::runtime::{local_executor, IsLocal, Task};
+use crate::runtime::{IsLocal, Task, local_executor};
 use crate::sync::{AsyncRWLock, AsyncReadLockGuard, AsyncWriteLockGuard, LockStatus};
-use crate::utils::{acquire_task_vec_from_pool, unwrap_or_bug_hint, TaskVecFromPool};
+use crate::utils::{TaskVecFromPool, acquire_task_vec_from_pool, unwrap_or_bug_hint};
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::mem::ManuallyDrop;
@@ -546,9 +546,9 @@ fn test_compile_local_rw_lock() {}
 #[cfg(test)]
 mod tests {
     use crate as orengine;
-    use crate::runtime::Locality;
-    use crate::sync::{AsyncWaitGroup, LocalWaitGroup};
-    use crate::yield_now;
+    use crate::runtime::{Locality, Task};
+    use crate::sync::{AsyncRWLock, AsyncWaitGroup, LocalRWLock, LocalWaitGroup};
+    use crate::{local_executor, yield_now};
     use std::rc::Rc;
 
     #[orengine::test::test_local]

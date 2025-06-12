@@ -9,8 +9,8 @@ use crate::sync::{
     AsyncChannel, AsyncReceiver, AsyncSender, RecvErr, RecvTimeoutErr, SendErr, SendTimeoutErr,
     TryRecvErr, TrySendErr,
 };
+use crate::utils::{OrengineInstant, Ptr, unwrap_or_bug_hint};
 use crate::utils::{unlikely, unreachable_hint};
-use crate::utils::{unwrap_or_bug_hint, OrengineInstant, Ptr};
 use crate::{local_executor, panic_if_shared_in_future};
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
@@ -707,7 +707,9 @@ macro_rules! generate_recv_or_subscribe {
 
             match task_in_select_branch.acquire_once() {
                 Some(task) => {
-                    unsafe { slot.write(unwrap_or_bug_hint(inner.storage.pop_front())); };
+                    unsafe {
+                        slot.write(unwrap_or_bug_hint(inner.storage.pop_front()));
+                    };
 
                     local_executor().exec_task(task);
 
@@ -960,10 +962,13 @@ fn test_compile_local_channel() {}
 #[cfg(test)]
 mod tests {
     use crate as orengine;
-    use crate::sync::{RecvErr, TryRecvErr};
+    use crate::sync::{
+        AsyncChannel, AsyncReceiver, AsyncSender, LocalChannel, RecvErr, RecvTimeoutErr, SendErr,
+        SendTimeoutErr, TryRecvErr, TrySendErr,
+    };
     use crate::utils::droppable_element::DroppableElement;
-    use crate::utils::SpinLock;
-    use crate::yield_now;
+    use crate::utils::{Ptr, SpinLock};
+    use crate::{local_executor, yield_now};
     use std::rc::Rc;
     use std::sync::Arc;
     use std::time::Duration;

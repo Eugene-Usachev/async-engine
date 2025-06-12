@@ -133,11 +133,11 @@ fn test_compile_shared_once() {}
 mod tests {
     use crate as orengine;
     use crate::sleep;
-    use crate::sync::{AsyncWaitGroup, WaitGroup};
+    use crate::sync::{AsyncOnce, AsyncWaitGroup, CallOnceResult, Once, OnceState, WaitGroup};
     use crate::test::sched_future_to_another_thread;
+    use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::SeqCst;
-    use std::sync::Arc;
     use std::time::Duration;
 
     #[orengine::test::test_shared]

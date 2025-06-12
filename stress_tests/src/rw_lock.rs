@@ -10,9 +10,9 @@ use std::thread;
 
 #[orengine::test::test_shared(timeout_ms = 10000)]
 fn stress_test_shared_rw_lock() {
-    const PAR: usize = 5;
+    const PAR: usize = 6;
     const NUMBER_OF_TASKS: usize = 3;
-    const TRIES: usize = 1000;
+    const TRIES: usize = 10000;
 
     static STEP: AtomicUsize = AtomicUsize::new(0);
     static TOTAL_READ: AtomicUsize = AtomicUsize::new(0);
@@ -49,7 +49,7 @@ fn stress_test_shared_rw_lock() {
 
     let lock = acquire_global_lock();
 
-    for _ in 0..50 {
+    for _ in 0..100 {
         let rw_lock = Arc::new(RWLock::new(0));
         let wg = Arc::new(WaitGroup::new());
 

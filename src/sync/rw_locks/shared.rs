@@ -1,14 +1,14 @@
-//! This module provides an asynchronous `rw_lock` (e.g. [`std::sync::RwLock`]) type [`crate::sync::RWLock`].
+//! This module provides an asynchronous `rw_lock` (e.g. [`std::sync::RwLock`]) type [`RWLock`].
 //!
 //! It allows for asynchronous read or write locking and unlocking, and provides
-//! ownership-based locking through [`crate::sync::ReadLockGuard`] and [`crate::sync::WriteLockGuard`].
+//! ownership-based locking through [`ReadLockGuard`] and [`WriteLockGuard`].
 
 use crate::local_executor;
 use crate::runtime::{Call, IsLocal, Task};
 use crate::sync::{AsyncRWLock, AsyncReadLockGuard, AsyncWriteLockGuard, LockStatus};
 use crate::utils::{
-    acquire_task_vec_from_pool, likely, unlikely, unwrap_or_bug_hint, Backoff, SpinLock,
-    TaskVecFromPool,
+    Backoff, SpinLock, TaskVecFromPool, acquire_task_vec_from_pool, likely, unlikely,
+    unwrap_or_bug_hint,
 };
 use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
@@ -16,7 +16,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 
-/// Contains the readers and writers waiters lists.
+/// Contains the read and write waiters lists.
 #[repr(C)]
 struct RWWaitersLists {
     writers_list: SpinLock<TaskVecFromPool>,
@@ -232,6 +232,32 @@ impl<T: ?Sized> RWLock<T> {
         }
     }
 
+    /// # Safety
+    ///
+    /// Before calling this function, the counter must be incremented by `ONE_WRITER`.
+    #[allow(
+        clippy::future_not_send,
+        reason = "It is not `Send` only when T is not `Send`, it is fine"
+    )]
+    async unsafe fn park_writer_task_and_wait(
+        &self,
+    ) -> <Self as AsyncRWLock<T>>::WriteLockGuard<'_> {
+        let current_task = unsafe { Task::get_current().await };
+        let mut writers = self.queue.writers_list.lock();
+
+        writers.push(current_task);
+
+        unsafe {
+            local_executor().invoke_call(Call::release_atomic_bool(writers.leak_to_atomic()));
+
+            Task::park_current_task().await;
+        }
+
+        debug_assert_eq!(self.get_lock_status(), LockStatus::WriteLocked);
+
+        WriteLockGuard::new(self)
+    }
+
     /// Wakes up a writer.
     ///
     /// # Panics
@@ -367,49 +393,48 @@ impl<T: ?Sized> AsyncRWLock<T> for RWLock<T> {
             );
         }
 
-        let mut prev = self.state.load(Acquire);
+        let prev = self.state.fetch_add(ONE_WRITER, AcqRel);
+
+        if prev != 0 {
+            // We need to park the current task
+            // Now the counter is updated, so any unlocker knows about this task
+
+            return unsafe { self.park_writer_task_and_wait().await };
+        }
+
+        // We need to update the `state` to `IS_WRITE_MODE_BIT | ONE_WRITER`
+
+        let mut number_of_writers = ONE_WRITER;
 
         loop {
-            if prev != 0 {
-                // We need to park the current task
-                let res = self
-                    .state
-                    .compare_exchange(prev, prev + ONE_WRITER, Acquire, Acquire);
-                if unlikely(res.is_err()) {
-                    prev = res.unwrap_err();
-
-                    continue;
-                }
-
-                // Now the counter is updated, so any unlocker knows about this task
-
-                let current_task = unsafe { Task::get_current().await };
-                let mut writers = self.queue.writers_list.lock();
-
-                writers.push(current_task);
-
-                unsafe {
-                    local_executor()
-                        .invoke_call(Call::release_atomic_bool(writers.leak_to_atomic()));
-
-                    Task::park_current_task().await;
-                }
-
-                debug_assert_eq!(self.get_lock_status(), LockStatus::WriteLocked);
-
-                return WriteLockGuard::new(self);
-            }
-
-            // `Acquire` for the failure reduces misses,
+            // `Acquire` for the failure reduces misses
             // but also decreases performance.
             // The choice can be changed later.
-            let res =
-                self.state
-                    .compare_exchange(0, IS_WRITE_MODE_BIT | ONE_WRITER, Acquire, Acquire);
+            let res = self.state.compare_exchange(
+                number_of_writers,
+                IS_WRITE_MODE_BIT | number_of_writers,
+                Acquire,
+                Acquire,
+            );
 
             match res {
                 Ok(_) => return WriteLockGuard::new(self),
-                Err(e) => prev = e,
+                Err(current) => {
+                    if current & WRITERS_COUNT_MASK != current {
+                        // Another task has already acquired the lock
+                        // It doesn't matter if it is a writer or a reader
+                        // We need to park the current task
+                        // Now the counter is updated, so any unlocker knows about this task
+
+                        return unsafe { self.park_writer_task_and_wait().await };
+                    }
+
+                    // Another writer has tried to acquire the lock,
+                    // But he failed.
+                    // We need to retry
+
+                    number_of_writers = current;
+                }
             }
         }
     }
@@ -431,54 +456,28 @@ impl<T: ?Sized> AsyncRWLock<T> for RWLock<T> {
             );
         }
 
-        let mut prev = self.state.load(Acquire);
+        let prev = self.state.fetch_add(ONE_READER, AcqRel);
+        if unlikely(prev & IS_WRITE_MODE_BIT != 0) {
+            // We need to park the current task
+            // Now the counter is updated, so any unlocker knows about this task
 
-        loop {
-            if unlikely(prev & IS_WRITE_MODE_BIT != 0) {
-                // We need to park the current task
-                let res = self.state.compare_exchange(
-                    prev,
-                    prev + ONE_READER, // It has the flag
-                    Acquire,
-                    Acquire,
-                );
-                if unlikely(res.is_err()) {
-                    prev = res.unwrap_err();
+            let current_task = unsafe { Task::get_current().await };
+            let mut readers = self.queue.readers_list.lock();
 
-                    continue;
-                }
+            readers.push(current_task);
 
-                // Now the counter is updated, so any unlocker knows about this task
+            unsafe {
+                local_executor().invoke_call(Call::release_atomic_bool(readers.leak_to_atomic()));
 
-                let current_task = unsafe { Task::get_current().await };
-                let mut readers = self.queue.readers_list.lock();
-
-                readers.push(current_task);
-
-                unsafe {
-                    local_executor()
-                        .invoke_call(Call::release_atomic_bool(readers.leak_to_atomic()));
-
-                    Task::park_current_task().await;
-                }
-
-                debug_assert!(matches!(self.get_lock_status(), LockStatus::ReadLocked(_)));
-
-                return ReadLockGuard::new(self);
+                Task::park_current_task().await;
             }
 
-            // `Acquire` for the failure reduces misses,
-            // but also decreases performance.
-            // The choice can be changed later.
-            let res = self
-                .state
-                .compare_exchange(prev, prev + ONE_READER, Acquire, Acquire);
+            debug_assert!(matches!(self.get_lock_status(), LockStatus::ReadLocked(_)));
 
-            match res {
-                Ok(_) => return ReadLockGuard::new(self),
-                Err(e) => prev = e,
-            }
+            return ReadLockGuard::new(self);
         }
+
+        ReadLockGuard::new(self)
     }
 
     #[inline]
@@ -505,7 +504,7 @@ impl<T: ?Sized> AsyncRWLock<T> for RWLock<T> {
 
             debug_assert!(prev <= MAX_READERS_COUNT);
 
-            // `Acquire` for the failure reduces misses,
+            // `Acquire` for the failure reduces misses
             // but also decreases performance.
             // The choice can be changed later.
             let res = self
@@ -726,6 +725,7 @@ fn test_compile_shared_rw_lock() {}
 #[cfg(test)]
 mod tests {
     use crate as orengine;
+    use crate::sync::{AsyncRWLock, LockStatus, RWLock};
     use crate::{local_executor, yield_now};
     use std::sync::Arc;
 

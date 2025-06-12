@@ -1,34 +1,37 @@
 use crate::bug_message::BUG_MESSAGE;
 use crate::io::sys::WorkerSys;
-use crate::io::worker::{get_local_worker_ref, init_local_worker, IoWorker};
+use crate::io::worker::{IoWorker, get_local_worker_ref, init_local_worker};
 use crate::io::{init_local_buf_pool, uninit_local_buf_pool};
+#[cfg(not(feature = "disable_task_pool"))]
+use crate::runtime::TaskPool;
 use crate::runtime::call::Call;
 use crate::runtime::config::{Config, ValidConfig};
 use crate::runtime::executor::end_local_thread_and_write_into_ptr::EndLocalThreadAndWriteIntoPtr;
 use crate::runtime::executor::sleeping_manager::SleepingManager;
-use crate::runtime::global_state::{register_local_executor, SubscribedState};
+use crate::runtime::global_state::{SubscribedState, register_local_executor};
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::runtime::interaction_between_executors::{ExecutorIsNotRegisteredErr, Interactor};
 use crate::runtime::local_thread_pool::LocalThreadWorkerPool;
 use crate::runtime::task::Task;
 use crate::runtime::waker::create_waker;
-#[cfg(not(feature = "disable_task_pool"))]
-use crate::runtime::TaskPool;
 use crate::runtime::{
-    get_core_id_for_executor, ExecutorSharedTaskList, Locality, TaskWithDeadline,
+    ExecutorSharedTaskList, Locality, TaskWithDeadline, get_core_id_for_executor,
 };
-use crate::sync::channels::waiting_task::TaskInSelectBranch;
-use crate::sync::channels::CallStatePtr;
 use crate::sync::Unlock;
-use crate::utils::{assert_hint, likely, unlikely, unwrap_or_bug_hint, unwrap_or_bug_message_hint, CoreId, OrengineInstant, ProgressiveTimeout};
+use crate::sync::channels::CallStatePtr;
+use crate::sync::channels::waiting_task::TaskInSelectBranch;
+use crate::utils::{
+    CoreId, OrengineInstant, ProgressiveTimeout, assert_hint, likely, unlikely, unwrap_or_bug_hint,
+    unwrap_or_bug_message_hint,
+};
 use fastrand::Rng;
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::Ordering::{AcqRel, Release};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{mem, ptr, thread};
@@ -145,7 +148,11 @@ pub struct Executor {
     progressive_timeout: ProgressiveTimeout<64, 131_072>,
 
     future_call_stack_depth: usize,
+    executed_tasks_count_in_current_round: usize,
+    local_tasks_in_current_round: usize,
+    shared_tasks_in_current_round: usize,
     current_call: Call,
+
     start_round_time: OrengineInstant,
     /// `start_round_time` + 100 microseconds
     #[cfg(target_os = "linux")]
@@ -241,7 +248,6 @@ impl Executor {
                 core_id,
                 id: executor_id,
                 config: valid_config,
-                current_call: Call::default(),
                 #[cfg(not(feature = "disable_task_pool"))]
                 task_pool: TaskPool::default(),
                 subscribed_state: Arc::new(SubscribedState::new()),
@@ -249,6 +255,11 @@ impl Executor {
                 progressive_timeout: ProgressiveTimeout::new(),
 
                 future_call_stack_depth: 0,
+                current_call: Call::default(),
+                executed_tasks_count_in_current_round: 0,
+                local_tasks_in_current_round: 0,
+                shared_tasks_in_current_round: 0,
+
                 start_round_time: OrengineInstant::now(),
                 #[cfg(target_os = "linux")]
                 start_round_time_for_deadlines: OrengineInstant::now() + Duration::from_micros(100),
@@ -560,6 +571,7 @@ impl Executor {
         }
 
         self.future_call_stack_depth -= 1;
+        self.executed_tasks_count_in_current_round += 1;
 
         // Orengine's Waker::drop does nothing, but virtual call is not free.
         mem::forget(waker);
@@ -578,7 +590,6 @@ impl Executor {
     /// For more details read [`Task::check_safety`].
     #[inline]
     pub fn exec_task(&mut self, task: Task) {
-        // TODO maybe not 8? Maybe count the memory usage?
         if likely(self.future_call_stack_depth < 8) {
             self.exec_task_now(task);
 
@@ -628,6 +639,10 @@ impl Executor {
     ///
     /// This function enqueues it in the queue for `local` tasks, but it is `LIFO`.
     ///
+    /// The spawned future likely __will be executed in the current round__.
+    /// If you want it to be executed in the next round, use
+    /// [`spawn_task_at_end_of_local_tasks_queue`](Executor::spawn_task_at_end_of_local_tasks_queue).
+    ///
     /// # The difference between shared and local tasks
     ///
     /// Read it in [`Executor`].
@@ -635,12 +650,14 @@ impl Executor {
     pub fn spawn_local_task(&mut self, task: Task) {
         debug_assert!(task.is_local(), "Try to spawn `shared` task as `local`!");
 
+        self.shared_tasks_in_current_round += 1;
+
         self.local_tasks.push_back(task);
     }
 
     /// Enqueues a `local` [`task`](Task).
     ///
-    /// The queue is `LIFO`, so it is pushed at the start.
+    /// The queue is `LIFO`, so it is pushed at the start and __will be executed in the next round__.
     ///
     /// # Usage
     ///
@@ -668,12 +685,10 @@ impl Executor {
     fn spawn_shared_task_<const PUT_IN_THE_START_OF_QUEUE: bool>(&mut self, task: Task) {
         fn try_flush(executor: &mut Executor) {
             if let Some(mut shared_tasks_list) =
-                unwrap_or_bug_hint(executor
-                    .shared_tasks_list
-                    .as_ref())
-                    .try_lock_and_return_as_vec()
+                unwrap_or_bug_hint(executor.shared_tasks_list.as_ref()).try_lock_and_return_as_vec()
             {
                 let number_of_shared = (executor.shared_tasks.len() >> 1) + 1;
+
                 for task in executor.shared_tasks.drain(..number_of_shared) {
                     shared_tasks_list.push(task);
                 }
@@ -696,6 +711,8 @@ impl Executor {
 
                 self.shared_tasks.push_back(task);
 
+                self.shared_tasks_in_current_round += 1;
+
                 return;
             }
 
@@ -705,11 +722,13 @@ impl Executor {
         }
 
         self.shared_tasks.push_back(task);
+
+        self.shared_tasks_in_current_round += 1;
     }
 
     /// Enqueues a `shared` [`task`](Task).
     ///
-    /// The queue is `LIFO`, so it is pushed at the start.
+    /// The queue is `LIFO`, so it is pushed at the start and __will be executed in the next round__.
     ///
     /// # Usage
     ///
@@ -725,6 +744,10 @@ impl Executor {
     /// # Attention
     ///
     /// This function enqueues it in the queue for `shared` tasks, but it is `LIFO`.
+    ///
+    /// The spawned future likely __will be executed in the current round__.
+    /// If you want it to be executed in the next round, use
+    /// [`spawn_task_at_end_of_shared_tasks_queue`](Executor::spawn_task_at_end_of_shared_tasks_queue).
     ///
     /// # The difference between shared and local tasks
     ///
@@ -1063,6 +1086,8 @@ impl Executor {
     /// Executes all ready CPU tasks.
     #[inline]
     fn exec_cpu_tasks(&mut self) {
+        const MAX_TASKS_IN_ROUND: usize = 67;
+
         // A round is a number of tasks that must be completed before the next round is started.
         // It is necessary to avoid a case like:
         //   Task with yield -> repeat this task -> repeat this task -> ...
@@ -1071,9 +1096,10 @@ impl Executor {
         //   Round 1 -> background work -> round 2  -> ...
 
         let mut task;
+        self.executed_tasks_count_in_current_round = 0;
 
-        let number_of_local_tasks_in_this_round = self.local_tasks.len();
-        for _ in 0..number_of_local_tasks_in_this_round {
+        self.local_tasks_in_current_round = self.local_tasks.len();
+        for _ in 0..self.local_tasks_in_current_round {
             assert_hint(
                 !self.local_tasks.is_empty(),
                 "number_of_local_tasks_in_this_round is invalid",
@@ -1082,12 +1108,20 @@ impl Executor {
             task = unwrap_or_bug_hint(self.local_tasks.pop_back());
 
             self.exec_task_now(task);
+
+            if unlikely(self.executed_tasks_count_in_current_round >= MAX_TASKS_IN_ROUND) {
+                return;
+            }
         }
 
-        let number_of_shared_tasks_in_this_round = self.shared_tasks.len();
-        for _ in 0..number_of_shared_tasks_in_this_round {
+        self.shared_tasks_in_current_round = self.shared_tasks.len();
+        for _ in 0..self.shared_tasks_in_current_round {
             if let Some(task) = self.shared_tasks.pop_back() {
                 self.exec_task_now(task);
+
+                if unlikely(self.executed_tasks_count_in_current_round >= MAX_TASKS_IN_ROUND) {
+                    return;
+                }
             } else {
                 // The executor shared its tasks with another one.
                 break;
@@ -1197,9 +1231,13 @@ impl Executor {
                     self.start_round_time,
                 );
             }
+
             self.exec_cpu_tasks();
+
             self.take_work_if_needed();
+
             self.thread_pool.poll(&mut self.local_tasks);
+
             let nearest_timeout_option = self.check_sleeping_tasks();
 
             // We need to consider 8 cases from 3 variables:

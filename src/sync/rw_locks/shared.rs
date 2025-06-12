@@ -3,18 +3,20 @@
 //! It allows for asynchronous read or write locking and unlocking, and provides
 //! ownership-based locking through [`ReadLockGuard`] and [`WriteLockGuard`].
 
-use crate::local_executor;
 use crate::runtime::{Call, IsLocal, Task};
 use crate::sync::{AsyncRWLock, AsyncReadLockGuard, AsyncWriteLockGuard, LockStatus};
 use crate::utils::{
     Backoff, SpinLock, TaskVecFromPool, acquire_task_vec_from_pool, likely, unlikely,
     unwrap_or_bug_hint,
 };
+use crate::{local_executor, panic_if_local_in_future};
 use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
+use std::pin::Pin;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
+use std::task::{Context, Poll};
 
 /// Contains the read and write waiters lists.
 #[repr(C)]
@@ -25,6 +27,167 @@ struct RWWaitersLists {
 
 unsafe impl Send for RWWaitersLists {}
 unsafe impl Sync for RWWaitersLists {}
+
+/// `WaitWriteLock` is a [`Future`] that resolves to [`WriteLockGuard`].
+#[repr(C)]
+struct WaitWriteLock<'rw_lock, T: 'rw_lock + ?Sized> {
+    rw_lock: &'rw_lock RWLock<T>,
+    was_called: bool,
+}
+
+impl<'rw_lock, T: 'rw_lock + ?Sized> WaitWriteLock<'rw_lock, T> {
+    /// Creates a new instance of [`WaitWriteLock`].
+    fn new(rw_lock: &'rw_lock RWLock<T>) -> Self {
+        Self {
+            rw_lock,
+            was_called: false,
+        }
+    }
+}
+
+impl<'rw_lock, T: 'rw_lock + ?Sized> Future for WaitWriteLock<'rw_lock, T> {
+    type Output = WriteLockGuard<'rw_lock, T>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        /// # Safety
+        ///
+        /// Before calling this function, the counter must be incremented by `ONE_WRITER`.
+        #[allow(
+            clippy::future_not_send,
+            reason = "It is not `Send` only when T is not `Send`, it is fine"
+        )]
+        unsafe fn park_writer_task<'rw_lock, T: 'rw_lock + ?Sized>(
+            rw_lock: &'rw_lock RWLock<T>,
+            task: Task,
+        ) {
+            let mut writers = rw_lock.queue.writers_list.lock();
+
+            writers.push(task);
+
+            unsafe {
+                local_executor().invoke_call(Call::release_atomic_bool(writers.leak_to_atomic()));
+            }
+        }
+
+        panic_if_local_in_future!(cx, "RWLock");
+
+        let this = &mut *self;
+
+        if this.was_called {
+            debug_assert_eq!(this.rw_lock.get_lock_status(), LockStatus::WriteLocked);
+
+            return Poll::Ready(WriteLockGuard::new(this.rw_lock));
+        }
+
+        this.was_called = true;
+
+        let prev = this.rw_lock.state.fetch_add(ONE_WRITER, AcqRel);
+
+        if prev != 0 {
+            // We need to park the current task
+            // Now the counter is updated, so any unlocker knows about this task
+
+            unsafe { park_writer_task(this.rw_lock, Task::from_context(cx)) };
+
+            return Poll::Pending;
+        }
+
+        // We need to update the `state` to `IS_WRITE_MODE_BIT | ONE_WRITER`
+
+        let mut number_of_writers = ONE_WRITER;
+
+        loop {
+            // `Acquire` for the failure reduces misses
+            // but also decreases performance.
+            // The choice can be changed later.
+            let res = this.rw_lock.state.compare_exchange(
+                number_of_writers,
+                IS_WRITE_MODE_BIT | number_of_writers,
+                Acquire,
+                Acquire,
+            );
+
+            match res {
+                Ok(_) => return Poll::Ready(WriteLockGuard::new(this.rw_lock)),
+                Err(current) => {
+                    if current & WRITERS_COUNT_MASK != current {
+                        // Another task has already acquired the lock
+                        // It doesn't matter if it is a writer or a reader
+                        // We need to park the current task
+                        // Now the counter is updated, so any unlocker knows about this task
+
+                        unsafe { park_writer_task(this.rw_lock, Task::from_context(cx)) };
+
+                        return Poll::Pending;
+                    }
+
+                    // Another writer has tried to acquire the lock,
+                    // But he failed.
+                    // We need to retry
+
+                    number_of_writers = current;
+                }
+            }
+        }
+    }
+}
+
+/// `WaitReadLock` is a [`Future`] that resolves to [`ReadLockGuard`].
+#[repr(C)]
+struct WaitReadLock<'rw_lock, T: 'rw_lock + ?Sized> {
+    rw_lock: &'rw_lock RWLock<T>,
+    was_called: bool,
+}
+
+impl<'rw_lock, T: 'rw_lock + ?Sized> WaitReadLock<'rw_lock, T> {
+    /// Creates a new instance of [`WaitReadLock`].
+    fn new(rw_lock: &'rw_lock RWLock<T>) -> Self {
+        Self {
+            rw_lock,
+            was_called: false,
+        }
+    }
+}
+
+impl<'rw_lock, T: 'rw_lock + ?Sized> Future for WaitReadLock<'rw_lock, T> {
+    type Output = ReadLockGuard<'rw_lock, T>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        panic_if_local_in_future!(cx, "RWLock");
+
+        let this = &mut *self;
+
+        if this.was_called {
+            debug_assert!(matches!(
+                this.rw_lock.get_lock_status(),
+                LockStatus::ReadLocked(_)
+            ));
+
+            return Poll::Ready(ReadLockGuard::new(this.rw_lock));
+        }
+
+        this.was_called = true;
+
+        let prev = this.rw_lock.state.fetch_add(ONE_READER, AcqRel);
+
+        if unlikely(prev & IS_WRITE_MODE_BIT != 0) {
+            // We need to park the current task
+            // Now the counter is updated, so any unlocker knows about this task
+
+            let mut readers = this.rw_lock.queue.readers_list.lock();
+
+            readers.push(unsafe { Task::from_context(cx) });
+
+            unsafe {
+                local_executor().invoke_call(Call::release_atomic_bool(readers.leak_to_atomic()));
+
+                return Poll::Pending;
+            }
+        }
+
+        Poll::Ready(ReadLockGuard::new(this.rw_lock))
+    }
+}
 
 // region guards
 
@@ -232,32 +395,6 @@ impl<T: ?Sized> RWLock<T> {
         }
     }
 
-    /// # Safety
-    ///
-    /// Before calling this function, the counter must be incremented by `ONE_WRITER`.
-    #[allow(
-        clippy::future_not_send,
-        reason = "It is not `Send` only when T is not `Send`, it is fine"
-    )]
-    async unsafe fn park_writer_task_and_wait(
-        &self,
-    ) -> <Self as AsyncRWLock<T>>::WriteLockGuard<'_> {
-        let current_task = unsafe { Task::get_current().await };
-        let mut writers = self.queue.writers_list.lock();
-
-        writers.push(current_task);
-
-        unsafe {
-            local_executor().invoke_call(Call::release_atomic_bool(writers.leak_to_atomic()));
-
-            Task::park_current_task().await;
-        }
-
-        debug_assert_eq!(self.get_lock_status(), LockStatus::WriteLocked);
-
-        WriteLockGuard::new(self)
-    }
-
     /// Wakes up a writer.
     ///
     /// # Panics
@@ -380,104 +517,22 @@ impl<T: ?Sized> AsyncRWLock<T> for RWLock<T> {
         clippy::future_not_send,
         reason = "It is not `Send` only when T is not `Send`, it is fine"
     )]
-    async fn write<'rw_lock>(&'rw_lock self) -> Self::WriteLockGuard<'rw_lock>
+    fn write<'rw_lock>(&'rw_lock self) -> impl Future<Output = Self::WriteLockGuard<'rw_lock>>
     where
         T: 'rw_lock,
     {
-        #[cfg(debug_assertions)]
-        {
-            let task = unsafe { Task::get_current().await };
-            assert!(
-                !task.is_local(),
-                "Cannot use `local` task in `shared` RWLock"
-            );
-        }
-
-        let prev = self.state.fetch_add(ONE_WRITER, AcqRel);
-
-        if prev != 0 {
-            // We need to park the current task
-            // Now the counter is updated, so any unlocker knows about this task
-
-            return unsafe { self.park_writer_task_and_wait().await };
-        }
-
-        // We need to update the `state` to `IS_WRITE_MODE_BIT | ONE_WRITER`
-
-        let mut number_of_writers = ONE_WRITER;
-
-        loop {
-            // `Acquire` for the failure reduces misses
-            // but also decreases performance.
-            // The choice can be changed later.
-            let res = self.state.compare_exchange(
-                number_of_writers,
-                IS_WRITE_MODE_BIT | number_of_writers,
-                Acquire,
-                Acquire,
-            );
-
-            match res {
-                Ok(_) => return WriteLockGuard::new(self),
-                Err(current) => {
-                    if current & WRITERS_COUNT_MASK != current {
-                        // Another task has already acquired the lock
-                        // It doesn't matter if it is a writer or a reader
-                        // We need to park the current task
-                        // Now the counter is updated, so any unlocker knows about this task
-
-                        return unsafe { self.park_writer_task_and_wait().await };
-                    }
-
-                    // Another writer has tried to acquire the lock,
-                    // But he failed.
-                    // We need to retry
-
-                    number_of_writers = current;
-                }
-            }
-        }
+        WaitWriteLock::new(self)
     }
 
     #[allow(
         clippy::future_not_send,
         reason = "It is not `Send` only when T is not `Send`, it is fine"
     )]
-    async fn read<'rw_lock>(&'rw_lock self) -> Self::ReadLockGuard<'rw_lock>
+    fn read<'rw_lock>(&'rw_lock self) -> impl Future<Output = Self::ReadLockGuard<'rw_lock>>
     where
         T: 'rw_lock,
     {
-        #[cfg(debug_assertions)]
-        {
-            let task = unsafe { Task::get_current().await };
-            assert!(
-                !task.is_local(),
-                "Cannot use `local` task in `shared` RWLock"
-            );
-        }
-
-        let prev = self.state.fetch_add(ONE_READER, AcqRel);
-        if unlikely(prev & IS_WRITE_MODE_BIT != 0) {
-            // We need to park the current task
-            // Now the counter is updated, so any unlocker knows about this task
-
-            let current_task = unsafe { Task::get_current().await };
-            let mut readers = self.queue.readers_list.lock();
-
-            readers.push(current_task);
-
-            unsafe {
-                local_executor().invoke_call(Call::release_atomic_bool(readers.leak_to_atomic()));
-
-                Task::park_current_task().await;
-            }
-
-            debug_assert!(matches!(self.get_lock_status(), LockStatus::ReadLocked(_)));
-
-            return ReadLockGuard::new(self);
-        }
-
-        ReadLockGuard::new(self)
+        WaitReadLock::new(self)
     }
 
     #[inline]

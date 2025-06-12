@@ -991,6 +991,9 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                                 >(&mut select_closure)
                             ),
                         );
+
+                    // TODO rewrite to Future and bench performance + memory.
+                    // Should be a bit better
                     orengine::runtime::Task::park_current_task().await;
                 };
 

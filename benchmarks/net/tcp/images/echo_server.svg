@@ -1,0 +1,20 @@
+<svg width="1653" height="993" xmlns="http://www.w3.org/2000/svg"
+     xml:space="preserve" overflow="hidden"><defs><clipPath id="clip0"><rect x="15885" y="1046" width="1653" height="993"/></clipPath></defs>
+    <g clip-path="url(#clip0)" transform="translate(-15885 -1046)"><rect x="15886" y="1047" width="1650" height="990" fill="#FFFFFF"/>
+        <g><path d="M16100.5 1787.56 17485.5 1787.56M16100.5 1645.55 17485.5 1645.55M16100.5 1502.55 17485.5 1502.55M16100.5 1359.54 17485.5 1359.54M16100.5 1216.5 17485.5 1216.5" stroke="#D9D9D9" stroke-width="3.4375" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/></g>
+        <g><path d="M16195.5 1658.05 16282.5 1658.05 16282.5 1931 16195.5 1931ZM16472.5 1630.05 16559.5 1630.05 16559.5 1931 16472.5 1931ZM16749.5 1424.05 16836.6 1424.05 16836.6 1931 16749.5 1931ZM17026.6 1419.05 17113.6 1419.05 17113.6 1931 17026.6 1931ZM17303.6 1285.04 17390.6 1285.04 17390.6 1931 17303.6 1931Z" fill="#4472C4"/></g>
+        <g><path d="M16100.5 1930.5 17485.5 1930.5" stroke="#D9D9D9" stroke-width="3.4375" stroke-linejoin="round" stroke-miterlimit="10" fill="none" fill-rule="evenodd"/></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 16041.4 1942)">0</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 15936.9 1799)">500000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 15916 1657)">1000000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 15916 1514)">1500000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 15916 1371)">2000000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 15916 1229)">2500000</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 16160.1 1996)">async-std</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 16473.3 1996)">tokio</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 16757.4 1996)">may</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 17044.4 1996)">std</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="41" transform="matrix(1 0 0 1 17272.5 1996)">orengine</text></g>
+        <g><text fill="#595959" font-family="Calibri,Calibri_MSFontService,sans-serif" font-weight="400" font-size="64" transform="matrix(1 0 0 1 16454.6 1142)">Requets per second</text></g>
+        <rect x="15886.5" y="1047.5" width="1650" height="990" stroke="#D9D9D9" stroke-width="3.4375"
+              stroke-linejoin="round" stroke-miterlimit="10" fill="none"/></g></svg>

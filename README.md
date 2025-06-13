@@ -70,7 +70,12 @@ Extensive benchmarking has been done to prove Orengine’s superiority.
 
 ## Echo Server
 
-![benchmarks/net/tcp/images/echo_server.png](benchmarks/net/tcp/images/echo_server.png)
+![benchmarks/net/tcp/images/echo_server.svg](benchmarks/net/tcp/images/echo_server.svg)
+
+But these results are for `localhost`, so it can show only _ideal_ case when no packages are lost and the connection
+is perfect.
+In the real case, __Orengine__ and __May__ show almost the same performance,
+but Orengine uses memory much more efficiently.
 
 ## Memory Usage
 

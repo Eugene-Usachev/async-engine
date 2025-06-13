@@ -4,17 +4,6 @@ Orengine is a blazing fast, memory-efficient, and highly flexible asynchronous e
 age of Rust development. Whether you're building applications with a shared-nothing architecture
 or a shared-all architecture, Orengine provides you with the tools to reach maximum performance.
 
-# Stage
-
-In development. This library is not ready for
-production use, and its API can be changed.
-
-Wait for `v1.0.0` and media posts.
-
-# Before release
-
-- add more docs.
-
 # Why Orengine?
 
 - __Speed:__ Orengine is designed from the ground up to be the fastest async engine available in the Rust ecosystem.
@@ -34,15 +23,15 @@ Wait for `v1.0.0` and media posts.
 - __No Compromises on Performance__: Highly tuned internal code-based optimizations that prioritize performance over
   unnecessary complexity.
 
-# Task execution: local vs. shared
+# Task execution: `local` vs. `shared`
 
-Orengine offers two execution modes for tasks and `Futures`: local and shared, each suited to different
+Orengine offers two execution modes for tasks and `Futures`: `local` and `shared`, each suited to different
 architectural needs and performance optimizations.
 
 ## `Local Tasks`
 
 - Local tasks and `Futures` are executed strictly within the current thread. They cannot be moved between threads.
-  This allows the use of __Shared-Nothing Architecture__, where each task is isolated and works with local resources,
+  This allows using the __Shared-Nothing Architecture__, where each task is isolated and works with local resources,
   ensuring that no data needs to be shared between threads.
 
 - With local tasks, you can leverage `Local` and local synchronization primitives, which offer significant
@@ -85,7 +74,7 @@ Extensive benchmarking has been done to prove Orengine’s superiority.
 
 ## Memory Usage
 
-![benchmarks/cpu_bound/images/memory_usage_per_10m_tasks_favorites_only.png](benchmarks/cpu_bound/images/memory_usage_per_10m_tasks_favorites_only.png)
+![benchmarks/cpu_bound/images/memory_usage_per_10m_tasks_favorites_only.svg](benchmarks/cpu_bound/images/memory_usage_per_10m_tasks_favorites_only.svg)
 
 Read more about the benchmarks in the [benchmarks](benchmarks) directory.
 

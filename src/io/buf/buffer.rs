@@ -1,9 +1,10 @@
-use crate::io::buf_pool::{BufPool, buf_pool, buffer};
+//! This module contains [`Buffer`].
+use crate::io::buf_pool::{buf_pool, buffer, BufPool};
 #[cfg(target_os = "linux")]
 use crate::io::linux::linux_buffer::LinuxBuffer;
 use crate::io::slice::{Slice, SliceMut};
 use crate::io::{FixedBuffer, FixedBufferMut};
-use crate::utils::{Sealed, likely};
+use crate::utils::{likely, Sealed};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
@@ -12,7 +13,7 @@ use std::slice::SliceIndex;
 use std::{fmt, mem, ptr};
 
 #[derive(Debug)]
-/// `LenIsGreaterThanCapacity` is a custom error type that is returned by [`Buffer::set_len`]
+/// `LenIsGreaterThanCapacity` is a custom error type returned by [`Buffer::set_len`]
 /// if the provided len is greater than the buffer capacity.
 pub struct LenIsGreaterThanCapacity;
 
@@ -39,9 +40,9 @@ impl std::error::Error for LenIsGreaterThanCapacity {}
 ///
 /// For get from [`BufPool`], call [`buffer()`]
 /// or [`full_buffer()`](crate::io::full_buffer).
-/// If you can use [`BufPool`], use it, to have better performance.
+/// If you can use [`BufPool`], use it to have better performance.
 ///
-/// If it was gotten from [`BufPool`], it will come back after drop.
+/// If it was gotten from [`BufPool`], it will come back after a drop.
 ///
 /// # Buffer representation
 ///
@@ -68,11 +69,11 @@ pub struct Buffer {
 
 impl Buffer {
     /// Creates new buffer with given size. This buffer will not be put to the pool.
-    /// So, use it only for creating a buffer with specific size.
+    /// So, use it only for creating a buffer with a specific size.
     ///
     /// # Safety
     ///
-    /// - size > 0
+    /// - `size` > 0
     #[inline]
     pub(crate) fn new(size: u32) -> Self {
         Self {
@@ -197,7 +198,7 @@ impl Buffer {
     ///     let mut buf = buffer();
     ///
     ///     buf.append(&[1, 2, 3]);
-    ///     buf.resize(20000); // Buffer is resized to 20000, contents are preserved
+    ///     buf.resize(20000); // Buffer is resized to 20,000, contents are preserved
     ///
     ///     assert_eq!(buf.capacity(), 20000);
     ///     assert_eq!(buf.as_ref(), &[1, 2, 3]);
@@ -328,7 +329,7 @@ impl Buffer {
         SliceMut::new(self, start, end)
     }
 
-    /// Puts the buffer to the pool. You can not to use it, and then this method will be called automatically by drop.
+    /// Puts the buffer to the pool. You cannot to use it, and then this method will be called automatically by drop.
     #[inline]
     pub fn release(self) {
         buf_pool().put(self);

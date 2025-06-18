@@ -1,3 +1,4 @@
+//! This module contains the [`NeverWaitLock`].
 use crate::utils::{SpinLock, SpinLockGuard};
 
 /// `NeverWaitLock` is a wrapper around [`SpinLock`] that never waits for the lock.

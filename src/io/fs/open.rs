@@ -1,10 +1,11 @@
-use crate as orengine;
+//! This module provides the [`Open`] io operation.
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::{get_os_path_ptr, OsPath};
 use crate::io::sys::{FromRawFile, OsOpenOptions, RawFile};
 use crate::io::worker::{local_worker, IoWorker};
 use crate::utils::unwrap_or_bug_hint;
-use orengine_macros::poll_for_io_request;
+
+use crate::io::macros::poll_for_io_request;
 use std::future::Future;
 use std::io::Result;
 use std::marker::PhantomData;
@@ -37,16 +38,20 @@ impl<F: FromRawFile> Future for Open<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = unsafe { self.get_unchecked_mut() };
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().open(
-                get_os_path_ptr(&this.path),
-                &this.os_open_options,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().open(
+                    get_os_path_ptr(&this.path),
+                    &this.os_open_options,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             unsafe { F::from_raw_file(ret as RawFile) }
-        ));
+        );
     }
 }
 

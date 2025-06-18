@@ -1,3 +1,4 @@
+//! This module contains the [`IntoSockAddr`] trait.
 #[cfg(unix)]
 use crate::net::unix::UnixAddr;
 use socket2::SockAddr;

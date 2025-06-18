@@ -1,3 +1,6 @@
+//! This module provides a pool of task structures that are used to
+//! implement the `Task` and `TaskQueue` data structures.
+
 macro_rules! create_control_cap_wrapper {
     ($name:ident, $acquire:expr, $guard_name:ident) => {
         pub struct $name {

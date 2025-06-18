@@ -1,10 +1,11 @@
-use crate::runtime::ExecutorSharedTaskList;
+//! This module provides the [`GlobalState`] and the [`stop_executor`] and [`stop_all_executors`] functions.
 use crate::runtime::global_state::subscribed_state::SubscribedState;
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::runtime::interaction_between_executors::SyncBatchOptimizedTaskQueue;
+use crate::runtime::ExecutorSharedTaskList;
 use crate::utils::vec_map::VecMap;
 use crate::utils::{SpinLock, SpinLockGuard};
-use crate::{Executor, local_executor};
+use crate::{local_executor, Executor};
 use std::sync::Arc;
 
 /// Contains [`SubscribedState`] and, optionally (`cfg(not(feature = "disable_send_task_to"))`),
@@ -102,8 +103,8 @@ impl GlobalState {
         self.lists.clear();
     }
 
-    /// Returns a shared reference to all alive executors.
-    pub(crate) fn alive_executors(&self) -> &VecMap<StateOfAliveExecutor> {
+    /// Returns a shared reference to all _live_ executors.
+    pub(crate) fn live_executors(&self) -> &VecMap<StateOfAliveExecutor> {
         &self.states_of_alive_executors
     }
 
@@ -112,7 +113,7 @@ impl GlobalState {
         &self.lists
     }
 
-    /// Returns ids of all alive executors.
+    /// Returns ids of all _live_ executors.
     pub fn executors_ids(&self) -> Vec<usize> {
         self.states_of_alive_executors
             .iter()
@@ -132,7 +133,7 @@ impl GlobalState {
 
 unsafe impl Send for GlobalState {}
 
-/// `GLOBAL_STATE` contains current version, `tasks_lists` of all alive executors with work-sharing.
+/// `GLOBAL_STATE` contains the current version, `tasks_lists` of all _live_ executors with work-sharing.
 /// It and [`SubscribedState`] form `Shared RWLock`.
 ///
 /// Read [`GlobalState`](GlobalState) for more details.
@@ -149,8 +150,7 @@ static GLOBAL_STATE: SpinLock<GlobalState> = SpinLock::new(GlobalState::new());
 /// # Example
 ///
 /// ```no_run
-/// use orengine::{run_shared_future_on_all_cores, stop_all_executors};
-/// use orengine::runtime::lock_and_get_global_state;
+/// use orengine::{run_shared_future_on_all_cores, stop_all_executors, executors_ids};
 /// use orengine::sync::{AsyncWaitGroup, WaitGroup};
 /// use orengine::utils::get_core_ids;
 /// use std::sync::Arc;
@@ -169,7 +169,7 @@ static GLOBAL_STATE: SpinLock<GlobalState> = SpinLock::new(GlobalState::new());
 ///         wait_group.done();
 ///         wait_group.wait().await;
 ///
-///         assert_eq!(lock_and_get_global_state().executors_ids().len(), number_of_cores);
+///         assert_eq!(executors_ids().len(), number_of_cores);
 ///
 ///         // Do some work
 ///
@@ -177,7 +177,7 @@ static GLOBAL_STATE: SpinLock<GlobalState> = SpinLock::new(GlobalState::new());
 ///     }
 /// });
 /// ```
-pub fn lock_and_get_global_state() -> SpinLockGuard<'static, GlobalState> {
+pub(crate) fn lock_and_get_global_state() -> SpinLockGuard<'static, GlobalState> {
     GLOBAL_STATE.lock()
 }
 
@@ -185,6 +185,20 @@ pub fn lock_and_get_global_state() -> SpinLockGuard<'static, GlobalState> {
 /// and notifies all executors.
 pub(crate) fn register_local_executor() {
     lock_and_get_global_state().register_local_executor();
+}
+
+/// Returns ids of all _live_ executors.
+///
+/// It __locks__ the global state, so it hurts the performance very much.
+pub fn executors_ids() -> Vec<usize> {
+    lock_and_get_global_state().executors_ids()
+}
+
+/// Returns ids of executors with `work_sharing` enabled.
+///
+/// It __locks__ the global state, so it hurts the performance very much.
+pub fn work_sharing_executors_ids() -> Vec<usize> {
+    lock_and_get_global_state().work_sharing_executors_ids()
 }
 
 /// Stops the executor with the given id.
@@ -250,7 +264,7 @@ mod tests {
     use super::*;
     use crate as orengine;
     use crate::runtime::Config;
-    use crate::{Executor, local_executor, sleep};
+    use crate::{local_executor, sleep, Executor};
     use std::thread;
     use std::time::Duration;
 

@@ -1,5 +1,7 @@
+//! This module contains the [`IoCall`] enum that represents a type of I/O call and its arguments
+//! it allows to use the enum-discriminant-based dispatching instead of the virtual calls.
 use crate::io::sys::fallback::operations;
-use crate::io::sys::{self, MessageRecvHeader, OsMessageHeader, RawSocket, os_sockaddr};
+use crate::io::sys::{self, os_sockaddr, MessageRecvHeader, OsMessageHeader, RawSocket};
 #[cfg(feature = "fallback_thread_pool")]
 use crate::io::sys::{OsOpenOptions, OsPathPtr, RawFile};
 

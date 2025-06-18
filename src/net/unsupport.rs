@@ -1,3 +1,4 @@
+//! This module contains the [`new_unix_unsupported_error`] function.
 use std::io;
 
 /// Returns an [`unsupported by unix socket`](io::ErrorKind::Unsupported) error.

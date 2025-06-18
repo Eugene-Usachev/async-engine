@@ -1,17 +1,20 @@
+//! This module contains the implementation of the io worker using `io_uring`.
+//!
+//! [`IOUringWorker`] implements [`IoWorker`] using `io_uring`.
 use crate::io::config::IoWorkerConfig;
 use crate::io::io_request_data::IoRequestDataPtr;
 use crate::io::sys;
 use crate::io::sys::{
-    MessageRecvHeader, OsMessageHeader, OsPathPtr, RawFile, RawSocket, os_sockaddr,
+    os_sockaddr, MessageRecvHeader, OsMessageHeader, OsPathPtr, RawFile, RawSocket,
 };
 use crate::io::time_bounded_io_task::TimeBoundedIoTask;
 use crate::io::worker::IoWorker;
 use crate::runtime::local_executor;
-use crate::utils::{OrengineInstant, likely, unlikely};
-use crate::{BUG_MESSAGE, Executor};
+use crate::utils::{likely, unlikely, OrengineInstant};
+use crate::{Executor, BUG_MESSAGE};
 use io_uring::squeue::Entry;
 use io_uring::types::{OpenHow, SubmitArgs, Timespec};
-use io_uring::{IoUring, Probe, cqueue, opcode, types};
+use io_uring::{cqueue, opcode, types, IoUring, Probe};
 use libc;
 use std::cell::UnsafeCell;
 use std::collections::{BTreeSet, VecDeque};

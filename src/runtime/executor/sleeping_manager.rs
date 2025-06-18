@@ -1,10 +1,11 @@
+//! This module provides the [`SleepingManager`] struct.
 use crate::local_executor;
 use crate::runtime::{Task, TaskWithDeadline};
 use crate::sync::channels::waiting_task::TaskInSelectBranch;
 use crate::utils::OrengineInstant;
 use std::cmp::min;
-use std::collections::BTreeMap;
 use std::collections::btree_map::Entry::{Occupied, Vacant};
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// Manages the tasks that are currently sleeping.

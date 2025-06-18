@@ -1,3 +1,5 @@
+//! This module contains the [`Call`] that can be used to call an operation after
+//! the [`Future::poll`] returns.
 use crate::runtime::Task;
 use crate::sync::{AsyncMutex, AsyncMutexGuard, Mutex, Unlock};
 use crate::sync_task_queue::SyncTaskList;
@@ -6,7 +8,8 @@ use std::mem;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-/// Represents a call from a `Future::poll` to the [`Executor`](crate::runtime::Executor).
+/// Represents a call from a [`Future::poll`] to the [`Executor`](crate::runtime::Executor)
+/// that can be used to call an operation after the [`Future::poll`] returns.
 ///
 /// The `Call` enum encapsulates different actions that an executor can take
 /// after a future yields [`Poll::Pending`](std::task::Poll::Pending).

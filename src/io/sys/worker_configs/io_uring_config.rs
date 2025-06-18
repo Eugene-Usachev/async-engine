@@ -1,3 +1,5 @@
+//! This module contains IO worker configuration [`IOUringConfig`].
+
 /// Configuration for `io-uring worker`.
 ///
 /// # Fields

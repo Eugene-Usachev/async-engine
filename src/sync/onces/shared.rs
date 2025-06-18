@@ -1,3 +1,4 @@
+//! This module provides the [`Once`].
 use std::future::Future;
 use std::sync::atomic::AtomicIsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
@@ -135,9 +136,9 @@ mod tests {
     use crate::sleep;
     use crate::sync::{AsyncOnce, AsyncWaitGroup, CallOnceResult, Once, OnceState, WaitGroup};
     use crate::test::sched_future_to_another_thread;
-    use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::Arc;
     use std::time::Duration;
 
     #[orengine::test::test_shared]

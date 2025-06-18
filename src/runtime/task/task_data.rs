@@ -1,3 +1,4 @@
+//! This module contains the [`TaskData`].
 use crate::runtime::Locality;
 #[cfg(target_pointer_width = "64")]
 use crate::runtime::{IS_LOCAL_MASK, TASK_MASK};
@@ -119,7 +120,7 @@ mod tests {
     use super::*;
     use crate as orengine;
     use crate::runtime::Task;
-    use crate::{Local, local_executor};
+    use crate::{local_executor, Local};
 
     #[orengine::test::test_local]
     fn test_task_data() {

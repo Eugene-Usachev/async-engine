@@ -1,16 +1,14 @@
 use crate::runtime::task::Task;
 use std::io::Result;
+use std::mem::MaybeUninit;
 use std::ptr;
-
-/// Default value of [`IoRequestData::ret`].
-pub(crate) const UNINIT_RESULT: Result<usize> = Ok((1 << 32) - 1);
 
 /// Data of io request. It contains a result and a task.
 /// After the task is done, the result will be set and the task will be executed.
 #[repr(C)]
 pub(crate) struct IoRequestData {
     task: Task,
-    ret: Result<usize>,
+    ret: MaybeUninit<Result<usize>>,
     #[cfg(debug_assertions)]
     was_executed: bool,
 }
@@ -20,7 +18,7 @@ impl IoRequestData {
     #[inline]
     pub(crate) fn new(task: Task) -> Self {
         Self {
-            ret: UNINIT_RESULT,
+            ret: MaybeUninit::uninit(),
             task,
             #[cfg(debug_assertions)]
             was_executed: false,
@@ -41,17 +39,13 @@ impl IoRequestData {
     /// Sets the result.
     #[inline(always)]
     pub(crate) fn set_ret(&mut self, ret: Result<usize>) {
-        self.ret = ret;
+        self.ret.write(ret);
     }
 
     /// Returns the result.
     #[inline]
     pub(crate) fn ret(&mut self) -> Result<usize> {
-        if cfg!(debug_assertions) {
-            std::mem::replace(&mut self.ret, UNINIT_RESULT)
-        } else {
-            unsafe { ptr::read(&self.ret) }
-        }
+        unsafe { self.ret.assume_init_read() }
     }
 
     /// Returns an associated task.

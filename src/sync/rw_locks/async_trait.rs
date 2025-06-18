@@ -1,3 +1,4 @@
+//! This module provides the [`AsyncRWLock`] trait.
 use crate::runtime::IsLocal;
 use crate::sync::LockStatus;
 use std::future::Future;

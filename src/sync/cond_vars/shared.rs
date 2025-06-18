@@ -1,8 +1,9 @@
+//! This module contains the [`CondVar`] struct that implements the [`AsyncCondVar`].
 use crate::panic_if_local_in_future;
-use crate::runtime::{Call, Task, local_executor};
+use crate::runtime::{local_executor, Call, Task};
 use crate::sync::{AsyncCondVar, AsyncMutex, AsyncMutexGuard, AsyncSubscribableMutex, Mutex};
 use crate::utils::{
-    PairedWithLock, TaskVecFromPool, acquire_task_vec_from_pool, unlikely, unwrap_or_bug_hint,
+    acquire_task_vec_from_pool, unlikely, unwrap_or_bug_hint, PairedWithLock, TaskVecFromPool,
 };
 use std::mem;
 use std::ops::Deref;

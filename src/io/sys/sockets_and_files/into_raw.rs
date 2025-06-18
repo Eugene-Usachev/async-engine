@@ -1,3 +1,6 @@
+//! This module contains [`IntoRawFile`] and [`IntoRawSocket`] traits to use
+//! `files` and `sockets` on any OS.
+
 use crate::io::sys::{RawFile, RawSocket};
 
 /// `IntoRawSocket` is a synonym for `IntoRawFd` (`std::os::fd::IntoRawFd`) on `unix` or for

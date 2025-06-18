@@ -1,3 +1,4 @@
+//! This module contains the [`AsyncSender`], [`AsyncReceiver`] and [`AsyncChannel`] traits.
 use crate::local_executor;
 use crate::runtime::IsLocal;
 use crate::sync::channels::{RecvErr, SendErr, TryRecvErr, TrySendErr};
@@ -352,7 +353,9 @@ pub trait AsyncReceiver<T>: IsLocal {
 ///
 /// Else use [`Channel`](crate::sync::Channel).
 ///
-/// # Example
+/// # Examples
+///
+/// ## No splitting
 ///
 /// ```rust
 /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
@@ -361,8 +364,38 @@ pub trait AsyncReceiver<T>: IsLocal {
 ///     let channel = orengine::sync::Channel::bounded(1); // capacity = 1
 ///
 ///     channel.send(1).await.unwrap();
+///
 ///     let res = channel.recv().await.unwrap();
+///
 ///     assert_eq!(res, 1);
+/// }
+/// ```
+///
+/// ## Splitting
+///
+/// You can split the channel by using only one trait of [`AsyncSender`] and [`AsyncReceiver`].
+///
+/// ```rust
+/// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
+/// use orengine::local_executor;
+///
+/// use std::sync::Arc;
+///
+/// async fn return_value(sender: impl AsyncSender<u32>) {
+///     sender.send(1).await.unwrap();
+/// }
+///
+/// async fn print_value(receiver: impl AsyncReceiver<u32>) {
+///     let res = receiver.recv().await.unwrap();
+///
+///     assert_eq!(res, 1);
+/// }
+///
+/// async fn foo() {
+///     let channel = Arc::new(orengine::sync::Channel::bounded(1)); // capacity = 1
+///
+///     local_executor().spawn_shared(return_value(channel.clone()));
+///     local_executor().spawn_shared(print_value(channel));
 /// }
 /// ```
 pub trait AsyncChannel<T>: AsyncSender<T> + AsyncReceiver<T> {

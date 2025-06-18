@@ -1,3 +1,4 @@
+//! This module contains helper functions for tests.
 use std::ffi::OsStr;
 #[cfg(unix)]
 use std::os::unix::fs::DirBuilderExt;

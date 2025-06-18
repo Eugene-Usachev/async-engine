@@ -1,3 +1,5 @@
+//! This module provides the [`Backoff`].
+
 // Copied from crossbeam and updated not to use thread::park
 
 use crate::yield_now;

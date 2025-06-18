@@ -1,3 +1,6 @@
+//! This module contains the fallback io worker implementation with thread pool.
+//!
+//! You can read [`FallbackWorker`] for more information.
 use crate::io::io_request_data::IoRequestDataPtr;
 use crate::io::sys::fallback::io_call::IoCall;
 use crate::io::sys::fallback::mio_poller::MioPoller;
@@ -6,10 +9,9 @@ use crate::io::sys::{
 };
 use crate::io::time_bounded_io_task::TimeBoundedIoTask;
 use crate::io::worker::IoWorker;
-use crate::io::{IoWorkerConfig, sys};
+use crate::io::{sys, IoWorkerConfig};
 use crate::local_executor;
 use crate::runtime::Task;
-use crate::runtime::call::Call;
 use crate::utils::OrengineInstant;
 use mio::Interest;
 use socket2::{Domain, Protocol, Type};
@@ -135,7 +137,7 @@ macro_rules! check_deadline_and {
                 // We can't spawn a shared task when it is running.
                 // But spawn_task_at_end_of_shared_tasks_queue never shares the provided task.
 
-                unsafe { local_executor().spawn_task_at_end_of_shared_tasks_queue(task) };
+                local_executor().spawn_task_at_end_of_shared_tasks_queue(task);
             }
         }
     };
@@ -197,7 +199,7 @@ impl FallbackWorker {
         }
     }
 
-    /// Checks for timed out requests and removes them from the queue.
+    /// Checks for timed-out requests and removes them from the queue.
     ///
     /// It saves the timed out requests to the provided vector.
     ///
@@ -249,7 +251,7 @@ impl FallbackWorker {
         let io_request_data = io_request_data_ptr.get_mut();
         let task = unsafe { io_request_data.task() };
 
-        io_request_data.set_ret(Ok(0)); // This IO-Call is just a poll. So, it don't depend on the return value.
+        io_request_data.set_ret(Ok(0)); // This IO-Call is just a poll. So, it doesn't depend on the return value.
 
         if task.is_local() {
             local_executor().exec_task(task);
@@ -272,7 +274,7 @@ impl FallbackWorker {
         unsafe { &mut *self.synced_completions.get() }
     }
 
-    /// Polls and processes all the polled requests. Returns if this function have done io work.  
+    /// Polls and processes all the polled requests. Returns if this function has done io work.  
     fn poll_and_process(&mut self, timeout: Duration) -> bool {
         let mut have_done = false;
 
@@ -336,7 +338,7 @@ impl FallbackWorker {
         have_done
     }
 
-    /// Returns if this function have done io work.
+    /// Returns if this function has done io work.
     #[must_use]
     fn must_poll_(&mut self, timeout: Duration) -> bool {
         let mut have_done = self.poll_and_process(timeout);

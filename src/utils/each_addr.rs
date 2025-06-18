@@ -1,5 +1,5 @@
-use crate::net::addr::to_sock_addrs::ToSockAddrs;
-use crate::net::addr::{FromSockAddr, IntoSockAddr};
+//! This module contains the [`each_addr`] function.
+use crate::net::{FromSockAddr, IntoSockAddr, ToSockAddrs};
 use std::future::Future;
 use std::io;
 
@@ -17,7 +17,7 @@ pub(crate) enum EachAddrRes<R> {
 }
 
 /// Iterate over the addresses in `addrs` and call `f` for each one
-/// before first successful result or the last address.
+/// before the first successful result or the last address.
 #[allow(
     clippy::future_not_send,
     reason = "It is not Send only when Res or Fur or F is not Send, it is right."

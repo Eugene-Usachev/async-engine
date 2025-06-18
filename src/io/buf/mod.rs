@@ -1,4 +1,5 @@
 //! This module contains [`Buffer`] and [`BufPool`].
+//!
 //! Read [`Buffer`] and [`BufPool`] for more information.
 pub use buf_pool::*;
 pub use buffer::*;

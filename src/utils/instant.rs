@@ -1,3 +1,4 @@
+//! This module contains the [`OrengineInstant`].
 use std::fmt;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 use std::time::{Duration, Instant as StdInstant};

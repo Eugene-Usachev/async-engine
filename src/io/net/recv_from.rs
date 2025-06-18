@@ -1,3 +1,5 @@
+//! This module contains the [`RecvFrom`] and [`RecvFromWithDeadline`] IO operations
+//! and the [`AsyncRecvFrom`].
 use std::future::Future;
 use std::io::{IoSliceMut, Result};
 use std::mem;
@@ -5,18 +7,16 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use socket2::SockAddr;
 
-use crate as orengine;
-use crate::io::FixedBufferMut;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
+use crate::io::macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use crate::io::sys::{AsRawSocket, MessageRecvHeader, RawSocket};
-use crate::io::worker::{IoWorker, local_worker};
-use crate::net::Socket;
-use crate::net::addr::FromSockAddr;
-use crate::utils::{OrengineInstant, unwrap_or_bug_hint};
-use crate::{BUG_MESSAGE, local_executor};
+use crate::io::worker::{local_worker, IoWorker};
+use crate::io::FixedBufferMut;
+use crate::net::{FromSockAddr, Socket};
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant};
+use crate::{local_executor, BUG_MESSAGE};
 
 /// `recv_from` io operation.
 #[repr(C)]
@@ -48,19 +48,24 @@ impl Future for RecvFrom<'_> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().recv_from(
-                this.raw_socket,
-                &mut this.msg_header,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
             {
-                unsafe { this.sock_addr.set_length(this.msg_header.get_addr_len()) };
+                local_worker().recv_from(
+                    this.raw_socket,
+                    &mut this.msg_header,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
+            unsafe {
+                this.sock_addr.set_length(this.msg_header.get_addr_len());
+
                 ret
             }
-        ));
+        );
     }
 }
 
@@ -104,20 +109,27 @@ impl Future for RecvFromWithDeadline<'_> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
         let worker = local_worker();
-        let ret;
 
-        poll_for_time_bounded_io_request!((
-            worker.recv_from_with_deadline(
-                this.raw_socket,
-                &mut this.msg_header,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
-                &mut this.deadline
-            ),
+        poll_for_time_bounded_io_request!(
             {
-                unsafe { this.sock_addr.set_length(this.msg_header.get_addr_len()) };
+                worker.recv_from_with_deadline(
+                    this.raw_socket,
+                    &mut this.msg_header,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                    &mut this.deadline,
+                );
+            },
+            this.io_request_data,
+            worker,
+            &this.deadline,
+            cx,
+            ret,
+            unsafe {
+                this.sock_addr.set_length(this.msg_header.get_addr_len());
+
                 ret
             }
-        ));
+        );
     }
 }
 
@@ -147,7 +159,7 @@ unsafe impl Send for RecvFromWithDeadline<'_> {}
 /// stream.poll_recv().await?;
 /// let mut buf = full_buffer();
 ///
-/// // Receive at the incoming data with consuming it
+/// // Receive at the incoming data by consuming it
 /// let bytes_peeked = stream.recv_from(&mut buf).await?;
 /// # Ok(())
 /// # }

@@ -1,3 +1,15 @@
+// TODO add link to online docs
+
+//! # Orengine
+//!
+//! You can read the description of the crate in the [`README.md`] file.
+//!
+//! If you are finding for the documentation, please, visit the [`online documentation`].
+//! Although documentation covers all functions, structures, and traits,
+//! the documentation of most modules consists only of links to the documentation of their elements.
+//!
+//! [`README.md`]: (https://github.com/orengine/orengine/blob/main/README.md)
+//! [`online documentation`]: https://docs.rs/orengine/latest/orengine/
 #![deny(clippy::all)]
 #![deny(clippy::assertions_on_result_states)]
 #![deny(clippy::match_wild_err_arm)]
@@ -45,6 +57,10 @@ pub mod fs;
 pub mod io;
 pub mod local;
 pub mod local_pool;
+#[allow(
+    rustdoc::broken_intra_doc_links,
+    reason = "On Unix all links are valid, but on Windows they are not"
+)]
 pub mod net;
 pub mod run;
 pub mod runtime;
@@ -61,8 +77,11 @@ pub(crate) use bug_message::BUG_MESSAGE;
 pub use local::Local;
 pub use orengine_macros::select;
 pub use run::*;
-pub use runtime::{Executor, local_executor, stop_all_executors, stop_executor};
+pub use runtime::{
+    executors_ids, local_executor, stop_all_executors, stop_executor, work_sharing_executors_ids,
+    Executor,
+};
 pub use sleep::{sleep, sleep_until};
 pub use socket2;
 pub use test::{test_local, test_shared};
-pub use yield_now::{Yield, yield_now};
+pub use yield_now::{yield_now, Yield};

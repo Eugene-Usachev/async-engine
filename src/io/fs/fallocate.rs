@@ -1,16 +1,17 @@
-use orengine_macros::poll_for_io_request;
+//! This module provides the [`Fallocate`] io operation.
+
 use std::future::Future;
 use std::io::Result;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
+use crate::io::macros::poll_for_io_request;
 use crate::io::sys::{AsRawFile, RawFile};
 use crate::io::worker::{local_worker, IoWorker};
 use crate::utils::unwrap_or_bug_hint;
 
-/// `fallocate` io operation which allows to allocate space in a file from a given offset.
+/// `fallocate` io operation which allows allocating space in a file from a given offset.
 #[repr(C)]
 pub struct Fallocate {
     offset: usize,
@@ -38,26 +39,29 @@ impl Future for Fallocate {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        #[allow(unused, reason = "Cannot write proc_macro else to make it readable.")]
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().fallocate(
-                this.raw_file,
-                this.offset as u64,
-                this.len as u64,
-                this.flags,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().fallocate(
+                    this.raw_file,
+                    this.offset as u64,
+                    this.len as u64,
+                    this.flags,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            _ret,
             ()
-        ));
+        );
     }
 }
 
 unsafe impl Send for Fallocate {}
 
-/// This trait allows to create a `fallocate` io operation
-/// which allows to allocate space in a file from a given offset.
+/// This trait allows creating a `fallocate` io operation
+/// which allows allocating space in a file from a given offset.
 ///
 /// Call [`fallocate`](AsyncFallocate::fallocate) to allocate len bytes on the disk.
 pub trait AsyncFallocate: AsRawFile {
@@ -80,7 +84,7 @@ pub trait AsyncFallocate: AsRawFile {
     /// async fn foo() {
     /// let f = File::open("foo.txt", &OpenOptions::new().write(true).create(true)).await.unwrap();
     ///
-    /// // Allocate a 1024 byte file without filling it, like Vec::reserve
+    /// // Allocate a 1024-byte file without filling it, like Vec::reserve
     /// #[cfg(target_os = "linux")]
     /// f.fallocate(0, 1024, libc::FALLOC_FL_KEEP_SIZE).await.unwrap();
     /// # }

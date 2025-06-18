@@ -1,3 +1,4 @@
+//! This module contains the implementation of the [`LocalChannel`].
 use crate::runtime::waiting_task::WaitingTask;
 use crate::runtime::{IsLocal, Task, TaskWithDeadline};
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
@@ -9,8 +10,8 @@ use crate::sync::{
     AsyncChannel, AsyncReceiver, AsyncSender, RecvErr, RecvTimeoutErr, SendErr, SendTimeoutErr,
     TryRecvErr, TrySendErr,
 };
-use crate::utils::{OrengineInstant, Ptr, unwrap_or_bug_hint};
 use crate::utils::{unlikely, unreachable_hint};
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant, Ptr};
 use crate::{local_executor, panic_if_shared_in_future};
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
@@ -751,7 +752,9 @@ macro_rules! generate_recv_or_subscribe {
 ///
 /// Read [`Executor`](crate::Executor) for more details.
 ///
-/// # Example
+/// # Examples
+///
+/// ## No splitting
 ///
 /// ```rust
 /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
@@ -760,8 +763,38 @@ macro_rules! generate_recv_or_subscribe {
 ///     let channel = orengine::sync::LocalChannel::bounded(1); // capacity = 1
 ///
 ///     channel.send(1).await.unwrap();
+///
 ///     let res = channel.recv().await.unwrap();
+///
 ///     assert_eq!(res, 1);
+/// }
+/// ```
+///
+/// ## Splitting
+///
+/// You can split the channel by using only one trait of [`AsyncSender`] and [`AsyncReceiver`].
+///
+/// ```rust
+/// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
+/// use orengine::local_executor;
+///
+/// use std::rc::Rc;
+///
+/// async fn return_value(sender: impl AsyncSender<u32>) {
+///     sender.send(1).await.unwrap();
+/// }
+///
+/// async fn print_value(receiver: impl AsyncReceiver<u32>) {
+///     let res = receiver.recv().await.unwrap();
+///
+///     assert_eq!(res, 1);
+/// }
+///
+/// async fn foo() {
+///     let channel = Rc::new(orengine::sync::LocalChannel::bounded(1)); // capacity = 1
+///
+///     local_executor().spawn_local(return_value(channel.clone()));
+///     local_executor().spawn_local(print_value(channel));
 /// }
 /// ```
 pub struct LocalChannel<T> {
@@ -1084,9 +1117,9 @@ mod tests {
     const N: usize = 125;
 
     // Case 1 - send N and recv N. No wait
-    // Case 2 - send N and recv (N + 1). Wait for recv
-    // Case 3 - send (N + 1) and recv N. Wait for send
-    // Case 4 - send (N + 1) and recv (N + 1). Wait for send and wait for recv
+    // Case 2 - send N and recv (N + 1). Wait for `recv`
+    // Case 3 - send (N + 1) and recv N. Wait for `send`
+    // Case 4 - send (N + 1) and recv (N + 1). Wait for `send` and wait for `recv`
 
     #[orengine::test::test_local]
     fn test_local_channel_case1() {

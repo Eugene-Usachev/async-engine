@@ -1,8 +1,9 @@
-use crate::Executor;
+//! This module provides the [`Task`].
 #[cfg(debug_assertions)]
 use crate::local_executor;
-use crate::runtime::Locality;
 use crate::runtime::task::task_data::TaskData;
+use crate::runtime::Locality;
+use crate::Executor;
 use std::future::Future;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
@@ -406,7 +407,7 @@ pub async unsafe fn update_current_task_locality(locality: Locality) {
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::{Local, local_executor, yield_now};
+    use crate::{local_executor, yield_now, Local};
     use std::ptr;
 
     #[orengine::test::test_local]

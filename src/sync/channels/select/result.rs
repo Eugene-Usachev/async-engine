@@ -1,3 +1,9 @@
+//! This module contains the [`SelectNonBlockingBranchResult`].
+//!
+//! It is public only for implementation the [`select`](crate::select).
+//! If you don't want to write your own `select` or understand how does `Orengine` works,
+//! you don't need to read it.
+
 /// Result of [`SelectReceiver::recv_or_subscribe`] or [`SelectSender::send_or_subscribe`].
 ///
 /// For more details read [`SelectNonBlockingBranchResult::Success`],

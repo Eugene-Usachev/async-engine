@@ -1,6 +1,8 @@
-pub mod config;
+//! This module provides the [`Executor`], the [`Config`] struct
+//! and the [`local_executor`] function.
+mod config;
 mod end_local_thread_and_write_into_ptr;
-pub mod executor;
+mod executor;
 pub(crate) mod executors_on_cores_table;
 mod sleeping_manager;
 

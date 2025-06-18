@@ -1,3 +1,4 @@
+//! This module provides the [`LocalThreadWorkerPool`].
 use crate::runtime::Task;
 use crate::sync_task_queue::SyncTaskList;
 use std::collections::VecDeque;

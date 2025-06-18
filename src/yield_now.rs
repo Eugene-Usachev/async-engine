@@ -1,3 +1,4 @@
+//! This module contains the [`yield_now`] function.
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};

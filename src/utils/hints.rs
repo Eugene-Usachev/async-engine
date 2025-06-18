@@ -1,5 +1,4 @@
 //! Hints to the compiler that affects how code should be emitted or optimized.
-
 use crate::bug_message::BUG_MESSAGE;
 
 /// Do the same as [`assert_unchecked`](std::hint::assert_unchecked), but instead of UB,
@@ -9,6 +8,7 @@ use crate::bug_message::BUG_MESSAGE;
 ///
 /// It panics with `debug_assertions` if `cond` is `false`.
 #[inline(always)]
+#[track_caller]
 #[allow(unused_variables, reason = "It contains #[cfg(debug_assertions)]")]
 pub fn assert_hint(cond: bool, debug_msg: &str) {
     if cfg!(debug_assertions) {
@@ -25,6 +25,7 @@ pub fn assert_hint(cond: bool, debug_msg: &str) {
 ///
 /// It panics with `debug_assertions`.
 #[inline(always)]
+#[track_caller]
 #[allow(unused_variables, reason = "It contains #[cfg(debug_assertions)]")]
 pub fn unreachable_hint() -> ! {
     if cfg!(debug_assertions) {
@@ -95,6 +96,7 @@ impl<T, E> UnwrapOrPanic<T> for Result<T, E> {
 /// Unwraps a value, panicking if it is [`None`] or [`Err`] with `debug_assertions`.
 ///
 /// Else hints to the compiler that the value is not `None` or `Err`.
+#[track_caller]
 pub(crate) fn unwrap_or_bug_hint<T>(item: impl UnwrapOrPanic<T>) -> T {
     if cfg!(debug_assertions) {
         item.unwrap_or_panic(BUG_MESSAGE)
@@ -107,6 +109,7 @@ pub(crate) fn unwrap_or_bug_hint<T>(item: impl UnwrapOrPanic<T>) -> T {
 ///
 /// Else hints to the compiler that the value is not `None` or `Err`.
 #[allow(unused_variables, reason = "It contains #[cfg(debug_assertions)]")]
+#[track_caller]
 pub(crate) fn unwrap_or_bug_message_hint<T>(
     item: impl UnwrapOrPanic<T>,
     message: &'static str,

@@ -1,7 +1,7 @@
 //! This module contains [`UnixStream`].
 
-use crate::io::shutdown::AsyncShutdown;
 use crate::io::sys::{AsRawSocket, AsSocket, FromRawSocket, IntoRawSocket, RawSocket};
+use crate::io::AsyncShutdown;
 use crate::io::{
     AsyncConnectStream, AsyncPeek, AsyncPollSocket, AsyncRecv, AsyncSend, AsyncSocketClose,
 };
@@ -162,8 +162,8 @@ impl Drop for UnixStream {
 mod tests {
     use crate as orengine;
     use crate::io::{
-        AsyncAccept, AsyncBind, AsyncConnectStream, AsyncPeek, AsyncPollSocket, AsyncRecv,
-        AsyncSend, FixedBuffer, buffer, get_fixed_buffer,
+        buffer, get_fixed_buffer, AsyncAccept, AsyncBind, AsyncConnectStream, AsyncPeek,
+        AsyncPollSocket, AsyncRecv, AsyncSend, FixedBuffer,
     };
     use crate::net::{UnixListener, UnixStream};
     use crate::sync::{

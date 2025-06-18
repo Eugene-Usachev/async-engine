@@ -1,3 +1,9 @@
+//! This module contains traits that allow to use `sockets` and `files` on any OS.
+//!
+//! [`as_borrowed`]: contains [`BorrowedFile`] and [`BorrowedSocket`] traits.
+//! [`as_raw`]: contains [`AsFile`] and [`AsSocket`] traits.
+//! [`from_raw`]: contains [`FromRawFile`] and [`FromRawSocket`] traits.
+//! [`into_raw`]: contains [`IntoRawFile`] and [`IntoRawSocket`] traits.
 pub mod as_borrowed;
 pub mod as_raw;
 pub mod from_raw;

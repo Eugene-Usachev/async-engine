@@ -1,3 +1,4 @@
+//! This module contains [`UdpConnectedSocket`] struct.
 use crate::io::sys::{AsRawSocket, AsSocket, FromRawSocket, IntoRawSocket, RawSocket};
 use crate::io::{
     AsyncPeek, AsyncPollSocket, AsyncRecv, AsyncSend, AsyncShutdown, AsyncSocketClose,
@@ -168,7 +169,7 @@ impl Drop for UdpConnectedSocket {
 
 #[cfg(test)]
 mod tests {
-    use crate::io::{AsyncBind, AsyncConnectDatagram, get_fixed_buffer};
+    use crate::io::{get_fixed_buffer, AsyncBind, AsyncConnectDatagram};
     use crate::net::udp::UdpSocket;
     use std::net::SocketAddr;
     use std::str::FromStr;

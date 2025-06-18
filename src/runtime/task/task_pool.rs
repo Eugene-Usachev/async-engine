@@ -1,3 +1,4 @@
+//! This module contains the [`TaskPool`].
 use crate::local_executor;
 use crate::runtime::task::task_data::TaskData;
 use crate::runtime::{Locality, Task};

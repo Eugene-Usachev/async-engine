@@ -1,13 +1,13 @@
+//! This module contains the [`PeekBytes`], [`PeekBytesWithDeadline`], [`PeekFixed`]
+//! and [`PeekFixedWithDeadline`] IO operations and the [`AsyncPeek`] trait.
 use std::future::Future;
 use std::io::Result;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
-
-use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
+use crate::io::macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use crate::io::sys::{AsRawSocket, RawSocket};
 use crate::io::worker::{local_worker, IoWorker};
 use crate::io::{Buffer, FixedBufferMut};
@@ -43,17 +43,21 @@ impl Future for PeekBytes<'_> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().peek(
-                this.raw_socket,
-                this.buf.as_mut_ptr(),
-                this.buf.len() as u32,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().peek(
+                    this.raw_socket,
+                    this.buf.as_mut_ptr(),
+                    this.buf.len() as u32,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret
-        ));
+        );
     }
 }
 
@@ -93,18 +97,22 @@ impl Future for PeekFixed<'_> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().peek_fixed(
-                this.raw_socket,
-                this.ptr,
-                this.len,
-                this.fixed_index,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().peek_fixed(
+                    this.raw_socket,
+                    this.ptr,
+                    this.len,
+                    this.fixed_index,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret as u32
-        ));
+        );
     }
 }
 
@@ -141,18 +149,24 @@ impl Future for PeekBytesWithDeadline<'_> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
         let worker = local_worker();
-        let ret;
 
-        poll_for_time_bounded_io_request!((
-            worker.peek_with_deadline(
-                this.raw_socket,
-                this.buf.as_mut_ptr(),
-                this.buf.len() as u32,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
-                &mut this.deadline
-            ),
+        poll_for_time_bounded_io_request!(
+            {
+                worker.peek_with_deadline(
+                    this.raw_socket,
+                    this.buf.as_mut_ptr(),
+                    this.buf.len() as u32,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                    &mut this.deadline,
+                );
+            },
+            this.io_request_data,
+            worker,
+            &this.deadline,
+            cx,
+            ret,
             ret
-        ));
+        );
     }
 }
 
@@ -201,19 +215,25 @@ impl Future for PeekFixedWithDeadline<'_> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
         let worker = local_worker();
-        let ret;
 
-        poll_for_time_bounded_io_request!((
-            worker.peek_fixed_with_deadline(
-                this.raw_socket,
-                this.ptr,
-                this.len,
-                this.fixed_index,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
-                &mut this.deadline
-            ),
+        poll_for_time_bounded_io_request!(
+            {
+                worker.peek_fixed_with_deadline(
+                    this.raw_socket,
+                    this.ptr,
+                    this.len,
+                    this.fixed_index,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                    &mut this.deadline,
+                );
+            },
+            this.io_request_data,
+            worker,
+            &this.deadline,
+            cx,
+            ret,
             ret as u32
-        ));
+        );
     }
 }
 
@@ -495,11 +515,11 @@ pub trait AsyncPeek: Socket {
     }
 
     /// Asynchronously receives into the provided byte slice the incoming data without consuming it,
-    /// until the buffer is completely filled with exactly the requested number of bytes.
+    /// until the buffer is filled with exactly the requested number of bytes.
     ///
     /// # Difference between `peek_exact` and `peek_bytes_exact`
     ///
-    /// Use [`peek_exact`](Self::peek_exact) if it is possible,
+    /// Use [`peek_exact`](Self::peek_exact) if it is possible.
     ///
     /// # Example
     ///
@@ -528,11 +548,11 @@ pub trait AsyncPeek: Socket {
     }
 
     /// Asynchronously receives into the provided byte slice the incoming data without consuming it,
-    /// until the buffer is completely filled with exactly the requested number of bytes.
+    /// until the buffer is filled with exactly the requested number of bytes.
     ///
     /// # Difference between `peek_exact` and `peek_bytes_exact`
     ///
-    /// Use [`peek_exact`](Self::peek_exact) if it is possible,
+    /// Use [`peek_exact`](Self::peek_exact) if it is possible.
     ///
     /// # Example
     ///
@@ -581,7 +601,7 @@ pub trait AsyncPeek: Socket {
     }
 
     /// Asynchronously receives into the provided byte slice the incoming data without consuming it,
-    /// with a deadline until the buffer is completely filled with the exact number of bytes.
+    /// with a deadline until the buffer is filled with the exact number of bytes.
     ///
     /// If the deadline is exceeded, the method will return an error with
     /// kind [`ErrorKind::TimedOut`](std::io::ErrorKind::TimedOut).
@@ -628,7 +648,7 @@ pub trait AsyncPeek: Socket {
     }
 
     /// Asynchronously receives into the provided byte slice the incoming data without consuming it,
-    /// with a deadline until the buffer is completely filled with the exact number of bytes.
+    /// with a deadline until the buffer is filled with the exact number of bytes.
     ///
     /// If the deadline is exceeded, the method will return an error with
     /// kind [`ErrorKind::TimedOut`](std::io::ErrorKind::TimedOut).
@@ -697,7 +717,7 @@ pub trait AsyncPeek: Socket {
     }
 
     /// Asynchronously receives into the provided byte slice the incoming data without consuming it,
-    /// with a timeout until the buffer is completely filled with the exact number of bytes.
+    /// with a timeout until the buffer is filled with the exact number of bytes.
     ///
     /// If the deadline is exceeded, the method will return an error with
     /// kind [`ErrorKind::TimedOut`](std::io::ErrorKind::TimedOut).
@@ -739,7 +759,7 @@ pub trait AsyncPeek: Socket {
     }
 
     /// Asynchronously receives into the provided byte slice the incoming data without consuming it,
-    /// with a timeout until the buffer is completely filled with the exact number of bytes.
+    /// with a timeout until the buffer is filled with the exact number of bytes.
     ///
     /// If the deadline is exceeded, the method will return an error with
     /// kind [`ErrorKind::TimedOut`](std::io::ErrorKind::TimedOut).

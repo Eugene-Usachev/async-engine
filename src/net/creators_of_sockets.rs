@@ -1,5 +1,7 @@
-use crate::io::Socket;
+//! This module contains functions that create new sockets based on the provided address
+//! and socket type.
 use crate::io::sys::RawSocket;
+use crate::io::Socket;
 use socket2::{Domain, Protocol, Type};
 use std::net::SocketAddr;
 
@@ -43,12 +45,12 @@ pub(crate) async fn new_udp_socket(addr: &SocketAddr) -> std::io::Result<RawSock
 
 /// Creates a new UNIX socket with [`stream`](Type::STREAM) type.
 #[cfg(unix)]
-pub async fn new_unix_stream() -> std::io::Result<RawSocket> {
+pub(crate) async fn new_unix_stream() -> std::io::Result<RawSocket> {
     Socket::new(Domain::UNIX, Type::STREAM, Protocol::from(0)).await
 }
 
 /// Creates a new UNIX socket with [`datagram`](Type::DGRAM) type.
 #[cfg(unix)]
-pub async fn new_unix_datagram() -> std::io::Result<RawSocket> {
+pub(crate) async fn new_unix_datagram() -> std::io::Result<RawSocket> {
     Socket::new(Domain::UNIX, Type::DGRAM, Protocol::from(0)).await
 }

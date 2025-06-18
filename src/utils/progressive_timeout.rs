@@ -1,3 +1,5 @@
+//! This module provides the [`ProgressiveTimeout`].
+
 /// A utility to manage progressively increasing timeouts.
 ///
 /// # Type Parameters

@@ -1,4 +1,5 @@
-use crate::runtime::{Task, local_executor};
+//! This module provides the [`sleep`] and [`sleep_until`] functions.
+use crate::runtime::{local_executor, Task};
 use crate::utils::OrengineInstant;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -72,6 +73,8 @@ impl Future for Sleep {
 pub fn sleep(duration: Duration) -> impl Future<Output = ()> {
     Sleep {
         deadline: local_executor().start_round_time_for_deadlines() + duration,
+        #[cfg(not(unix))]
+        was_called: false,
     }
 }
 
@@ -95,6 +98,8 @@ pub fn sleep(duration: Duration) -> impl Future<Output = ()> {
 pub fn sleep_until(instant: impl Into<OrengineInstant>) -> impl Future<Output = ()> {
     Sleep {
         deadline: instant.into(),
+        #[cfg(not(unix))]
+        was_called: false,
     }
 }
 

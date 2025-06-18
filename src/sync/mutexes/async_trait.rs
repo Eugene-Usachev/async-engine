@@ -1,3 +1,4 @@
+//! This module contains the [`AsyncMutex`] and [`AsyncMutexGuard`].
 use crate::runtime::IsLocal;
 use std::future::Future;
 use std::ops::{Deref, DerefMut};

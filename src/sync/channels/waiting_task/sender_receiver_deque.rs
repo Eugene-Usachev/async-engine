@@ -1,6 +1,7 @@
+//! This module contains the [`SenderReceiverQueue`].
 use crate::runtime::waiting_task::WaitingTask;
 use crate::utils::{assert_hint, likely, unlikely};
-use std::alloc::{Layout, alloc, dealloc};
+use std::alloc::{alloc, dealloc, Layout};
 use std::ops::{Range, RangeBounds};
 use std::ptr::NonNull;
 use std::{ops, ptr};

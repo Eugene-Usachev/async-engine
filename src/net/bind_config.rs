@@ -1,3 +1,7 @@
+//! This module contains the [`BindConfig`] struct, which is used to configure the behavior of
+//! socket bindings, such as setting the backlog size, enabling IPv6-only mode, and configuring
+//! the [`port reuse behavior`](ReusePort).
+
 /// The `ReusePort` enum is used to configure the reuse port behavior for socket binding,
 /// primarily affecting the load balancing of incoming connections
 /// across multiple threads or processes.
@@ -65,6 +69,7 @@ impl BindConfig {
     #[must_use]
     pub fn backlog_size(mut self, backlog_size: isize) -> Self {
         self.backlog_size = backlog_size;
+
         self
     }
 
@@ -72,6 +77,7 @@ impl BindConfig {
     #[must_use]
     pub fn only_v6(mut self, only_v6: bool) -> Self {
         self.only_v6 = only_v6;
+
         self
     }
 
@@ -79,6 +85,7 @@ impl BindConfig {
     #[must_use]
     pub fn reuse_address(mut self, reuse_address: bool) -> Self {
         self.reuse_address = reuse_address;
+
         self
     }
 
@@ -89,6 +96,7 @@ impl BindConfig {
     #[must_use]
     pub fn reuse_port(mut self, reuse_port: ReusePort) -> Self {
         self.reuse_port = reuse_port;
+
         self
     }
 }

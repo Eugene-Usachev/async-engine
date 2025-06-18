@@ -1,9 +1,10 @@
-use crate as orengine;
+//! This module provides the [`CreateDir`] io operation.
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::{get_os_path_ptr, OsPath};
 use crate::io::worker::{local_worker, IoWorker};
 use crate::utils::unwrap_or_bug_hint;
-use orengine_macros::poll_for_io_request;
+
+use crate::io::macros::poll_for_io_request;
 use std::future::Future;
 use std::io::Result;
 use std::pin::Pin;
@@ -35,16 +36,19 @@ impl Future for CreateDir {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        #[allow(unused, reason = "Cannot write proc_macro else to make it readable.")]
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().create_dir(
-                get_os_path_ptr(&this.os_path),
-                this.mode,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().create_dir(
+                    get_os_path_ptr(&this.os_path),
+                    this.mode,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            _ret,
             ()
-        ));
+        );
     }
 }

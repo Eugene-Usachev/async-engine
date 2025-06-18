@@ -1,24 +1,90 @@
-pub use channels::{async_trait::*, errors::*, local::LocalChannel, shared::Channel};
-pub use cond_vars::{async_trait::*, local::LocalCondVar, shared::CondVar};
-pub use mutexes::{
-    async_trait::*,
-    local::{LocalMutex, LocalMutexGuard},
-    naive_shared::{NaiveMutex, NaiveMutexGuard},
-    smart_shared::{Mutex, MutexGuard},
-    subscribable_trait::AsyncSubscribableMutex,
-};
-pub use onces::{async_trait::*, local::LocalOnce, shared::Once, state::*};
-#[cfg(not(target_has_atomic = "64"))]
-pub use rw_locks::naive_shared::{RWLock, ReadLockGuard, WriteLockGuard};
-#[cfg(target_has_atomic = "64")]
-pub use rw_locks::shared::{RWLock, ReadLockGuard, WriteLockGuard};
-pub use rw_locks::{
-    async_trait::*,
-    local::{LocalRWLock, LocalReadLockGuard, LocalWriteLockGuard},
-    lock_status::*,
-};
+//! This module provides a comprehensive set of asynchronous traits and utilities for working
+//! with synchronization primitives.
+//!
+//! # Channels
+//!
+//! ## Traits
+//!
+//! - [`AsyncSender`]
+//! - [`AsyncReceiver`]
+//! - [`AsyncChannel`]
+//!
+//! ## Implementations
+//!
+//! In `local` context: [`LocalChannel`]
+//!
+//! In `global` context: [`Channel`]
+//!
+//! # Condition Variables
+//!
+//! ## Traits
+//!
+//! - [`AsyncCondVar`]
+//!
+//! ## Implementations
+//!
+//! In `local` context: [`LocalCondVar`]
+//!
+//! In `global` context: [`CondVar`]
+//!
+//! # Mutexes
+//!
+//! ## Traits
+//!
+//! - [`AsyncMutex`]
+//! - [`AsyncMutexGuard`]
+//! - [`AsyncSubscribableMutex`]
+//!
+//! ## Implementations
+//!
+//! In `local` context: [`LocalMutex`]
+//!
+//! In `global` context: [`Mutex`], [`NaiveMutex`]
+//!
+//! # Once
+//!
+//! ## Traits
+//!
+//! - [`AsyncOnce`]
+//!
+//! ## Implementations
+//!
+//! In `local` context: [`LocalOnce`]
+//!
+//! In `global` context: [`Once`]
+//!
+//! # RW Locks
+//!
+//! ## Traits
+//!
+//! - [`AsyncRWLock`]
+//! - [`AsyncReadLockGuard`]
+//! - [`AsyncWriteLockGuard`]
+//!
+//! ## Implementations
+//!
+//! In `local` context: [`LocalRWLock`]
+//!
+//! In `global` context: [`RWLock`]
+//!
+//! # Wait Groups
+//!
+//! ## Traits
+//!
+//! - [`AsyncWaitGroup`]
+//!
+//! ## Implementations
+//!
+//! In `local` context: [`LocalWaitGroup`]
+//!
+//! In `global` context: [`WaitGroup`]
 
-pub use wait_groups::{async_trait::*, local::LocalWaitGroup, shared::WaitGroup};
+pub use channels::*;
+pub use cond_vars::*;
+pub use mutexes::*;
+pub use onces::*;
+pub use rw_locks::*;
+pub use wait_groups::*;
 
 pub mod channels;
 pub mod cond_vars;

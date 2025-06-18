@@ -1,10 +1,11 @@
+//! This module contains the [`ExecutorSharedTaskList`].
 use crate::runtime::Task;
-use crate::utils::SpinLockGuard;
 use crate::utils::never_wait_lock::NeverWaitLock;
+use crate::utils::SpinLockGuard;
 use std::collections::VecDeque;
 use std::ptr;
 
-/// `SharedExecutorTaskList` is a list of tasks that can be shared between executors.
+/// `ExecutorSharedTaskList` is a list of tasks that can be shared between executors.
 ///
 /// All tasks in the list must be `shared` and their futures must implement `Send`.
 pub(crate) struct ExecutorSharedTaskList {
@@ -13,7 +14,7 @@ pub(crate) struct ExecutorSharedTaskList {
 }
 
 impl ExecutorSharedTaskList {
-    /// Creates a new `SharedExecutorTaskList`
+    /// Creates a new `ExecutorSharedTaskList`
     pub(crate) const fn new(executor_id: usize) -> Self {
         Self {
             executor_id,
@@ -21,7 +22,7 @@ impl ExecutorSharedTaskList {
         }
     }
 
-    /// Returns the executor id of this `SharedExecutorTaskList`.
+    /// Returns the executor id of this `ExecutorSharedTaskList`.
     #[inline]
     pub(crate) fn executor_id(&self) -> usize {
         self.executor_id

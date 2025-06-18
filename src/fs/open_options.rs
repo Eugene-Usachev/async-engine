@@ -1,3 +1,4 @@
+//! Options and flags which can be used to configure how a file is opened.
 use crate::io::sys::OsOpenOptions;
 use std::fmt::Debug;
 use std::io;

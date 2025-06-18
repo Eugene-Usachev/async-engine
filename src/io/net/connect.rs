@@ -1,20 +1,20 @@
+//! This module contains the [`Connect`] and [`ConnectWithDeadline`] IO operations
+//! and the [`AsyncConnectStream`] and [`AsyncConnectDatagram`] traits.
 use std::future::Future;
 use std::io::Result;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use socket2::SockAddr;
 
-use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
+use crate::io::macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use crate::io::sys;
 use crate::io::sys::{AsRawSocket, FromRawSocket, IntoRawSocket, RawSocket};
 use crate::io::worker::{local_worker, IoWorker};
 use crate::local_executor;
-use crate::net::addr::{IntoSockAddr, ToSockAddrs};
-use crate::net::{ConnectedDatagram, Socket};
+use crate::net::{ConnectedDatagram, IntoSockAddr, Socket, ToSockAddrs};
 use crate::utils::each_addr::each_addr;
 use crate::utils::{unwrap_or_bug_hint, OrengineInstant};
 
@@ -46,18 +46,21 @@ impl Future for Connect<'_> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        #[allow(unused, reason = "Cannot write proc_macro else to make it readable.")]
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().connect(
-                this.raw_fd,
-                this.addr.as_ptr().cast::<sys::os_sockaddr>(),
-                this.addr.len(),
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().connect(
+                    this.raw_fd,
+                    this.addr.as_ptr().cast::<sys::os_sockaddr>(),
+                    this.addr.len(),
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            _ret,
             ()
-        ));
+        );
     }
 }
 
@@ -94,19 +97,24 @@ impl Future for ConnectWithDeadline<'_> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
         let worker = local_worker();
-        #[allow(unused, reason = "Cannot write proc_macro else to make it readable.")]
-        let ret;
 
-        poll_for_time_bounded_io_request!((
-            worker.connect_with_deadline(
-                this.raw_fd,
-                this.addr.as_ptr().cast::<sys::os_sockaddr>(),
-                this.addr.len(),
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
-                &mut this.deadline
-            ),
+        poll_for_time_bounded_io_request!(
+            {
+                worker.connect_with_deadline(
+                    this.raw_fd,
+                    this.addr.as_ptr().cast::<sys::os_sockaddr>(),
+                    this.addr.len(),
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                    &mut this.deadline,
+                );
+            },
+            this.io_request_data,
+            worker,
+            &this.deadline,
+            cx,
+            _ret,
             ()
-        ));
+        );
     }
 }
 
@@ -138,7 +146,7 @@ pub trait AsyncConnectStream: Sized + Socket {
     ///
     /// # Warning
     ///
-    /// Creates a socket, without connecting it, therefore you need to connect it.
+    /// It creates a socket without connecting it; therefore, you need to connect it.
     ///
     /// # Example
     ///
@@ -146,10 +154,9 @@ pub trait AsyncConnectStream: Sized + Socket {
     /// use std::io;
     /// use std::io::ErrorKind;
     /// use std::net::SocketAddr;
-    /// use orengine::net::TcpStream;
+    /// use orengine::net::{TcpStream, IntoSockAddr};
     /// use orengine::io::{AsyncConnectStream, Connect};
     /// use orengine::io::sys::AsRawSocket;
-    /// use orengine::net::addr::IntoSockAddr;
     ///
     /// async fn foo() -> io::Result<()> {
     /// let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();

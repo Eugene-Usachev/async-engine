@@ -1,5 +1,11 @@
-use crate::runtime::{Config, local_executor};
-use crate::{Executor, utils};
+//! This module provides the functions for running a local future on all cores such as:
+//!
+//! - [`run_local_future_on_all_cores`].
+//! - [`run_local_future_on_all_cores_with_config`].
+//! - [`run_shared_future_on_all_cores`].
+//! - [`run_shared_future_on_all_cores_with_config`].
+use crate::runtime::{local_executor, Config};
+use crate::{utils, Executor};
 use std::future::Future;
 
 /// It does the next steps on each core:

@@ -1,14 +1,15 @@
-use crate as orengine;
+//! This module contains the [`Accept`] and [`AcceptWithDeadline`] IO operations
+//! and [`AsyncAccept`] trait.
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys;
 use crate::io::sys::{os_sockaddr, AsRawSocket, FromRawSocket, RawSocket};
 use crate::io::worker::{local_worker, IoWorker};
 use crate::local_executor;
-use crate::net::addr::FromSockAddr;
-use crate::net::{Socket, Stream};
+use crate::net::{FromSockAddr, Socket, Stream};
 use crate::utils::{unwrap_or_bug_hint, OrengineInstant};
 use crate::BUG_MESSAGE;
-use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
+
+use crate::io::macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use socket2::SockAddr;
 use std::future::Future;
 use std::io::Result;
@@ -78,22 +79,26 @@ impl<S: FromRawSocket> Future for Accept<S> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = unsafe { self.get_unchecked_mut() };
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().accept(
-                this.raw_socket,
-                (&raw mut this.addr.storage).cast::<os_sockaddr>(),
-                &raw mut this.addr.len,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().accept(
+                    this.raw_socket,
+                    (&raw mut this.addr.storage).cast::<os_sockaddr>(),
+                    &raw mut this.addr.len,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             unsafe {
                 (
                     <S as FromRawSocket>::from_raw_socket(ret as RawSocket),
                     this.addr.as_sock_addr(),
                 )
             }
-        ));
+        );
     }
 }
 
@@ -132,23 +137,29 @@ impl<S: FromRawSocket> Future for AcceptWithDeadline<S> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = unsafe { self.get_unchecked_mut() };
         let worker = local_worker();
-        let ret;
 
-        poll_for_time_bounded_io_request!((
-            worker.accept_with_deadline(
-                this.raw_socket,
-                (&raw mut this.addr.storage).cast::<os_sockaddr>(),
-                &raw mut this.addr.len,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
-                &mut this.deadline
-            ),
+        poll_for_time_bounded_io_request!(
+            {
+                worker.accept_with_deadline(
+                    this.raw_socket,
+                    (&raw mut this.addr.storage).cast::<os_sockaddr>(),
+                    &raw mut this.addr.len,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                    &mut this.deadline,
+                );
+            },
+            this.io_request_data,
+            worker,
+            &this.deadline,
+            cx,
+            ret,
             unsafe {
                 (
                     <S as FromRawSocket>::from_raw_socket(ret as RawSocket),
                     this.addr.as_sock_addr(),
                 )
             }
-        ));
+        );
     }
 }
 

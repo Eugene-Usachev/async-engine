@@ -1,5 +1,5 @@
 use orengine::fs::{DirBuilder, File, OpenOptions};
-use orengine::io::{buffer, AsyncRead, AsyncWrite};
+use orengine::io::{full_buffer, AsyncRead, AsyncWrite};
 use orengine::{asyncify, Executor};
 
 fn main() {
@@ -22,10 +22,12 @@ fn main() {
 
             file.write_all_bytes(b"Hello, world!").await.unwrap(); // non-positioned write
 
-            let mut buf = buffer();
+            let mut buf = full_buffer();
             file.pread_exact(&mut buf.slice_mut(..5), 7).await.unwrap(); // positioned read
 
-            assert_eq!(buf, b"world");
+            buf.set_len(5).unwrap();
+
+            assert_eq!(buf.as_ref(), b"world");
 
             // Now Orengine doesn't support read_dir, but you can use `std::fs::read_dir`
             // in async runtime with `asyncify`.
@@ -34,6 +36,7 @@ fn main() {
                 for entry in res {
                     let entry = entry.unwrap();
                     let path = entry.path();
+
                     println!("{:?}", path); // "./foo/bar/test.txt"
                 }
             })

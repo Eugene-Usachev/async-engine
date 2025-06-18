@@ -1,3 +1,6 @@
+//! This module provides functions for working with CPU cores such as [`get_core_ids`]
+//! and [`set_for_current`].
+
 /// ID of the CPU core.
 pub type CoreId = core_affinity::CoreId;
 

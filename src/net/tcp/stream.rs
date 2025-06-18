@@ -1,7 +1,7 @@
 //! This module contains [`TcpStream`].
 
-use crate::io::shutdown::AsyncShutdown;
 use crate::io::sys::{AsRawSocket, AsSocket, FromRawSocket, IntoRawSocket, RawSocket};
+use crate::io::AsyncShutdown;
 use crate::io::{
     AsyncConnectStream, AsyncPeek, AsyncPollSocket, AsyncRecv, AsyncSend, AsyncSocketClose,
 };
@@ -198,8 +198,8 @@ impl Drop for TcpStream {
 mod tests {
     use crate as orengine;
     use crate::io::{
-        AsyncAccept, AsyncBind, AsyncConnectStream, AsyncPeek, AsyncPollSocket, AsyncRecv,
-        AsyncSend, FixedBuffer, buffer, get_fixed_buffer,
+        buffer, get_fixed_buffer, AsyncAccept, AsyncBind, AsyncConnectStream, AsyncPeek,
+        AsyncPollSocket, AsyncRecv, AsyncSend, FixedBuffer,
     };
     use crate::local_executor;
     use crate::net::{BindConfig, Socket, Stream, TcpListener, TcpStream};

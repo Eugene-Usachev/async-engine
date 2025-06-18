@@ -1,3 +1,5 @@
+//! This module contains the [`FromSockAddr`] trait.
+
 #[cfg(unix)]
 use crate::net::unix::UnixAddr;
 

@@ -1,3 +1,4 @@
+//! This module contains the [`AsyncWaitGroup`] trait.
 use crate::runtime::IsLocal;
 use std::future::Future;
 

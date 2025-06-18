@@ -1,3 +1,4 @@
+//! This module contains test for the [`select`](crate::select) macro.
 use crate as orengine;
 use crate::sync::{AsyncChannel, AsyncReceiver, AsyncSender, Channel, LocalChannel, SendErr};
 use crate::{local_executor, sleep};

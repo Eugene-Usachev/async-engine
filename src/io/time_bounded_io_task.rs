@@ -1,3 +1,4 @@
+//! This module contains the [`TimeBoundedIoTask`] struct that represents a time-bounded I/O task.
 use crate::io::io_request_data::IoRequestDataPtr;
 #[cfg(not(target_os = "linux"))]
 use crate::io::sys::fallback::io_call::IoCall;

@@ -1,6 +1,7 @@
-use crate::BUG_MESSAGE;
+//! This module provides the [`Config`] struct.
 use crate::io::IoWorkerConfig;
 use crate::utils::SpinLock;
+use crate::BUG_MESSAGE;
 use std::mem::discriminant;
 
 /// A shared config of the state of the all runtime.

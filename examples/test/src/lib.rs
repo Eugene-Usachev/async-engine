@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[allow(dead_code)]
 async fn awesome_async_local_fn() -> usize {
-    sleep(Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(1)).await;
 
     42
 }
@@ -32,6 +32,7 @@ mod tests {
         ExecutorPool,
     };
     use std::sync::Arc;
+    use std::time::Duration;
 
     #[orengine::test::test_shared]
     fn test_local_with_macro() {
@@ -41,10 +42,10 @@ mod tests {
 
     #[test]
     fn test_local_without_macro() {
-        run_test_and_block_on_local(async {
+        run_test_and_block_on_local(|| async {
             let res = awesome_async_local_fn().await;
             assert_eq!(res, 42);
-        });
+        }, Some(Duration::from_millis(100))); // Timeouts after 100ms
     }
 
     #[orengine::test::test_shared]
@@ -69,7 +70,7 @@ mod tests {
 
     #[test]
     fn test_test_shared_and_parallel_without_macro() {
-        run_test_and_block_on_shared(async {
+        run_test_and_block_on_shared(|| async {
             let mutex = Arc::new(Mutex::new(0));
             let wg = Arc::new(WaitGroup::new());
 
@@ -86,7 +87,7 @@ mod tests {
 
             wg.wait().await;
             assert_eq!(*mutex.lock().await, 1000);
-        });
+        }, Some(Duration::from_secs(10))); // Timeouts after 10s
     }
 
     #[orengine::test::test_shared]

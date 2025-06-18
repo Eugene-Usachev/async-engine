@@ -1,3 +1,5 @@
+//! This module contains the [`FallbackWorker`] struct that implements the [`IoWorker`]
+//! trait for the fallback implementation of the I/O operations.
 use crate::bug_message::BUG_MESSAGE;
 use crate::io::io_request_data::IoRequestDataPtr;
 use crate::io::sys::fallback::io_call::IoCall;
@@ -13,7 +15,6 @@ use crate::io::time_bounded_io_task::TimeBoundedIoTask;
 use crate::io::worker::IoWorker;
 use crate::io::{IoWorkerConfig, sys};
 use crate::local_executor;
-use crate::runtime::call::Call;
 use crate::utils::OrengineInstant;
 use mio::Interest;
 use socket2::{Domain, Protocol, Type};
@@ -49,7 +50,7 @@ macro_rules! check_deadline_and {
                 // We can't spawn shared task when it is running.
                 // But spawn_task_at_end_of_shared_tasks_queue never shares the provided task.
 
-                unsafe { local_executor().spawn_task_at_end_of_shared_tasks_queue(task) };
+                local_executor().spawn_task_at_end_of_shared_tasks_queue(task);
             }
         }
     };
@@ -254,7 +255,7 @@ impl FallbackWorker {
                 // We can't spawn a shared task when it is running.
                 // But spawn_task_at_end_of_shared_tasks_queue never shares the provided task.
 
-                unsafe { local_executor().spawn_task_at_end_of_shared_tasks_queue(task) };
+                local_executor().spawn_task_at_end_of_shared_tasks_queue(task);
             }
 
             break;
@@ -352,7 +353,7 @@ impl FallbackWorker {
                 // We can't spawn a shared task when it is running.
                 // But spawn_task_at_end_of_shared_tasks_queue never shares the provided task.
 
-                unsafe { local_executor().spawn_task_at_end_of_shared_tasks_queue(task) };
+                local_executor().spawn_task_at_end_of_shared_tasks_queue(task);
             }
 
             break;

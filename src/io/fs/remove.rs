@@ -1,15 +1,16 @@
-use crate as orengine;
+//! This module provides the [`Remove`] io operation.
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
-use crate::io::sys::{OsPath, get_os_path_ptr};
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::sys::{get_os_path_ptr, OsPath};
+use crate::io::worker::{local_worker, IoWorker};
 use crate::utils::unwrap_or_bug_hint;
-use orengine_macros::poll_for_io_request;
+
+use crate::io::macros::poll_for_io_request;
 use std::future::Future;
 use std::io::Result;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-/// `remove` io operation which allows to remove a file from a given path.
+/// `remove` io operation which allows removing a file from a given path.
 #[repr(C)]
 pub struct Remove {
     path: OsPath,
@@ -31,16 +32,19 @@ impl Future for Remove {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        #[allow(unused, reason = "Cannot write proc_macro else to make it readable.")]
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().remove_file(
-                get_os_path_ptr(&this.path),
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().remove_file(
+                    get_os_path_ptr(&this.path),
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            _ret,
             ()
-        ));
+        );
     }
 }
 

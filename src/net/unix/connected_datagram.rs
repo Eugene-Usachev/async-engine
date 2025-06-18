@@ -1,3 +1,4 @@
+//! This module contains [`UnixConnectedDatagram`].
 use crate::io::sys::{AsRawSocket, AsSocket, FromRawSocket, IntoRawSocket, RawSocket};
 use crate::io::{
     AsyncPeek, AsyncPollSocket, AsyncRecv, AsyncSend, AsyncShutdown, AsyncSocketClose,
@@ -12,7 +13,7 @@ use std::mem::ManuallyDrop;
 ///
 /// After creating a `UnixConnectedSocket` by
 /// [`connecting`](crate::io::AsyncConnectDatagram::connect) it to a socket address,
-/// data can be [sent](AsyncSend) and [received](AsyncRecv) from other socket address.
+/// data can be [sent](AsyncSend) and [received](AsyncRecv) from another socket address.
 ///
 /// Although UNIX is a connectionless protocol, this implementation provides an interface
 /// to set an address where data should be sent and received from.
@@ -137,7 +138,7 @@ impl Drop for UnixConnectedDatagram {
 
 #[cfg(test)]
 mod tests {
-    use crate::io::{AsyncBind, AsyncConnectDatagram, get_fixed_buffer};
+    use crate::io::{get_fixed_buffer, AsyncBind, AsyncConnectDatagram};
     use crate::net::unix::UnixDatagram;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;

@@ -1,5 +1,10 @@
+//! This module provides the [`create_waker`] and the [`VTABLE`] for creating the [`Waker`] in
+//! the `orengine` runtime.
+
 use crate::runtime::local_executor;
 use crate::runtime::task::Task;
+use crate::utils::unreachable_hint;
+use std::mem::ManuallyDrop;
 use std::task::{RawWaker, RawWakerVTable, Waker};
 
 /// This is really unsafe.
@@ -55,13 +60,17 @@ unsafe fn wake_by_ref(data_ptr: *const ()) {
 #[inline]
 unsafe fn drop(_data_ptr: *const ()) {
     // Executor doesn't drop context. So, if you want to update this function, you should update it in `Executor` too.
+    unreachable_hint();
 }
 
 /// [`RawWakerVTable`] for `orengine` runtime only!
 pub const VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
 
-/// Creates a [`Waker`] with [`orengine::VTABLE`](VTABLE).
+/// Creates a `ManuallyDrop(`[`Waker`]`)` with [`orengine::VTABLE`](VTABLE).
+///
+/// Returned `Waker` should never be dropped.
+/// Because `Orengine's` `Waker::drop` does nothing, but virtual call is not free.
 #[inline]
-pub fn create_waker(task_ptr: *mut Task) -> Waker {
-    unsafe { Waker::from_raw(RawWaker::new(task_ptr as *const (), &VTABLE)) }
+pub fn create_waker(task_ptr: *mut Task) -> ManuallyDrop<Waker> {
+    ManuallyDrop::new(unsafe { Waker::from_raw(RawWaker::new(task_ptr as *const (), &VTABLE)) })
 }

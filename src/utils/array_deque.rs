@@ -1,3 +1,4 @@
+//! This module contains the [`ArrayDeque`].
 use crate::utils::assert_hint;
 use std::mem;
 use std::mem::{ManuallyDrop, MaybeUninit};

@@ -1,3 +1,4 @@
+//! This module contains the [`PairedWithLock`] wrapper.
 use crate::sync::{AsyncMutex, AsyncMutexGuard};
 use std::cell::UnsafeCell;
 use std::marker::PhantomData;

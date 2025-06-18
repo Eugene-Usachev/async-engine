@@ -1,8 +1,17 @@
-pub mod async_trait;
-pub mod local;
-pub mod naive_shared;
-pub mod smart_shared;
-pub mod subscribable_trait;
+//! This module contains an async mutual exclusion primitive (e.g. [`std::sync::Mutex`]).
+//!
+//! You can use [`AsyncMutex`] as a generic mutual exclusion primitive.
+//!
+//! In `local` context use [`LocalMutex`].
+//! In `shared` context use [`Mutex`] or [`NaiveMutex`].
+//!
+//! It also contains the [`AsyncSubscribableMutex`] trait that allows to implement
+//! [`AsyncCondVar`](crate::sync::AsyncCondVar).
+mod async_trait;
+mod local;
+mod naive_shared;
+mod smart_shared;
+mod subscribable_trait;
 
 pub use async_trait::*;
 pub use local::*;

@@ -1,3 +1,9 @@
+//! This module contains the [`IoWorker`] struct and methods to use it such as
+//!
+//! * [`local_worker`]: Returns the reference to the thread-local worker.
+//! * [`init_local_worker`]: Initializes the thread-local worker.
+//! * [`get_local_worker_ref`]: Returns the mutable reference to the option wrapper on
+//!   the thread-local worker.
 use crate::BUG_MESSAGE;
 use crate::io::config::IoWorkerConfig;
 use crate::io::io_request_data::IoRequestDataPtr;

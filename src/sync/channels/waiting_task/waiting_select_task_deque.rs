@@ -1,3 +1,5 @@
+//! This module contains the [`WaitingSelectTaskDequePool`], [`WaitingTaskSharedDequeGuard`]
+//! and [`WaitingTaskLocalDequeGuard`].
 use crate::local_executor;
 use crate::runtime::waiting_task::WaitingTask;
 use crate::sync::channels::state::CallStatePtr;

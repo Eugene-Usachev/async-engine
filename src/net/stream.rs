@@ -1,7 +1,9 @@
-use crate::io::{AsyncConnectStream, AsyncPeek, AsyncRecv, AsyncSend, AsyncShutdown, sys};
-use crate::net::Socket;
+//! This module provides the [`Stream`] trait, which defines common operations for bidirectional
+//! communication streams, such as TCP connections or similar.
+use crate::io::{sys, AsyncConnectStream, AsyncPeek, AsyncRecv, AsyncSend, AsyncShutdown};
 use crate::net::addr::FromSockAddr;
 use crate::net::new_unix_unsupported_error;
+use crate::net::Socket;
 use std::io;
 use std::io::Error;
 use std::time::Duration;
@@ -11,7 +13,7 @@ use std::time::Duration;
 ///
 /// It extends the [`Socket`] trait and integrates asynchronous methods for sending, receiving,
 /// and peeking data, as well as shutting down the stream. Additionally, it provides methods
-/// for controlling socket options like linger and `TCP_NODELAY`, and querying the peer address.
+/// for controlling socket options like `linger` and `TCP_NODELAY`, and querying the peer address.
 ///
 /// # Implemented Traits
 ///
@@ -93,7 +95,7 @@ pub trait Stream:
     ///
     /// # Unix
     ///
-    /// UNIX sockets do not support linger, therefore this method always returns `Ok(None)`
+    /// UNIX sockets do not support `linger`; therefore, this method always returns `Ok(None)`
     /// for those sockets.
     ///
     /// # Example
@@ -126,7 +128,7 @@ pub trait Stream:
     ///
     /// # Unix
     ///
-    /// UNIX sockets do not support `TCP_NODELAY`, therefore this method is empty for those sockets.
+    /// UNIX sockets do not support `TCP_NODELAY`; therefore, this method is empty for those sockets.
     ///
     /// # Example
     ///
@@ -155,7 +157,7 @@ pub trait Stream:
     ///
     /// # Unix
     ///
-    /// UNIX sockets do not support `TCP_NODELAY`, therefore this method always
+    /// UNIX sockets do not support `TCP_NODELAY`; therefore, this method always
     /// returns `Ok(false)` for those sockets.
     ///
     /// # Example

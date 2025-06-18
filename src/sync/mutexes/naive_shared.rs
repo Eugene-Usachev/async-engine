@@ -1,3 +1,7 @@
+//! This module provides an asynchronous mutex (e.g. [`std::sync::Mutex`]) type [`NaiveMutex`].
+//!
+//! It allows for asynchronous locking and unlocking, and provides
+//! ownership-based locking through [`NaiveMutexGuard`].
 use std::cell::UnsafeCell;
 use std::hint::spin_loop;
 use std::mem;
@@ -34,13 +38,13 @@ impl<'mutex, T: ?Sized> NaiveMutexGuard<'mutex, T> {
     /// Returns a pointer to the [`AtomicBool`]
     /// associated with the original [`NaiveMutex`] to
     /// [`call`](crate::Executor::invoke_call)
-    /// [`ReleaseAtomicBool`](crate::runtime::call::Call::ReleaseAtomicBool).
+    /// [`ReleaseAtomicBool`](crate::runtime::Call::ReleaseAtomicBool).
     ///
     /// # Safety
     ///
     /// The mutex is locked now and will be unlocked by calling [`NaiveMutex::unlock`] or
     /// [calling](crate::Executor::invoke_call)
-    /// [`ReleaseAtomicBool`](crate::runtime::call::Call::ReleaseAtomicBool).
+    /// [`ReleaseAtomicBool`](crate::runtime::Call::ReleaseAtomicBool).
     #[inline]
     pub unsafe fn leak_to_atomic(self) -> NonNull<AtomicBool> {
         debug_assert!(self.mutex.is_locked.load(Acquire));

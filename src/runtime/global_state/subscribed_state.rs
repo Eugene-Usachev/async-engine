@@ -1,17 +1,19 @@
-use crate::BUG_MESSAGE;
+//! This module provides [`SubscribedState`].
+use crate::runtime::global_state::lock_and_get_global_state;
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::runtime::interaction_between_executors::{
     Interactor, SharedTaskListForSendTo, SyncBatchOptimizedTaskQueue,
 };
-use crate::runtime::{ExecutorSharedTaskList, lock_and_get_global_state};
+use crate::runtime::ExecutorSharedTaskList;
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::utils::vec_map::VecMap;
 use crate::utils::{unlikely, unwrap_or_bug_hint};
+use crate::BUG_MESSAGE;
 use crossbeam::utils::CachePadded;
 use std::cell::UnsafeCell;
-use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Release};
+use std::sync::Arc;
 
 /// Inner value of [`GlobalState`](crate::runtime::global_state::GlobalState).
 struct Inner {
@@ -129,7 +131,7 @@ impl SubscribedState {
             inner.processed_version = current_version;
             let shared_state = lock_and_get_global_state();
             let found = shared_state
-                .alive_executors()
+                .live_executors()
                 .iter()
                 .any(|(alive_executor_id, _)| alive_executor_id == executor_id);
 
@@ -151,7 +153,7 @@ impl SubscribedState {
                 inner.executors_task_lists.clear();
 
                 shared_state
-                    .alive_executors()
+                    .live_executors()
                     .iter()
                     .for_each(|(id, state)| {
                         inner
@@ -162,7 +164,7 @@ impl SubscribedState {
                 interactor.shared_task_lists_mut().clear();
 
                 shared_state
-                    .alive_executors()
+                    .live_executors()
                     .iter()
                     .for_each(|(id, state)| {
                         interactor
@@ -174,7 +176,7 @@ impl SubscribedState {
         });
     }
 
-    /// Returns `tasks_lists` of all alive executors with work-sharing.
+    /// Returns `tasks_lists` of all _live_ executors with work-sharing.
     ///
     /// # Safety
     ///

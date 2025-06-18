@@ -1,3 +1,5 @@
+//! This module provides a function to [`shuffle`] a slice.
+
 use std::cell::Cell;
 use std::num::Wrapping;
 

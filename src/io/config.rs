@@ -1,3 +1,4 @@
+//! This module contains [`IoWorkerConfig`].
 use crate::io::sys::{FallbackConfig, IOUringConfig};
 
 /// Config for `io worker`.

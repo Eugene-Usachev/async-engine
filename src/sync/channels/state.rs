@@ -1,3 +1,8 @@
+//! This module contains the [`CallState`] and [`CallStatePtr`].
+//!
+//! It is public only for implementation the [`select`](crate::select).
+//! If you don't want to write your own `select` or understand how does `Orengine` works,
+//! you don't need to read it.
 use std::ops::Deref;
 use std::ptr::NonNull;
 

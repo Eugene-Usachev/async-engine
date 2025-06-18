@@ -1,6 +1,6 @@
 //! The `fs` module provides asynchronous file system operations.
 //!
-//! This module includes tools for working with files, directories,
+//! This module includes tools for working with [`files`](File), directories,
 //! and various file system utilities.
 //! It offers abstractions for opening files with options, creating directories, and performing
 //! common file operations in a non-blocking, async manner.

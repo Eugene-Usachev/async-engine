@@ -1,4 +1,6 @@
-/// `VecMap` is a classic map, that uses usize as keys, and it assumes that all the keys
+//! This module provides the [`VecMap`].
+
+/// `VecMap` is a classic map that uses usize as keys, and it assumes that all the keys
 /// are located extremely close to each other. It looks like a vector with "holes".
 ///
 /// As opposed to `Slab` it doesn't create keys.

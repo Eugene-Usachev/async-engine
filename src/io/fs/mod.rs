@@ -1,45 +1,47 @@
 //! This module provides asynchronous file system operations.
 //!
-//! It is focused on low-level interactions with the file system such as file and directory
-//! creation, removal, reading, writing, and syncing data to disk.
+//! It is focused on low-level interactions with the file system such as [`file opening`](open)
+//! and [`directory creation`](create_dir), [`removal`](remove), [`reading`](read),
+//! [`writing`](mod@write), [`syncing metadata to disk`](sync_all)
+//! and [`syncing data to disk`](sync_data).
 
 /// Contains tools for creating directories.
-pub mod create_dir;
+mod create_dir;
 
 /// Contains tools for opening files.
-pub mod open;
+mod open;
 
 /// Contains tools for reading from files.
-pub mod read;
+mod read;
 
 /// Contains tools for removing files.
-pub mod remove;
+mod remove;
 
 /// Contains tools for removing directories.
-pub mod remove_dir;
+mod remove_dir;
 
 /// Contains tools for renaming files or directories.
-pub mod rename;
+mod rename;
 
 /// Contains tools for writing to files.
-pub mod write;
+mod write;
 
 /// Contains tools for file allocation operations.
-pub mod fallocate;
+mod fallocate;
 
 /// Contains tools for syncing all file metadata to disk.
-pub mod sync_all;
+mod sync_all;
 
 /// Contains tools for syncing file data to disk.
-pub mod sync_data;
+mod sync_data;
 
-pub use create_dir::CreateDir;
-pub use fallocate::{AsyncFallocate, Fallocate};
-pub use open::Open;
-pub use read::AsyncRead;
-pub use remove::Remove;
-pub use remove_dir::RemoveDir;
-pub use rename::Rename;
-pub use sync_all::{AsyncSyncAll, SyncAll};
-pub use sync_data::{AsyncSyncData, SyncData};
-pub use write::AsyncWrite;
+pub use create_dir::*;
+pub use fallocate::*;
+pub use open::*;
+pub use read::*;
+pub use remove::*;
+pub use remove_dir::*;
+pub use rename::*;
+pub use sync_all::*;
+pub use sync_data::*;
+pub use write::*;

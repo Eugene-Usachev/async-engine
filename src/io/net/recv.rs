@@ -1,3 +1,5 @@
+//! This module contains the [`RecvBytes`], [`RecvFixed`], [`RecvBytesWithDeadline`]
+//! and [`RecvFixedWithDeadline`] IO operations and the [`AsyncRecv`] trait.
 use std::future::Future;
 use std::io::Result;
 use std::marker::PhantomData;
@@ -5,16 +7,14 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
-
-use crate as orengine;
-use crate::io::FixedBufferMut;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
+use crate::io::macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use crate::io::sys::{AsRawSocket, RawSocket};
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::worker::{local_worker, IoWorker};
+use crate::io::FixedBufferMut;
 use crate::local_executor;
 use crate::net::Socket;
-use crate::utils::{OrengineInstant, unwrap_or_bug_hint};
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant};
 
 /// `recv` io operation.
 #[repr(C)]
@@ -44,17 +44,21 @@ impl Future for RecvBytes<'_> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().recv(
-                this.raw_socket,
-                this.buf.as_mut_ptr(),
-                this.buf.len() as u32,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().recv(
+                    this.raw_socket,
+                    this.buf.as_mut_ptr(),
+                    this.buf.len() as u32,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret
-        ));
+        );
     }
 }
 
@@ -94,18 +98,22 @@ impl Future for RecvFixed<'_> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().recv_fixed(
-                this.raw_socket,
-                this.ptr,
-                this.len,
-                this.fixed_index,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().recv_fixed(
+                    this.raw_socket,
+                    this.ptr,
+                    this.len,
+                    this.fixed_index,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret as u32
-        ));
+        );
     }
 }
 
@@ -142,18 +150,24 @@ impl Future for RecvBytesWithDeadline<'_> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
         let worker = local_worker();
-        let ret;
 
-        poll_for_time_bounded_io_request!((
-            worker.recv_with_deadline(
-                this.raw_socket,
-                this.buf.as_mut_ptr(),
-                this.buf.len() as u32,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
-                &mut this.deadline
-            ),
+        poll_for_time_bounded_io_request!(
+            {
+                worker.recv_with_deadline(
+                    this.raw_socket,
+                    this.buf.as_mut_ptr(),
+                    this.buf.len() as u32,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                    &mut this.deadline,
+                );
+            },
+            this.io_request_data,
+            worker,
+            &this.deadline,
+            cx,
+            ret,
             ret
-        ));
+        );
     }
 }
 
@@ -202,26 +216,32 @@ impl Future for RecvFixedWithDeadline<'_> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
         let worker = local_worker();
-        let ret;
 
-        poll_for_time_bounded_io_request!((
-            worker.recv_fixed_with_deadline(
-                this.raw_socket,
-                this.ptr,
-                this.len,
-                this.fixed_index,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
-                &mut this.deadline
-            ),
+        poll_for_time_bounded_io_request!(
+            {
+                worker.recv_fixed_with_deadline(
+                    this.raw_socket,
+                    this.ptr,
+                    this.len,
+                    this.fixed_index,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                    &mut this.deadline,
+                );
+            },
+            this.io_request_data,
+            worker,
+            &this.deadline,
+            cx,
+            ret,
             ret as u32
-        ));
+        );
     }
 }
 
 unsafe impl Send for RecvFixedWithDeadline<'_> {}
 
 /// The `AsyncRecv` trait provides asynchronous methods for receiving at the incoming data
-/// with consuming it.
+/// by consuming it.
 ///
 /// It offers options to recv with deadlines, timeouts, and to ensure
 /// reading an exact number of bytes.
@@ -239,12 +259,12 @@ unsafe impl Send for RecvFixedWithDeadline<'_> {}
 /// stream.poll_recv().await?;
 ///
 /// let mut buf = full_buffer();
-/// let bytes_received = stream.recv(&mut buf).await?; // Recv at the incoming data with consuming it
+/// let bytes_received = stream.recv(&mut buf).await?; // Recv at the incoming data by consuming it
 /// # Ok(())
 /// # }
 /// ```
 pub trait AsyncRecv: Socket {
-    /// Asynchronously receives into the provided byte slice the incoming data with consuming it,
+    /// Asynchronously receives into the provided byte slice the incoming data by consuming it,
     /// filling the buffer with available data. Returns the number of bytes received.
     ///
     /// # Difference between `recv` and `recv_bytes`
@@ -273,7 +293,7 @@ pub trait AsyncRecv: Socket {
         RecvBytes::new(AsRawSocket::as_raw_socket(self), buf)
     }
 
-    /// Asynchronously receives into the provided byte slice the incoming data with consuming it,
+    /// Asynchronously receives into the provided byte slice the incoming data by consuming it,
     /// filling the buffer with available data. Returns the number of bytes received.
     ///
     /// # Difference between `recv` and `recv_bytes`
@@ -318,7 +338,7 @@ pub trait AsyncRecv: Socket {
         }
     }
 
-    /// Asynchronously receives into the provided byte slice the incoming data with consuming it,
+    /// Asynchronously receives into the provided byte slice the incoming data by consuming it,
     /// with a specified deadline. Returns the number of bytes received.
     ///
     /// If the deadline is exceeded, the method will return an error with
@@ -356,7 +376,7 @@ pub trait AsyncRecv: Socket {
         RecvBytesWithDeadline::new(AsRawSocket::as_raw_socket(self), buf, deadline.into())
     }
 
-    /// Asynchronously receives into the provided byte slice the incoming data with consuming it,
+    /// Asynchronously receives into the provided byte slice the incoming data by consuming it,
     /// with a specified deadline. Returns the number of bytes received.
     ///
     /// If the deadline is exceeded, the method will return an error with
@@ -417,7 +437,7 @@ pub trait AsyncRecv: Socket {
         }
     }
 
-    /// Asynchronously receives into the provided byte slice the incoming data with consuming it,
+    /// Asynchronously receives into the provided byte slice the incoming data by consuming it
     /// with a specified timeout. Returns the number of bytes received.
     ///
     /// If the deadline is exceeded, the method will return an error with
@@ -458,7 +478,7 @@ pub trait AsyncRecv: Socket {
         )
     }
 
-    /// Asynchronously receives into the provided byte slice the incoming data with consuming it,
+    /// Asynchronously receives into the provided byte slice the incoming data by consuming it
     /// with a specified timeout. Returns the number of bytes received.
     ///
     /// If the deadline is exceeded, the method will return an error with
@@ -499,12 +519,12 @@ pub trait AsyncRecv: Socket {
         )
     }
 
-    /// Asynchronously receives into the provided byte slice the incoming data with consuming it,
-    /// until the buffer is completely filled with exactly the requested number of bytes.
+    /// Asynchronously receives into the provided byte slice the incoming data by consuming it,
+    /// until the buffer is filled with exactly the requested number of bytes.
     ///
     /// # Difference between `recv_exact` and `recv_bytes_exact`
     ///
-    /// Use [`recv_exact`](Self::recv_exact) if it is possible,
+    /// Use [`recv_exact`](Self::recv_exact) if it is possible.
     ///
     /// # Example
     ///
@@ -532,12 +552,12 @@ pub trait AsyncRecv: Socket {
         Ok(())
     }
 
-    /// Asynchronously receives into the provided byte slice the incoming data with consuming it,
-    /// until the buffer is completely filled with exactly the requested number of bytes.
+    /// Asynchronously receives into the provided byte slice the incoming data by consuming it,
+    /// until the buffer is filled with exactly the requested number of bytes.
     ///
     /// # Difference between `recv_exact` and `recv_bytes_exact`
     ///
-    /// Use [`recv_exact`](Self::recv_exact) if it is possible,
+    /// Use [`recv_exact`](Self::recv_exact) if it is possible.
     ///
     /// # Example
     ///
@@ -585,8 +605,8 @@ pub trait AsyncRecv: Socket {
         Ok(())
     }
 
-    /// Asynchronously receives into the provided byte slice the incoming data with consuming it,
-    /// with a deadline until the buffer is completely filled with the exact number of bytes.
+    /// Asynchronously receives into the provided byte slice the incoming data by consuming it,
+    /// with a deadline until the buffer is filled with the exact number of bytes.
     ///
     /// If the deadline is exceeded, the method will return an error with
     /// kind [`ErrorKind::TimedOut`](std::io::ErrorKind::TimedOut).
@@ -632,8 +652,8 @@ pub trait AsyncRecv: Socket {
         Ok(())
     }
 
-    /// Asynchronously receives into the provided byte slice the incoming data with consuming it,
-    /// with a deadline until the buffer is completely filled with the exact number of bytes.
+    /// Asynchronously receives into the provided byte slice the incoming data by consuming it,
+    /// with a deadline until the buffer is filled with the exact number of bytes.
     ///
     /// If the deadline is exceeded, the method will return an error with
     /// kind [`ErrorKind::TimedOut`](std::io::ErrorKind::TimedOut).
@@ -701,8 +721,8 @@ pub trait AsyncRecv: Socket {
         Ok(())
     }
 
-    /// Asynchronously receives into the provided byte slice the incoming data with consuming it,
-    /// with a timeout until the buffer is completely filled with the exact number of bytes.
+    /// Asynchronously receives into the provided byte slice the incoming data by consuming it,
+    /// with a timeout until the buffer is filled with the exact number of bytes.
     ///
     /// If the deadline is exceeded, the method will return an error with
     /// kind [`ErrorKind::TimedOut`](std::io::ErrorKind::TimedOut).
@@ -743,8 +763,8 @@ pub trait AsyncRecv: Socket {
         )
     }
 
-    /// Asynchronously receives into the provided byte slice the incoming data with consuming it,
-    /// with a timeout until the buffer is completely filled with the exact number of bytes.
+    /// Asynchronously receives into the provided byte slice the incoming data by consuming it,
+    /// with a timeout until the buffer is filled with the exact number of bytes.
     ///
     /// If the deadline is exceeded, the method will return an error with
     /// kind [`ErrorKind::TimedOut`](std::io::ErrorKind::TimedOut).

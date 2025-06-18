@@ -1,6 +1,8 @@
+//! This module provides shortcuts for common file system operations: [`open_file`], [`create_dir`],
+//! [`create_dir_all`], [`remove_dir`], [`remove_file`] and [`rename`].
 use crate::fs::{DirBuilder, File, OpenOptions};
-use crate::io::remove_dir::RemoveDir;
 use crate::io::sys::get_os_path;
+use crate::io::RemoveDir;
 use std::io::Result;
 use std::path::Path;
 
@@ -53,7 +55,7 @@ pub async fn open_file<P: AsRef<Path> + Send>(path: P, open_options: &OpenOption
 /// # Errors
 ///
 /// This function will return an `Err` if the directory cannot be created due to I/O errors
-/// (e.g., permission denied, path does not exist).
+/// (e.g., permission denied, a path does not exist).
 #[inline]
 pub async fn create_dir<P: AsRef<Path> + Send>(path: P) -> Result<()> {
     DirBuilder::new().create(path).await
@@ -177,7 +179,7 @@ where
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::fs::test_helper::{TEST_DIR_PATH, create_test_dir_if_not_exist, is_exists};
+    use crate::fs::test_helper::{create_test_dir_if_not_exist, is_exists, TEST_DIR_PATH};
     use std::path::PathBuf;
 
     #[orengine::test::test_local]

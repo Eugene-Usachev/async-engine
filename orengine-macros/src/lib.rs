@@ -9,60 +9,11 @@
 
 extern crate proc_macro;
 mod ident_helper;
-mod poll_for_io_request;
 mod select;
 mod test;
 
-use crate::poll_for_io_request::{poll_for_io_request_, poll_for_time_bounded_io_request_};
 use crate::test::{generate_test, parse_args_to_timeout};
 use proc_macro::TokenStream;
-
-/// Generates code for [`Future::poll`](std::future::Future::poll).
-///
-/// # Must have above
-///
-/// * `this` with `io_request_data` (`Option<IoRequestData>`) fields;
-///
-/// * `cx` with `waker` method that returns ([`Waker`](std::task::Waker)) which contains
-///   `*const orengine::runtime::Task` in `data` field;
-///
-/// * declared variable `ret` (`usize`) which can be used in `ret_statement`.
-///
-/// # Arguments
-///
-/// * `do_request` - the request code
-/// * `ret_statement` - the return statement which can use `ret`(`usize`) variable.
-#[proc_macro]
-pub fn poll_for_io_request(input: TokenStream) -> TokenStream {
-    poll_for_io_request_(input)
-}
-
-/// Generates code for [`Future::poll`](std::future::Future::poll).
-///
-/// # The difference between `poll_for_io_request` and `poll_for_time_bounded_io_request`
-///
-/// `poll_for_time_bounded_io_request` deregisters the time bounded task after execution.
-///
-/// # Must have above
-///
-/// * `this` with `io_request_data` (`Option<IoRequestData>`) and `deadline`
-///   ([`Instant`](std::time::Instant)) fields;
-///
-/// * `cx` with `waker` method that returns ([`Waker`](std::task::Waker)) which contains
-///   `*const orengine::runtime::Task` in `data` field;
-///
-/// * declared variable `ret` (`usize`) which can be used in `ret_statement`;
-///
-/// * `worker` from `local_worker()`.
-///
-/// # Arguments
-///
-/// * `do_request` - the request code
-/// * `ret_statement` - the return statement which can use `ret`(`usize`) variable.
-#[proc_macro]
-pub fn poll_for_time_bounded_io_request(input: TokenStream) -> TokenStream {
-    poll_for_time_bounded_io_request_(input)
-}
 
 /// Generates a test function by running an `Executor` with a `local` task.
 ///
@@ -226,7 +177,7 @@ pub fn test_shared(args: TokenStream, input: TokenStream) -> TokenStream {
 ///   until one of the `recv` or `send` operations can complete.
 ///   It can be called only in `async` blocks.
 /// - **Non-Blocking Select**: If a default arm is provided, the `select!` macro will first check
-///   if any of the `recv` or `send` operations can be complete immediately. If none are ready,
+///   if any of the `recv` or `send` operations can be complete immediately. If none is ready,
 ///   the default arm's expression is executed.
 ///   The `select!` macro will not block.
 ///   Therefore, it can be called in `async` and non `async` blocks.

@@ -1,5 +1,6 @@
-use crate::io::create_dir::CreateDir;
+//! A builder used to create directories in various manners.
 use crate::io::sys::get_os_path;
+use crate::io::CreateDir;
 use crate::utils::unlikely;
 use smallvec::SmallVec;
 use std::io;
@@ -202,7 +203,7 @@ impl Default for DirBuilder {
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::fs::test_helper::{TEST_DIR_PATH, create_test_dir_if_not_exist, is_exists};
+    use crate::fs::test_helper::{create_test_dir_if_not_exist, is_exists, TEST_DIR_PATH};
     use std::path::PathBuf;
 
     #[test]

@@ -1,3 +1,4 @@
+//! This module provides the [`SyncBatchOptimizedTaskQueue`].
 use crate::runtime::Task;
 use crate::utils::never_wait_lock::NeverWaitLock;
 use std::collections::VecDeque;

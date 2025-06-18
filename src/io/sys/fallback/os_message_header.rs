@@ -1,3 +1,5 @@
+//! This module provides types [`MessageSendHeader`] and [`MessageRecvHeader`] based on
+//! an OS message header.
 use socket2::SockAddr;
 use std::io::{IoSlice, IoSliceMut};
 use std::ptr;

@@ -1,3 +1,4 @@
+//! This module defines the fallback poller implementation based on the `mio`.
 use crate::io::io_request_data::IoRequestDataPtr;
 use crate::io::sys::fallback::io_call::IoCall;
 use crate::io::sys::{FromRawSocket, RawSocket};
@@ -32,6 +33,7 @@ impl MioPoller {
     ) -> *mut (IoCall, IoRequestDataPtr) {
         if let Some(slot) = self.request_slots.pop() {
             unsafe { ptr::write(slot, request) };
+
             slot
         } else {
             Box::into_raw(Box::new(request))
@@ -50,7 +52,7 @@ impl MioPoller {
 
     /// Registers a new interest (read/write) for a given socket and associates it with a payload.
     ///
-    /// Returns a slot pointer that is used to deregister.
+    /// Returns a slot pointer used to deregister.
     pub(crate) fn register(
         &mut self,
         interest: Interest,

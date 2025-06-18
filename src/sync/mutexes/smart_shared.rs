@@ -1,4 +1,5 @@
 //! This module provides an asynchronous mutex (e.g. [`std::sync::Mutex`]) type [`Mutex`].
+//!
 //! It allows for asynchronous locking and unlocking, and provides
 //! ownership-based locking through [`MutexGuard`].
 use std::cell::UnsafeCell;
@@ -14,12 +15,12 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::task::{Context, Poll};
 
 use crate::panic_if_local_in_future;
-use crate::runtime::call::Call;
-use crate::runtime::{IsLocal, Task, local_executor};
+use crate::runtime::Call;
+use crate::runtime::{local_executor, IsLocal, Task};
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncMutex, AsyncMutexGuard, Unlock};
-use crate::utils::{Backoff, likely};
-use crate::utils::{PairedWithLock, SyncTaskListFromPool, acquire_sync_task_list_from_pool};
+use crate::utils::{acquire_sync_task_list_from_pool, PairedWithLock, SyncTaskListFromPool};
+use crate::utils::{likely, Backoff};
 
 /// An RAII implementation of a "scoped lock" of a mutex. When this structure is
 /// dropped (falls out of scope), the lock will be unlocked.

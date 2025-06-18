@@ -1,3 +1,8 @@
+//! This module contains the [`TaskInSelect`] and [`TaskInSelectBranch`].
+//!
+//! It is public only for implementation the [`select`](crate::select).
+//! If you don't want to write your own `select` or understand how does `Orengine` works,
+//! you don't need to read it.
 /// This module provides a mechanism for managing tasks in a select context.
 ///
 /// It defines the [`TaskInSelect`] struct, which represents a task that can be acquired
@@ -7,13 +12,14 @@
 use crate::local_executor;
 use crate::runtime::{Task, TaskWithDeadline};
 use crate::sync::channels::state::CallStatePtr;
-use crate::utils::{Backoff, unlikely};
 use crate::utils::{likely, unreachable_hint};
+use crate::utils::{unlikely, Backoff};
 use std::cell::UnsafeCell;
 use std::ptr;
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst};
-use std::sync::atomic::{AtomicUsize, fence};
+use std::sync::atomic::{fence, AtomicUsize};
+
 
 /// It means that [`TaskInSelect`] is not acquired.
 const NOT_ACQUIRED: usize = 0;

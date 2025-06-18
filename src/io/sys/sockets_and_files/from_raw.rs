@@ -1,3 +1,6 @@
+//! This module contains [`FromRawFile`] and [`FromRawSocket`] traits to use
+//! `files` and `sockets` on any OS.
+
 use crate::io::sys::{RawFile, RawSocket};
 
 /// `FromRawSocket` is a synonym for `FromRawFd` (`std::os::fd::FromRawFd`) on `unix` or for

@@ -1,9 +1,10 @@
-use crate as orengine;
+//! This module provides the [`SyncData`] io operation.
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::{AsRawFile, RawFile};
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::worker::{local_worker, IoWorker};
 use crate::utils::unwrap_or_bug_hint;
-use orengine_macros::poll_for_io_request;
+
+use crate::io::macros::poll_for_io_request;
 use std::future::Future;
 use std::io::Result;
 use std::pin::Pin;
@@ -27,19 +28,23 @@ impl SyncData {
 }
 
 impl Future for SyncData {
-    type Output = Result<usize>;
+    type Output = Result<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = unsafe { self.get_unchecked_mut() };
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().sync_data(
-                this.raw_file,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
-            ret
-        ));
+        poll_for_io_request!(
+            {
+                local_worker().sync_data(
+                    this.raw_file,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            _ret,
+            ()
+        );
     }
 }
 
@@ -54,7 +59,7 @@ pub trait AsyncSyncData: AsRawFile {
     /// This function is similar to [`sync_all`](crate::io::AsyncSyncAll::sync_all),
     /// except that it might not synchronize file metadata to the filesystem.
     ///
-    /// This is intended for use cases that must synchronize content, but don't
+    /// This is intended for use cases that must synchronize content but don't
     /// need the metadata on disk. The goal of this method is to reduce disk operations.
     ///
     /// Note that some platforms may simply implement
@@ -79,7 +84,7 @@ pub trait AsyncSyncData: AsRawFile {
     /// # }
     /// ```
     #[inline]
-    fn sync_data(&self) -> impl Future<Output = Result<usize>> {
+    fn sync_data(&self) -> impl Future<Output=Result<()>> {
         SyncData::new(self.as_raw_file())
     }
 }

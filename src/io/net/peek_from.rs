@@ -1,19 +1,19 @@
+//! This module contains the [`PeekFrom`] and [`PeekFromWithDeadline`] IO operations
+//! and the [`AsyncPeekFrom`] trait.
 use std::future::Future;
 use std::io::{IoSliceMut, Result};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use socket2::SockAddr;
 
-use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
+use crate::io::macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use crate::io::sys::{AsRawSocket, MessageRecvHeader, RawSocket};
 use crate::io::worker::{local_worker, IoWorker};
 use crate::io::FixedBufferMut;
-use crate::net::addr::FromSockAddr;
-use crate::net::Socket;
+use crate::net::{FromSockAddr, Socket};
 use crate::utils::{unwrap_or_bug_hint, OrengineInstant};
 use crate::{local_executor, BUG_MESSAGE};
 
@@ -47,19 +47,24 @@ impl Future for PeekFrom<'_> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().peek_from(
-                this.raw_socket,
-                &mut this.msg_header,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
             {
-                unsafe { this.sock_addr.set_length(this.msg_header.get_addr_len()) };
+                local_worker().peek_from(
+                    this.raw_socket,
+                    &mut this.msg_header,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
+            unsafe {
+                this.sock_addr.set_length(this.msg_header.get_addr_len());
+
                 ret
             }
-        ));
+        );
     }
 }
 
@@ -103,20 +108,27 @@ impl Future for PeekFromWithDeadline<'_> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
         let worker = local_worker();
-        let ret;
 
-        poll_for_time_bounded_io_request!((
-            worker.peek_from_with_deadline(
-                this.raw_socket,
-                &mut this.msg_header,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
-                &mut this.deadline
-            ),
+        poll_for_time_bounded_io_request!(
             {
-                unsafe { this.sock_addr.set_length(this.msg_header.get_addr_len()) };
+                worker.peek_from_with_deadline(
+                    this.raw_socket,
+                    &mut this.msg_header,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                    &mut this.deadline,
+                );
+            },
+            this.io_request_data,
+            worker,
+            &this.deadline,
+            cx,
+            ret,
+            unsafe {
+                this.sock_addr.set_length(this.msg_header.get_addr_len());
+
                 ret
             }
-        ));
+        );
     }
 }
 

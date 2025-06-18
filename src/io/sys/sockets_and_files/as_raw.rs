@@ -1,3 +1,6 @@
+//! This module contains [`AsRawFile`] and [`RawSocket`] traits to use
+//! `files` and `sockets` on any OS.
+
 /// `RawSocket` is a synonym for `RawFd` (`std::os::fd::RawFd`) on `unix`
 /// or [`RawSocket`](std::os::windows::io::RawSocket) on `windows`.
 #[cfg(windows)]

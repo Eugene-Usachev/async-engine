@@ -1,3 +1,5 @@
+//! This module contains the [`LockStatus`] enum.
+
 /// Represents the state of a lock in a [`read-write lock`](crate::sync::AsyncRWLock) mechanism.
 ///
 /// # Variants

@@ -1,3 +1,5 @@
+//! This module provides the [`Socket`] trait, which defines common socket-related operations and
+//! is intended to be implemented for types that represent network sockets.
 use crate::io::sys::{AsRawSocket, AsSocket, FromRawSocket, IntoRawSocket};
 use crate::io::{AsyncPollSocket, AsyncSocketClose};
 use crate::net::addr::{FromSockAddr, IntoSockAddr, ToSockAddrs};
@@ -9,7 +11,7 @@ use std::io::Error;
 /// for types that represent network sockets.
 ///
 /// It provides methods for querying and configuring
-/// socket settings, such as TTL and obtaining the local address
+/// socket settings, such as TTL and getting the local address
 /// or pending socket errors.
 ///
 /// # Implemented traits
@@ -69,7 +71,7 @@ pub trait Socket:
     ///
     /// # Unix
     ///
-    /// UNIX sockets do not support TTL, therefore this method is empty for those sockets.
+    /// UNIX sockets do not support TTL; therefore, this method is empty for those sockets.
     ///
     /// # Example
     ///
@@ -105,7 +107,7 @@ pub trait Socket:
     ///
     /// # Unix
     ///
-    /// UNIX sockets do not support TTL, therefore this method always returns `Ok(0)`
+    /// UNIX sockets do not support TTL; therefore, this method always returns `Ok(0)`
     /// for those sockets.
     ///
     /// # Example

@@ -1,3 +1,5 @@
+//! This module contains the [`Interactor`] and [`SharedTaskListForSendTo`] structs
+//! and the [`ExecutorIsNotRegisteredErr`] error.
 use crate::runtime::interaction_between_executors::SyncBatchOptimizedTaskQueue;
 use crate::runtime::Task;
 use crate::utils::vec_map::VecMap;

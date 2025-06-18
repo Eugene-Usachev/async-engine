@@ -1,3 +1,4 @@
+//! This module provides [`unix_impl_socket`] macro.
 #[macro_use]
 mod unix_impl_socket {
     /// This macro creates a `Socket` trait implementation for Unix sockets.

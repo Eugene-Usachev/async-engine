@@ -1,3 +1,4 @@
+//! This module contains the [`AsyncOnce`] trait and the [`CallOnceResult`] enum.
 use crate::runtime::IsLocal;
 use crate::sync::OnceState;
 use std::future::Future;

@@ -1,3 +1,5 @@
+//! This module contains a message of an internal bug in orengine.
+
 /// Message of an internal bug in orengine.
 pub(crate) const BUG_MESSAGE: &str = "\
 [BUG] If you encounter a bug, please report it to https://github.com/orengine/orengine/issues. \

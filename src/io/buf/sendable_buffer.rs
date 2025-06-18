@@ -1,10 +1,12 @@
+//! This module contains [`SendableBuffer`].
 use crate::io::{Buffer, FixedBuffer, FixedBufferMut, SendableSlice, SendableSliceMut};
 use crate::utils::Sealed;
 use std::collections::Bound;
 use std::ops::{Deref, DerefMut, RangeBounds};
 
 /// `SendableBuffer` is a wrapper struct that tells the compiler that the [`Buffer`] is
-/// [`sendable`](Send). But only The caller  should ensure that it never sends to another thread.
+/// [`sendable`](Send).
+/// But the caller should ensure that it will never be sent to another thread.
 ///
 /// ```no_run
 /// use std::ops::Deref;
@@ -17,7 +19,9 @@ use std::ops::{Deref, DerefMut, RangeBounds};
 ///         .await
 ///         .unwrap();
 ///     let mut buffer = unsafe { SendableBuffer::from_buffer(buffer()) };
+///
 ///     buffer.append("Hello, world!".as_bytes());
+///
 ///     file.write_all(&mut buffer).await.unwrap();
 /// }).unwrap();
 /// ```

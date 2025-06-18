@@ -1,6 +1,7 @@
+//! This module contains the fallback implementations of the operations.
 use crate::io::sys::{
-    self, FromRawFile, FromRawSocket, IntoRawFile, IntoRawSocket, MSG_PEEK_FLAG, MessageRecvHeader,
-    OsMessageHeader, OsOpenOptions, OsPathPtr, RawFile, RawSocket,
+    self, FromRawFile, FromRawSocket, IntoRawFile, IntoRawSocket, MessageRecvHeader, OsMessageHeader,
+    OsOpenOptions, OsPathPtr, RawFile, RawSocket, MSG_PEEK_FLAG,
 };
 use positioned_io::{ReadAt, WriteAt};
 use socket2::{Domain, MaybeUninitSlice, Protocol, SockAddr, Type};
@@ -210,7 +211,7 @@ pub(crate) fn fsync_op(raw_file: RawFile) -> io::Result<usize> {
     with_file(raw_file, |file| file.sync_all().map(|()| 0))
 }
 
-/// Syncs a file data to disk.
+/// Syncs file data to disk.
 pub(crate) fn fsync_data_op(raw_file: RawFile) -> io::Result<usize> {
     with_file(raw_file, |file| file.sync_data().map(|()| 0))
 }

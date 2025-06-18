@@ -1,3 +1,6 @@
+//! This module defines the [`Locality`] struct, which is used to represent whether a task is
+//! [`local`](Locality::local) or [`shared`](Locality::shared).
+
 /// In systems with 64-bit pointers, the high bit is reserved for the task-locality flag
 /// caused by the fact that `*mut dyn` can be safely cast to `i128`.
 ///

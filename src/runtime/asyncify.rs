@@ -1,5 +1,6 @@
+//! This module contains [`Asyncify`] struct and [`asyncify`](crate::asyncify) macro.
 use crate::local_executor;
-use crate::runtime::call::Call;
+use crate::runtime::Call;
 use std::future::Future;
 use std::mem;
 use std::pin::Pin;
@@ -69,7 +70,7 @@ impl Future for Asyncify<'_> {
 #[macro_export]
 macro_rules! asyncify {
     ($f:expr) => {
-        $crate::runtime::asyncify::Asyncify::new(&mut $f)
+        $crate::runtime::Asyncify::new(&mut $f)
     };
 }
 
@@ -103,7 +104,7 @@ mod tests {
         guard = cond_var.wait(guard).unwrap();
 
         assert!(*guard); // this executor was blocked, and
-        // if assertion passes, other thread (from the thread pool) processed the list.
+        // if assertion passes, another thread (from the thread pool) processed the list.
         drop(guard);
     }
 }

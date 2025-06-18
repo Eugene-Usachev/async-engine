@@ -1,8 +1,9 @@
+//! This module contains [`BufPool`].
+#[cfg(target_os = "linux")]
+use crate::io::worker::local_worker;
 use crate::io::Buffer;
 #[cfg(target_os = "linux")]
 use crate::io::FixedBuffer;
-#[cfg(target_os = "linux")]
-use crate::io::worker::local_worker;
 use crate::utils::{assert_hint, likely};
 #[cfg(target_os = "linux")]
 use libc;
@@ -58,7 +59,7 @@ pub fn buf_pool() -> &'static mut BufPool {
 
 /// Get [`Buffer`] from local [`BufPool`].
 ///
-/// Please, don't keep the buffer longer than necessary.
+/// Please don't keep the buffer longer than necessary.
 /// After drop, it will be returned to the pool.
 #[inline]
 pub fn buffer() -> Buffer {
@@ -70,7 +71,7 @@ pub fn buffer() -> Buffer {
 /// # Usage
 ///
 /// Use [`full_buffer`] if you need to read into the buffer,
-/// because [`buffer`] returns empty buffer.
+/// because [`buffer`] returns an empty buffer.
 ///
 /// ```rust
 /// use orengine::io::full_buffer;
@@ -87,9 +88,9 @@ pub fn buffer() -> Buffer {
 ///
 /// # Attention
 ///
-/// [`full_buffer`] returns full buffer, but it is filled with any value (not only 0).
+/// [`full_buffer`] returns a full buffer, but it is filled with any value (not only 0).
 ///
-/// Please, do not keep the buffer longer than necessary.
+/// Please do not keep the buffer longer than necessary.
 /// After drop, it will be returned to the pool.
 #[inline]
 pub fn full_buffer() -> Buffer {
@@ -151,14 +152,14 @@ impl BufPool {
                     )
                 })
                 .collect();
-            let iovecs: Vec<libc::iovec> = fixed_buffers
+            let io_vectors: Vec<libc::iovec> = fixed_buffers
                 .iter_mut()
                 .map(|buf| libc::iovec {
                     iov_base: buf.as_mut_ptr().cast(),
                     iov_len: buf.len() as _,
                 })
                 .collect();
-            local_worker().register_buffers(&iovecs);
+            local_worker().register_buffers(&io_vectors);
 
             Self {
                 fixed_buffers,
@@ -223,7 +224,7 @@ impl BufPool {
     /// Returns [`Buffer`] from the pool. It returns __fixed__ buffer if it is possible.
     ///
     /// This method doesn't guarantee any len of the buffer.
-    /// Returned buffer is filled with any value (not only 0).
+    /// The returned buffer is filled with any value (not only 0).
     #[inline]
     pub fn get_buffer_with_any_len(&mut self) -> Buffer {
         #[cfg(not(target_os = "linux"))]
@@ -246,7 +247,7 @@ impl BufPool {
     /// Gets [`Buffer`] from [`BufPool`] with full length. It returns __fixed__ buffer
     /// if it is possible.
     ///
-    /// Returned buffer is filled with any value (not only 0).
+    /// The returned buffer is filled with any value (not only 0).
     #[inline]
     pub fn get_full(&mut self) -> Buffer {
         let mut buffer = self.get_buffer_with_any_len();
@@ -258,7 +259,7 @@ impl BufPool {
     /// Gets empty (len == 0) [`Buffer`] from [`BufPool`]. It returns __fixed__ buffer
     /// if it is possible.
     ///
-    /// Returned buffer is filled with any value (not only 0).
+    /// The returned buffer is filled with any value (not only 0).
     #[inline]
     pub fn get(&mut self) -> Buffer {
         let mut buffer = self.get_buffer_with_any_len();

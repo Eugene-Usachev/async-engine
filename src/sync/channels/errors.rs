@@ -1,3 +1,4 @@
+//! This module contains the error types for the asynchronous channels.
 use std::fmt::Debug;
 
 /// An error of an asynchronous `send` operation.

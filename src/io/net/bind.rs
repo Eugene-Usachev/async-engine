@@ -1,6 +1,6 @@
+//! This module contains the [`AsyncBind`] trait.
 use crate::io::sys::{BorrowedSocket, FromRawSocket, RawSocket};
-use crate::net::addr::to_sock_addrs::ToSockAddrs;
-use crate::net::{BindConfig, ReusePort, Socket};
+use crate::net::{BindConfig, ReusePort, Socket, ToSockAddrs};
 use crate::utils::each_addr::each_addr;
 use socket2::SockRef;
 use std::io::Result;
@@ -102,7 +102,7 @@ pub trait AsyncBind: Sized + Socket {
 
     /// Asynchronously binds to a socket with a specific [`configuration`](BindConfig).
     ///
-    /// It will bind to first valid address provided in the list of possible addresses.
+    /// It will bind to the first valid address provided in the list of possible addresses.
     ///
     /// # Example
     ///

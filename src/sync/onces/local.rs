@@ -1,3 +1,4 @@
+//! This module provides the [`LocalOnce`].
 use crate::runtime::IsLocal;
 use crate::sync::OnceState;
 use crate::sync::{AsyncOnce, CallOnceResult};

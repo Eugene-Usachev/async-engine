@@ -1,13 +1,14 @@
-use crate as orengine;
-use crate::io::FixedBuffer;
+//! This module contains the [`SendTo`] and [`SendToWithDeadline`] IO operations
+//! and the [`AsyncSendTo`] trait.
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::{AsRawSocket, MessageSendHeader, RawSocket};
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::worker::{local_worker, IoWorker};
+use crate::io::FixedBuffer;
 use crate::local_executor;
-use crate::net::Socket;
-use crate::net::addr::{FromSockAddr, IntoSockAddr, ToSockAddrs};
-use crate::utils::{OrengineInstant, unwrap_or_bug_hint};
-use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
+use crate::net::{FromSockAddr, IntoSockAddr, Socket, ToSockAddrs};
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant};
+
+use crate::io::macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use socket2::SockAddr;
 use std::future::Future;
 use std::io;
@@ -44,21 +45,23 @@ impl Future for SendTo<'_> {
     type Output = Result<usize>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        #[allow(unused, reason = "Cannot write proc_macro else to make it readable.")]
-        let ret;
-
         let os_message_header_ptr = this
             .message_header
             .get_os_message_header_ptr(this.addr, this.bufs);
 
-        poll_for_io_request!((
-            local_worker().send_to(
-                this.raw_socket,
-                os_message_header_ptr,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().send_to(
+                    this.raw_socket,
+                    os_message_header_ptr,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret
-        ));
+        );
     }
 }
 
@@ -81,7 +84,7 @@ pub struct SendToWithDeadline<'fut> {
 }
 
 impl<'fut> SendToWithDeadline<'fut> {
-    /// Creates a new `send_to` io operation with deadline.
+    /// Creates a new `send_to` io operation with a deadline.
     pub fn new(
         raw_socket: RawSocket,
         bufs: &'fut [IoSlice<'fut>],
@@ -106,22 +109,26 @@ impl Future for SendToWithDeadline<'_> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
         let worker = local_worker();
-        #[allow(unused, reason = "Cannot write proc_macro else to make it readable.")]
-        let ret;
-
         let os_message_header_ptr = this
             .message_header
             .get_os_message_header_ptr(this.addr, this.bufs);
 
-        poll_for_time_bounded_io_request!((
-            worker.send_to_with_deadline(
-                this.raw_socket,
-                os_message_header_ptr,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
-                &mut this.deadline
-            ),
+        poll_for_time_bounded_io_request!(
+            {
+                worker.send_to_with_deadline(
+                    this.raw_socket,
+                    os_message_header_ptr,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                    &mut this.deadline,
+                );
+            },
+            this.io_request_data,
+            worker,
+            &this.deadline,
+            cx,
+            ret,
             ret
-        ));
+        );
     }
 }
 
@@ -132,7 +139,7 @@ impl Future for SendToWithDeadline<'_> {
 unsafe impl Send for SendToWithDeadline<'_> {}
 
 #[inline]
-/// Returns first resolved address from `ToSocketAddrs`.
+/// Returns the first resolved address from `ToSocketAddrs`.
 fn sock_addr_from_to_socket_addr<Addr: IntoSockAddr + FromSockAddr, A: ToSockAddrs<Addr>>(
     to_addr: &A,
 ) -> Result<SockAddr> {
@@ -176,7 +183,7 @@ fn sock_addr_from_to_socket_addr<Addr: IntoSockAddr + FromSockAddr, A: ToSockAdd
 ///
 /// # If coping `SocketAddr` is a performance issue
 ///
-/// Then you can use structs [`SendTo`] and [`SendToWithDeadline`] that accepts only
+/// Then you can use structs [`SendTo`] and [`SendToWithDeadline`] that accept only
 /// a reference to [`SockAddr`] that can be created with [`ToSockAddrs`] one time and then reused.
 pub trait AsyncSendTo: Socket {
     /// Asynchronously sends data to the specified address. The method only sends to the first

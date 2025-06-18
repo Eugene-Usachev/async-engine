@@ -66,13 +66,13 @@ impl<'spin_lock, T: ?Sized> SpinLockGuard<'spin_lock, T> {
     /// Returns a reference to the [`AtomicBool`]
     /// associated with the original [`SpinLock`] to
     /// [`call`](crate::Executor::invoke_call)
-    /// [`ReleaseAtomicBool`](crate::runtime::call::Call::ReleaseAtomicBool).
+    /// [`ReleaseAtomicBool`](crate::runtime::Call::ReleaseAtomicBool).
     ///
     /// # Safety
     ///
     /// The mutex is unlocked by calling [`SpinLock::unlock`] later
     /// or by [calling](crate::Executor::invoke_call)
-    /// [`ReleaseAtomicBool`](crate::runtime::call::Call::ReleaseAtomicBool).
+    /// [`ReleaseAtomicBool`](crate::runtime::Call::ReleaseAtomicBool).
     #[inline]
     pub unsafe fn leak_to_atomic(self) -> NonNull<AtomicBool> {
         debug_assert!(self.spin_lock.is_locked.load(Acquire));

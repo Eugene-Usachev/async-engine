@@ -1,6 +1,7 @@
+//! This module contains the [`AsyncCondVar`] trait.
 use crate::runtime::IsLocal;
-use crate::sync::AsyncMutex;
 use crate::sync::mutexes::AsyncSubscribableMutex;
+use crate::sync::AsyncMutex;
 use std::future::Future;
 use std::ops::Deref;
 

@@ -1,6 +1,8 @@
-use crate::io::{AsyncPeek, AsyncRecv, AsyncSend, sys};
-use crate::net::Socket;
+//! This module provides the [`ConnectedDatagram`] trait, which represents a datagram socket that has
+//! been connected to a specific remote address.
+use crate::io::{sys, AsyncPeek, AsyncRecv, AsyncSend};
 use crate::net::addr::FromSockAddr;
+use crate::net::Socket;
 use std::io;
 use std::io::Error;
 
@@ -8,7 +10,7 @@ use std::io::Error;
 /// remote address.
 ///
 /// Unlike regular datagram sockets, a connected datagram socket can send and receive
-/// packets without specifying the destination address on each send.
+/// packets without specifying the destination address on each sending.
 ///
 /// # Implemented Traits
 ///

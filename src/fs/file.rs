@@ -1,13 +1,30 @@
+//! The [`File`] type represents an open file on the filesystem.
+//!
+//! A [`File`] can be read and/or written depending on what options it was opened with.
+//!
+//! A [`File`] can be created, opened, read, written, or closed.
+//!
+//! # Examples
+//!
+//! ```rust
+//! use orengine::fs::{File, OpenOptions};
+//!
+//! # async fn foo() -> std::io::Result<()> {
+//! let open_options = OpenOptions::new().read(true).write(true);
+//! let file = File::open("example.txt", &open_options).await?;
+//! # Ok(())
+//! # }
+//! ```
 use crate::fs::OpenOptions;
 use crate::io::close::AsyncFileClose;
-use crate::io::fallocate::AsyncFallocate;
-use crate::io::open::Open;
-use crate::io::remove::Remove;
-use crate::io::rename::Rename;
-use crate::io::sync_all::AsyncSyncAll;
-use crate::io::sync_data::AsyncSyncData;
 use crate::io::sys::get_os_path;
 use crate::io::sys::{AsFile, AsRawFile, FromRawFile, IntoRawFile, RawFile};
+use crate::io::AsyncFallocate;
+use crate::io::AsyncSyncAll;
+use crate::io::AsyncSyncData;
+use crate::io::Open;
+use crate::io::Remove;
+use crate::io::Rename;
 use crate::io::{AsyncRead, AsyncWrite};
 use crate::runtime::local_executor;
 use crate::utils::unlikely;
@@ -283,8 +300,8 @@ impl Drop for File {
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::fs::test_helper::{TEST_DIR_PATH, create_test_dir_if_not_exist, is_exists};
-    use crate::io::{FixedBuffer, full_buffer, get_fixed_buffer, get_full_fixed_buffer};
+    use crate::fs::test_helper::{create_test_dir_if_not_exist, is_exists, TEST_DIR_PATH};
+    use crate::io::{full_buffer, get_fixed_buffer, get_full_fixed_buffer, FixedBuffer};
     use std::fs::{create_dir, create_dir_all};
     use std::io::{Seek, SeekFrom};
     use std::path::PathBuf;

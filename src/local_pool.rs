@@ -1,3 +1,5 @@
+//! This module provides a macro to create a thread-local pool for reusing allocated in heap memory.
+
 /// This macro creates a new thread local pool.
 /// Because it is `thread local`, it is lockless.
 ///

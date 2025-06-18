@@ -1,21 +1,33 @@
-//! The io/net module provides a comprehensive set of asynchronous traits and utilities for working
+//! This module provides a comprehensive set of asynchronous traits and utilities for working
 //! with network sockets.
 //!
 //! These abstractions facilitate the creation and management
-//! of TCP and UDP connections, along with supporting operations like connecting, accepting,
-//! sending, receiving, binding, and shutting down sockets.
-pub mod accept;
-pub mod bind;
-pub mod connect;
-pub mod peek;
-pub mod peek_from;
-pub mod poll_fd;
-pub mod recv;
-pub mod recv_from;
-pub mod send;
-pub mod send_to;
-pub mod shutdown;
-pub mod socket;
+//! of TCP, UDP or Unix connections, along with supporting operations like
+//!
+//! - [`accept`]
+//! - [`bind`]
+//! - [`connect`]
+//! - [`peek`]
+//! - [`peek_from`]
+//! - [`poll_fd`]
+//! - [`recv`]
+//! - [`recv_from`]
+//! - [`send`]
+//! - [`send_to`]
+//! - [`shutdown`]
+//! - [`socket`]
+mod accept;
+mod bind;
+mod connect;
+mod peek;
+mod peek_from;
+mod poll_fd;
+mod recv;
+mod recv_from;
+mod send;
+mod send_to;
+mod shutdown;
+mod socket;
 
 pub use accept::*;
 pub use bind::*;

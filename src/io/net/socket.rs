@@ -1,9 +1,10 @@
-use crate as orengine;
+//! This module contains the [`Socket`] io operation.
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::RawSocket;
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::worker::{local_worker, IoWorker};
 use crate::utils::unwrap_or_bug_hint;
-use orengine_macros::poll_for_io_request;
+
+use crate::io::macros::poll_for_io_request;
 use socket2::{Domain, Protocol, Type};
 use std::future::Future;
 use std::pin::Pin;
@@ -35,17 +36,21 @@ impl Future for Socket {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().socket(
-                this.domain,
-                this.socket_type,
-                this.protocol,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().socket(
+                    this.domain,
+                    this.socket_type,
+                    this.protocol,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret as RawSocket
-        ));
+        );
     }
 }
 

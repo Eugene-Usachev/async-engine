@@ -1,8 +1,9 @@
-use crate::runtime::{Task, local_executor};
+//! This module contains the [`LocalCondVar`] struct that implements the [`AsyncCondVar`].
+use crate::runtime::{local_executor, Task};
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncCondVar, AsyncMutex, AsyncMutexGuard, LocalMutex};
 use crate::utils::{
-    PairedWithLock, TaskVecFromPool, acquire_task_vec_from_pool, unlikely, unwrap_or_bug_hint,
+    acquire_task_vec_from_pool, unlikely, unwrap_or_bug_hint, PairedWithLock, TaskVecFromPool,
 };
 use std::marker::PhantomData;
 use std::mem;
@@ -139,6 +140,7 @@ impl<T, S: AsyncSubscribableMutex<T>> LocalCondVar<T, S> {
 impl<T, S: AsyncSubscribableMutex<T>> AsyncCondVar<T> for LocalCondVar<T, S> {
     type Mutex = S;
 
+    #[allow(clippy::future_not_send, reason = "It is `local`.")]
     fn wait<'lock>(
         &'lock self,
         guard: <S as AsyncMutex<T>>::Guard<'lock>,

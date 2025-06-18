@@ -1,25 +1,24 @@
 use crate::io::{SendableBuffer, buf_pool};
 use crate::runtime::executor::get_local_executor_ref;
-use crate::runtime::{Locality, update_current_task_locality};
+use crate::runtime::{Locality, Task, update_current_task_locality};
 use std::future::Future;
 
-/// Allows `shared` [`Task`](crate::runtime::Task) to use a [`Buffer`](crate::io::Buffer).
+/// Allows `shared` [`Task`] to use a [`Buffer`](crate::io::Buffer).
 ///
 /// It is possible because it gets a future spawner that must spawn a `local` future.
 ///
-/// [`SendableBuffer`] that is provided to the future spawner have a length equal to 0.
+/// [`SendableBuffer`] that is provided to the future spawner has a length equal to 0.
 /// Use [`with_any_len_buffer`] to get [`SendableBuffer`] with an any length or
 /// use [`with_full_buffer`] to get [`SendableBuffer`] with a length equal to
 /// [`BufPool::default_buffer_capacity`](buf_pool::BufPool::default_buffer_capacity).
 ///
 /// # Safety
 ///
-/// The future spawner spawns `local` future that is never moved to another thread.
+/// The future spawner spawns a `local` future never moved to another thread.
 ///
-/// # Panics
-///
-/// If the spawned future is moved to another thread with `debug_assertions`. In release mode
-/// it causes undefined behavior.
+/// If the spawned future is moved to another thread with `debug_assertions`
+/// or if called in the `local` context.
+/// In release mode it causes undefined behavior.
 ///
 /// # Example
 ///
@@ -39,6 +38,7 @@ use std::future::Future;
 ///     with_buffer(|mut buf| async move {
 ///         // Here task is `local`
 ///         buf.append(b"Hello world!");
+///
 ///         file.write_all(&buf).await.unwrap();
 ///     }).await;
 ///
@@ -61,23 +61,22 @@ where
     .await
 }
 
-/// Allows `shared` [`Task`](crate::runtime::Task) to use a [`Buffer`](crate::io::Buffer).
+/// Allows `shared` [`Task`] to use a [`Buffer`](crate::io::Buffer).
 ///
 /// It is possible because it gets a future spawner that must spawn a `local` future.
 ///
-/// [`SendableBuffer`] that is provided to the future spawner have a length equal
+/// [`SendableBuffer`] that is provided to the future spawner has a length equal
 /// to [`BufPool::default_buffer_capacity`](buf_pool::BufPool::default_buffer_capacity).
 /// Use [`with_any_len_buffer`] to get [`SendableBuffer`] with any a length or
 /// use [`with_buffer`] to get [`SendableBuffer`] with a length equal to 0.
 ///
 /// # Safety
 ///
-/// The future spawner spawns `local` future that is never moved to another thread.
+/// The future spawner spawns a ` local ` future never moved to another thread.
 ///
-/// # Panics
-///
-/// If the spawned future is moved to another thread with `debug_assertions`. In release mode
-/// it causes undefined behavior.
+/// If the spawned future is moved to another thread with `debug_assertions`
+/// or if called in the `local` context.
+/// In release mode it causes undefined behavior.
 ///
 /// # Example
 ///
@@ -119,23 +118,24 @@ where
     .await
 }
 
-/// Allows `shared` [`Task`](crate::runtime::Task) to use a [`Buffer`](crate::io::Buffer).
+/// Allows `shared` [`Task`] to use a [`Buffer`](crate::io::Buffer).
 ///
 /// It is possible because it gets a future spawner that must spawn a `local` future.
 ///
-/// [`SendableBuffer`] that is provided to the future spawner have an any length.
+/// [`SendableBuffer`] that is provided to the future spawner has an any length.
 /// Use [`with_full_buffer`] to get [`SendableBuffer`] with a length equal to
 /// [`BufPool::default_buffer_capacity`](buf_pool::BufPool::default_buffer_capacity) or use
 /// [`with_buffer`] to get [`SendableBuffer`] with a length equal to 0.
 ///
 /// # Safety
 ///
-/// The future spawner spawns `local` future that is never moved to another thread.
+/// The future spawner spawns a ` local ` future never moved to another thread.
 ///
 /// # Panics
 ///
-/// If the spawned future is moved to another thread with `debug_assertions`. In release mode
-/// it causes undefined behavior.
+/// If the spawned future is moved to another thread with `debug_assertions`
+/// or if called in the `local` context.
+/// In release mode it causes undefined behavior.
 ///
 /// # Example
 ///
@@ -170,6 +170,10 @@ where
     Fut: Future<Output = Ret> + Send,
     F: Send + FnOnce(SendableBuffer) -> Fut,
 {
+    debug_assert!(
+        !unsafe { Task::get_current().await.is_local() },
+        "You cannot call `with_buffer` in `local` context."
+    );
     debug_assert!(
         get_local_executor_ref().is_some(),
         "Executor is not initialized."

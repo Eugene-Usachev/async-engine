@@ -1,13 +1,14 @@
+//! This module contains the [`ToSockAddrs`] trait.
 use crate::net::addr::{FromSockAddr, IntoSockAddr};
 #[cfg(unix)]
 use crate::net::unix::UnixAddr;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
 
-/// `ToSockAddrs` is a copy of [`std::net::ToSocketAddrs`],
+/// `ToSockAddrs` is a copy of [`std::net::ToSocketAddrs`](ToSocketAddrs),
 /// but with a generic type parameter.
 ///
-/// It allows to use [`UnixAddr`] as a generic type parameter
+/// It allows using [`UnixAddr`] as a generic type parameter
 /// or another custom type that implements [`FromSockAddr`] and [`IntoSockAddr`].
 #[allow(
     rustdoc::broken_intra_doc_links,
@@ -19,7 +20,7 @@ pub trait ToSockAddrs<Addr: FromSockAddr + IntoSockAddr> {
 
     /// Converts this object to an iterator of resolved `Addr` (generic type of this trait).
     ///
-    /// The returned iterator might not actually yield any values depending on the
+    /// The returned iterator might not yield any values depending on the
     /// outcome of any resolution performed.
     ///
     /// Note that this function may block the current thread while resolution is

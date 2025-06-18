@@ -1,3 +1,4 @@
+//! This module contains the [`AsyncSubscribableMutex`] trait.
 use crate::runtime::Task;
 use crate::sync::AsyncMutex;
 use std::future::Future;

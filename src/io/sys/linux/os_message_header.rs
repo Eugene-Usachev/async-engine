@@ -1,3 +1,5 @@
+//! This module provides types [`MessageSendHeader`] and [`MessageRecvHeader`] based on
+//! an OS message header.
 use std::io::{IoSlice, IoSliceMut};
 use std::mem;
 use std::mem::size_of;

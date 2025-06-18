@@ -1,11 +1,12 @@
-use crate as orengine;
+//! This module contains the [`PollRecv`], [`PollRecvWithDeadline`], [`PollSend`]
+//! and [`PollSendWithDeadline`] IO operations and the [`AsyncPollSocket`] trait.
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
+use crate::io::macros::{poll_for_io_request, poll_for_time_bounded_io_request};
 use crate::io::sys::{AsRawSocket, RawSocket};
 use crate::io::worker::{local_worker, IoWorker};
 use crate::local_executor;
-use crate::utils::unwrap_or_bug_hint;
-use crate::utils::OrengineInstant;
-use orengine_macros::{poll_for_io_request, poll_for_time_bounded_io_request};
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant};
+
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -35,16 +36,22 @@ macro_rules! generate_poll {
 
             fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
                 let this = unsafe { self.get_unchecked_mut() };
-                #[allow(unused, reason = "Cannot write proc_macro else to make it readable.")]
-                let ret;
 
-                poll_for_io_request!((
-                    local_worker().$method(
-                        this.raw_socket,
-                        IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-                    ),
+                poll_for_io_request!(
+                    {
+                        $method(
+                            local_worker(),
+                            this.raw_socket,
+                            IoRequestDataPtr::new(unwrap_or_bug_hint(
+                                this.io_request_data.as_mut(),
+                            )),
+                        );
+                    },
+                    this.io_request_data,
+                    cx,
+                    _ret,
                     ()
-                ));
+                );
             }
         }
 
@@ -75,17 +82,25 @@ macro_rules! generate_poll {
             fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
                 let this = unsafe { self.get_unchecked_mut() };
                 let worker = local_worker();
-                #[allow(unused, reason = "Cannot write proc_macro else to make it readable.")]
-                let ret;
 
-                poll_for_time_bounded_io_request!((
-                    worker.$method_with_deadline(
-                        this.raw_socket,
-                        IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
-                        &mut this.deadline
-                    ),
+                poll_for_time_bounded_io_request!(
+                    {
+                        $method_with_deadline(
+                            worker,
+                            this.raw_socket,
+                            IoRequestDataPtr::new(unwrap_or_bug_hint(
+                                this.io_request_data.as_mut(),
+                            )),
+                            &mut this.deadline,
+                        );
+                    },
+                    this.io_request_data,
+                    worker,
+                    &this.deadline,
+                    cx,
+                    _ret,
                     ()
-                ));
+                );
             }
         }
 
@@ -96,14 +111,14 @@ macro_rules! generate_poll {
 generate_poll!(
     PollRecv,
     PollRecvWithDeadline,
-    poll_socket_read,
-    poll_socket_read_with_deadline
+    IoWorker::poll_socket_read,
+    IoWorker::poll_socket_read_with_deadline
 );
 generate_poll!(
     PollSend,
     PollSendWithDeadline,
-    poll_socket_write,
-    poll_socket_write_with_deadline
+    IoWorker::poll_socket_write,
+    IoWorker::poll_socket_write_with_deadline
 );
 
 /// The `AsyncPollSocket` trait provides non-blocking polling methods for readiness in receiving

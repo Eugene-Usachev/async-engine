@@ -1,3 +1,5 @@
+//! This module contains [`Slice`], [`SliceMut`], [`SendableSlice`] and [`SendableSliceMut`]
+//! that are immutable and mutable slices of [`Buffer`].
 use crate::io::{Buffer, FixedBuffer, FixedBufferMut, SendableBuffer};
 use crate::utils::Sealed;
 use std::ops::{Deref, DerefMut};

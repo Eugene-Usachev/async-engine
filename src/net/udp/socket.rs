@@ -1,3 +1,4 @@
+//! This module contains [`UdpSocket`].
 use std::fmt::{Debug, Formatter};
 use std::io::Result;
 use std::mem::ManuallyDrop;
@@ -7,12 +8,12 @@ use socket2::{SockAddr, SockRef};
 
 use crate::io::sys::{AsRawSocket, AsSocket, FromRawSocket, IntoRawSocket, RawSocket};
 use crate::io::{
-    AsyncBind, AsyncConnectDatagram, AsyncPeekFrom, AsyncPollSocket, AsyncRecvFrom, AsyncSendTo,
-    AsyncSocketClose, sys,
+    sys, AsyncBind, AsyncConnectDatagram, AsyncPeekFrom, AsyncPollSocket, AsyncRecvFrom,
+    AsyncSendTo, AsyncSocketClose,
 };
-use crate::net::BindConfig;
 use crate::net::creators_of_sockets::new_udp_socket;
 use crate::net::udp::connected_socket::UdpConnectedSocket;
+use crate::net::BindConfig;
 use crate::net::{Datagram, Socket};
 use crate::runtime::local_executor;
 

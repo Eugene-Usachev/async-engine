@@ -70,7 +70,7 @@ Extensive benchmarking has been done to prove Orengine’s superiority.
 
 ## Echo Server
 
-![benchmarks/net/tcp/images/echo_server.svg](benchmarks/net/tcp/images/echo_server.svg)
+![echo server](benchmarks/net/tcp/images/echo_server.svg)
 
 But these results are for `localhost`, so it can show only _ideal_ case when no packages are lost and the connection
 is perfect.
@@ -79,9 +79,19 @@ but Orengine uses memory much more efficiently.
 
 ## Memory Usage
 
-![benchmarks/cpu_bound/images/memory_usage_per_10m_tasks_favorites_only.svg](benchmarks/cpu_bound/images/memory_usage_per_10m_tasks_favorites_only.svg)
+![memory usage per 10m tasks favorites only](benchmarks/cpu_bound/images/memory_usage_per_10m_tasks_favorites_only.svg)
 
 Read more about the benchmarks in the [benchmarks](benchmarks) directory.
+
+# Stage
+
+Orengine is currently well-tested on Linux. Now its API is stable and will not change in the future or change rarely.
+
+You can use it for your projects, and we will fix any bug you find.
+
+If you think that some function is missing, please open an issue and we will add it.
+
+`v1.0.*` are for Rust 1.85 and later.
 
 # License
 

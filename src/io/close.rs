@@ -1,10 +1,12 @@
-use crate as orengine;
+//! This module contains the [`CloseSocket`] and [`CloseFile`] IO operations
+//! and the [`AsyncSocketClose`] and [`AsyncFileClose`] traits.
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::worker::{local_worker, IoWorker};
 
 use crate::io::sys::{AsRawFile, AsRawSocket, RawFile, RawSocket};
 use crate::utils::unwrap_or_bug_hint;
-use orengine_macros::poll_for_io_request;
+
+use crate::io::macros::poll_for_io_request;
 use std::future::Future;
 use std::io::Result;
 use std::pin::Pin;
@@ -32,16 +34,19 @@ impl Future for CloseSocket {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        #[allow(unused, reason = "Cannot write proc_macro else to make it readable.")]
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().close_socket(
-                this.raw_socket,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().close_socket(
+                    this.raw_socket,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            _ret,
             ()
-        ));
+        );
     }
 }
 
@@ -56,9 +61,9 @@ pub trait AsyncSocketClose: AsRawSocket {
     /// # Be careful
     ///
     /// Some structs (like all structs in [`orengine::net`](crate::net)
-    /// implements [`Drop`](Drop) that calls [`close`](Self::close).
+    /// implement the [`Drop`] that calls [`close`](Self::close).
     ///
-    /// So, before call [`close`](Self::close) you should check if the struct implements auto-closing.
+    /// So, before calling [`close`](Self::close), you should check if the struct implements auto-closing.
     fn close(&mut self) -> impl Future<Output = Result<()>> + 'static {
         CloseSocket::new(<Self as AsRawSocket>::as_raw_socket(self))
     }
@@ -86,16 +91,19 @@ impl Future for CloseFile {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        #[allow(unused, reason = "Cannot write proc_macro else to make it readable.")]
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().close_file(
-                this.raw_file,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().close_file(
+                    this.raw_file,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            _ret,
             ()
-        ));
+        );
     }
 }
 
@@ -109,10 +117,10 @@ pub trait AsyncFileClose: AsRawFile {
     ///
     /// # Be careful
     ///
-    /// Some structs (like all structs in [`orengine::fs`](crate::fs)) implements [`Drop`](Drop)
+    /// Some structs (like all structs in [`orengine::fs`](crate::fs)) implement the [`Drop`]
     /// that calls [`close`](Self::close).
     ///
-    /// So, before call [`close`](Self::close) you should check if the struct implements auto-closing.
+    /// So, before calling [`close`](Self::close), you should check if the struct implements auto-closing.
     fn close(&mut self) -> impl Future<Output = Result<()>> + 'static {
         CloseFile::new(<Self as AsRawFile>::as_raw_file(self))
     }

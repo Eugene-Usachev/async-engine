@@ -1,3 +1,5 @@
+//! This module contains IO worker configuration [`FallbackConfig`].
+
 /// Configuration for `fallback worker`.
 ///
 /// # Fields

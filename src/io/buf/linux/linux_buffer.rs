@@ -1,11 +1,14 @@
-use std::alloc::{Layout, alloc};
+//! This module contains definitions for the Linux buffer:
+//! [`FixedBuffer`](linux_buffer::FixedBuffer) and [`LinuxBuffer`](linux_buffer::LinuxBuffer).
+use std::alloc::{alloc, Layout};
 use std::marker::PhantomData;
 use std::ptr;
 
+/// A fixed size buffer on Linux.
 #[repr(C)]
 pub(crate) struct FixedBuffer {
     len: u32,
-    // cap is a default buffer capacity of pool. But we cache it here to avoid calling thread_static
+    // `cap` is a default buffer capacity of the pool. But we cache it here to avoid calling `thread_static`
     cap: u32,
     index: u16,
     ptr: *mut u8,
@@ -21,6 +24,7 @@ impl FixedBuffer {
     }
 }
 
+/// A variable size or fixed buffer on Linux.
 #[repr(C)]
 pub(crate) enum LinuxBuffer {
     Fixed(FixedBuffer),
@@ -28,6 +32,7 @@ pub(crate) enum LinuxBuffer {
 }
 
 impl LinuxBuffer {
+    /// Creates a new fixed buffer.
     pub(crate) fn new_fixed(ptr: *mut u8, cap: u32, index: u16) -> Self {
         Self::Fixed(FixedBuffer {
             ptr,
@@ -38,6 +43,7 @@ impl LinuxBuffer {
         })
     }
 
+    /// Creates a new variable size buffer.
     #[inline]
     pub(crate) fn new_non_fixed(size: u32) -> Self {
         debug_assert!(
@@ -51,6 +57,8 @@ impl LinuxBuffer {
 
         Self::NonFixed(unsafe { Vec::from_raw_parts(alloc(layout), 0, size as _) })
     }
+
+    /// Returns the length of the buffer.
     #[inline]
     pub(crate) fn len(&self) -> u32 {
         match self {
@@ -60,6 +68,8 @@ impl LinuxBuffer {
         }
     }
 
+    /// Sets the length of the buffer.
+    ///
     /// # Safety
     ///
     /// `len` must be less than or equal to `capacity`.
@@ -71,6 +81,7 @@ impl LinuxBuffer {
         }
     }
 
+    /// Returns the capacity of the buffer.
     #[inline]
     pub(crate) fn capacity(&self) -> u32 {
         match self {
@@ -80,6 +91,7 @@ impl LinuxBuffer {
         }
     }
 
+    /// Returns the underlying pointer to the buffer.
     #[inline]
     pub(crate) fn as_ptr(&self) -> *const u8 {
         match self {
@@ -88,6 +100,7 @@ impl LinuxBuffer {
         }
     }
 
+    /// Returns the underlying mutable pointer to the buffer.
     #[inline]
     pub(crate) fn as_mut_ptr(&mut self) -> *mut u8 {
         match self {

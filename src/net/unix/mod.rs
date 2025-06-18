@@ -1,9 +1,11 @@
-pub mod addr;
-pub mod connected_datagram;
-pub mod datagram;
-pub mod listener;
-pub mod stream;
-pub(crate) mod unix_impl_socket;
+//! This module contains [`UnixStream`], [`UnixListener`], [`UnixDatagram`] and
+//! [`UnixConnectedDatagram`] structs.
+mod addr;
+mod connected_datagram;
+mod datagram;
+mod listener;
+mod stream;
+mod unix_impl_socket;
 
 pub use addr::*;
 pub use connected_datagram::*;

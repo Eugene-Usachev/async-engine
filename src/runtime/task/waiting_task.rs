@@ -1,3 +1,4 @@
+//! This module contains the [`WaitingTask`] enum for channels.
 use crate::runtime::{Task, TaskWithDeadline};
 use crate::sync::channels::CallStatePtr;
 use crate::sync::channels::waiting_task::TaskInSelectBranch;

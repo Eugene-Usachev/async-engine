@@ -1,3 +1,30 @@
+//! This module provides traits that generalize common socket operations and structs
+//! that implement them.
+//!
+//! # Traits
+//!
+//! - [`Socket`]
+//! - [`Listener`]
+//! - [`Stream`]
+//! - [`Datagram`]
+//! - [`ConnectedDatagram`]
+//!
+//! # TCP
+//!
+//! - [`TcpListener`]
+//! - [`TcpStream`]
+//!
+//! # UDP
+//!
+//! - [`UdpSocket`]
+//! - [`UdpConnectedSocket`]
+//!
+//! # Unix
+//!
+//! - [`UnixListener`]
+//! - [`UnixStream`]
+//! - [`UnixDatagram`]
+//! - [`UnixConnectedDatagram`]
 pub use addr::*;
 pub use bind_config::{BindConfig, ReusePort};
 pub use connected_datagram::ConnectedDatagram;
@@ -11,14 +38,14 @@ pub use udp::{UdpConnectedSocket, UdpSocket};
 pub use unix::{UnixConnectedDatagram, UnixDatagram, UnixListener, UnixStream};
 pub(crate) use unsupport::new_unix_unsupported_error;
 
-pub mod addr;
-pub mod bind_config;
-pub mod connected_datagram;
+mod addr;
+mod bind_config;
+mod connected_datagram;
 pub(crate) mod creators_of_sockets;
-pub mod datagram;
-pub mod listener;
-pub mod socket;
-pub mod stream;
+mod datagram;
+mod listener;
+mod socket;
+mod stream;
 pub mod tcp;
 pub mod udp;
 #[cfg(unix)]

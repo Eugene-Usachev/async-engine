@@ -1,8 +1,9 @@
+//! This module provides helper functions to create Unix socket addresses and the [`UnixAddr`] struct.
 use crate::utils::unlikely;
 use libc::{sa_family_t, sockaddr_storage, socklen_t};
 use socket2::SockAddr;
 use std::ffi::OsStr;
-use std::mem::{MaybeUninit, offset_of};
+use std::mem::{offset_of, MaybeUninit};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::SocketAddr;
 use std::path::Path;
@@ -36,7 +37,7 @@ pub(in crate::net) fn sockaddr_un(path: &Path) -> io::Result<(sockaddr_storage, 
         ));
     }
     // SAFETY: `bytes` and `addr.sun_path` are not overlapping and
-    // both point to valid memory.
+    // both points to valid memory.
     // NOTE: We zeroed the memory above, so the path is already null
     // terminated.
     unsafe {
@@ -316,7 +317,7 @@ impl UnixAddr {
     }
 }
 
-/// We use a pointer arithmetic because we know that [`SocketAddr`] is:
+/// We use pointer arithmetic because we know that [`SocketAddr`] is:
 ///
 /// ```
 /// pub struct SocketAddr {
@@ -325,7 +326,7 @@ impl UnixAddr {
 /// }
 /// ```
 ///
-/// It is a copy that is used to get offsets of fields.
+/// It is a copy used to get offsets of fields.
 pub struct SocketAddrPrototype {
     pub(in crate::net) addr: libc::sockaddr_un,
     pub(in crate::net) len: socklen_t,
@@ -412,8 +413,8 @@ impl fmt::Debug for UnixAddr {
 
 #[cfg(test)]
 mod tests {
-    use crate::net::unix::UnixAddr;
     use crate::net::unix::addr::AddressKind;
+    use crate::net::unix::UnixAddr;
     #[cfg(any(target_os = "android", target_os = "linux"))]
     use std::os::linux::net::SocketAddrExt;
     use std::os::unix::net::SocketAddr;

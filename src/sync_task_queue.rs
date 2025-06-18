@@ -1,3 +1,4 @@
+//! This module contains the [`SyncTaskList`].
 use crate::runtime::Task;
 use crate::utils::SpinLock;
 use std::collections::VecDeque;
@@ -54,7 +55,7 @@ impl SyncTaskList {
     /// - Called not in [`Future::poll`] with the current task.
     ///
     /// In [`Future::poll`] [`call`](crate::Executor::invoke_call)
-    /// [`PushCurrentTaskTo`](crate::runtime::call::Call::PushCurrentTaskTo) instead.
+    /// [`PushCurrentTaskTo`](crate::runtime::Call::PushCurrentTaskTo) instead.
     pub unsafe fn push(&self, task: Task) {
         self.inner.lock().push(task);
     }

@@ -1,3 +1,4 @@
+//! This module provides the [`IsLocal`] trait.
 use std::ops::Deref;
 
 /// A trait that indicates whether a struct is `local` or `shared`.

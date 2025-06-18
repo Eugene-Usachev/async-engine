@@ -1,3 +1,4 @@
+//! This module contains [`EndLocalThreadAndWriteIntoPtr`] struct.
 use crate::local_executor;
 use crate::runtime::global_state::stop_executor;
 use std::future::Future;

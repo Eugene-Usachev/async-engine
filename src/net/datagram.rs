@@ -1,7 +1,9 @@
-use crate::io::{AsyncBind, AsyncConnectDatagram, AsyncPeekFrom, AsyncRecvFrom, AsyncSendTo, sys};
-use crate::net::Socket;
+//! This module provides the [`Datagram`] trait, which defines common operations for
+//! connectionless datagram-based sockets, such as UDP.
+use crate::io::{sys, AsyncBind, AsyncConnectDatagram, AsyncPeekFrom, AsyncRecvFrom, AsyncSendTo};
 use crate::net::connected_datagram::ConnectedDatagram;
 use crate::net::new_unix_unsupported_error;
+use crate::net::Socket;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// The `Datagram` trait defines common operations for connectionless datagram-based sockets,

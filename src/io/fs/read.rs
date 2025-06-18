@@ -1,10 +1,12 @@
-use crate as orengine;
+//! This module provides the [`ReadBytes`], [`ReadFixed`], [`PositionedReadBytes`]
+//! and [`PositionedReadFixed`] IO operations and [`AsyncRead`] trait.
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
 use crate::io::sys::{AsRawFile, RawFile};
-use crate::io::worker::{IoWorker, local_worker};
+use crate::io::worker::{local_worker, IoWorker};
 use crate::io::{Buffer, FixedBufferMut};
 use crate::utils::unwrap_or_bug_hint;
-use orengine_macros::poll_for_io_request;
+
+use crate::io::macros::poll_for_io_request;
 use std::future::Future;
 use std::io::Result;
 use std::marker::PhantomData;
@@ -39,17 +41,21 @@ impl Future for ReadBytes<'_> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().read(
-                this.raw_file,
-                this.buf.as_mut_ptr(),
-                this.buf.len() as u32,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().read(
+                    this.raw_file,
+                    this.buf.as_mut_ptr(),
+                    this.buf.len() as u32,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret
-        ));
+        );
     }
 }
 
@@ -89,18 +95,22 @@ impl Future for ReadFixed<'_> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().read_fixed(
-                this.raw_file,
-                this.ptr,
-                this.len,
-                this.fixed_index,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().read_fixed(
+                    this.raw_file,
+                    this.ptr,
+                    this.len,
+                    this.fixed_index,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret as u32
-        ));
+        );
     }
 }
 
@@ -141,18 +151,22 @@ impl Future for PositionedReadBytes<'_> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().pread(
-                this.raw_file,
-                this.buf.as_mut_ptr(),
-                this.buf.len() as u32,
-                this.offset,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().pread(
+                    this.raw_file,
+                    this.buf.as_mut_ptr(),
+                    this.buf.len() as u32,
+                    this.offset,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret
-        ));
+        );
     }
 }
 
@@ -199,19 +213,23 @@ impl Future for PositionedReadFixed<'_> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().pread_fixed(
-                this.raw_file,
-                this.ptr,
-                this.len,
-                this.fixed_index,
-                this.offset,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().pread_fixed(
+                    this.raw_file,
+                    this.ptr,
+                    this.len,
+                    this.fixed_index,
+                    this.offset,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret as u32
-        ));
+        );
     }
 }
 
@@ -243,7 +261,7 @@ unsafe impl Send for PositionedReadFixed<'_> {}
 /// buffer.append(b"Hello world!");
 /// file.write_all(&buffer).await?;
 ///
-/// // Asynchronously read into buffer
+/// // Asynchronously read into the buffer
 /// let bytes_read = file.read(&mut buffer).await?;
 /// // Asynchronously read exactly 12 bytes
 /// file.read_exact(&mut buffer.slice_mut(..12)).await?;

@@ -1,3 +1,4 @@
+//! This module contains [`SendableNonNull`].
 use std::ops::Deref;
 use std::ptr::NonNull;
 

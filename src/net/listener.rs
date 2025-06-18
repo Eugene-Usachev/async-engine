@@ -1,3 +1,5 @@
+//! The `Listener` trait defines common socket-related operations for types that implement
+//! listening functionality, such as [`TCP socket listeners`](crate::net::TcpListener).
 use crate::io::{AsyncAccept, AsyncBind};
 use crate::net::{Socket, Stream};
 
@@ -6,7 +8,7 @@ use crate::net::{Socket, Stream};
 ///
 /// It is intended to be implemented for types that accept incoming connections
 /// via the [`AsyncAccept`] trait and provides methods for querying and configuring socket settings,
-/// such as TTL and obtaining the local address. Additionally, it offers the ability
+/// such as TTL and getting the local address. Additionally, it offers the ability
 /// to retrieve pending socket errors.
 ///
 /// # Implemented Traits

@@ -1,20 +1,21 @@
+//! This module provides the [`OsPath`] and [`OsPathPtr`] types.
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// Synonymous with os paths type.
+/// Synonymous with OS paths type.
 pub(crate) type OsPath = PathBuf;
 
-/// Synonymous with os paths type pointer.
+/// Synonymous with an OS path type pointer.
 pub(crate) type OsPathPtr = *const PathBuf;
 
-/// Get os path from path.
+/// Get OS path from path.
 #[inline]
 #[allow(clippy::unnecessary_wraps, reason = "It is an accepted signature.")]
 pub(crate) fn get_os_path(path: &Path) -> io::Result<OsPath> {
     Ok(path.to_path_buf())
 }
 
-/// Gets a pointer to os path.
+/// Gets a pointer to an OS path.
 pub(crate) fn get_os_path_ptr(path: &OsPath) -> OsPathPtr {
     path
 }

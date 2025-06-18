@@ -1,3 +1,5 @@
+//! This module provides the [`OnceState`] enum.
+
 /// `OnceState` is used to indicate whether the `Once` has been called or not.
 ///
 /// # Variants

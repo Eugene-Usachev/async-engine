@@ -1,11 +1,14 @@
+//! This module provides the [`get_core_id_for_executor`] function to balance the
+//! [`executors`](crate::Executor) between cores.
+use crate::utils::{get_core_ids, CoreId};
 use crate::BUG_MESSAGE;
-use crate::utils::{CoreId, get_core_ids};
 use std::collections::VecDeque;
 use std::sync::{LazyLock, Mutex};
 
-/// A list of cores ids. It is needed for balancing the [`executors`](crate::Executor) between cores.
+/// A list of cores ids. It is necessary for balancing the [`executors`](crate::Executor) between cores.
 static CORES_IDS_LIST: LazyLock<Mutex<VecDeque<CoreId>>> = LazyLock::new(|| {
     let cores = get_core_ids().expect(BUG_MESSAGE);
+
     Mutex::new(VecDeque::from(cores))
 });
 
@@ -18,6 +21,7 @@ static CORES_IDS_LIST: LazyLock<Mutex<VecDeque<CoreId>>> = LazyLock::new(|| {
 pub(crate) fn get_core_id_for_executor() -> CoreId {
     let mut table = CORES_IDS_LIST.lock().expect(BUG_MESSAGE);
     let core_id = table.pop_front().expect(BUG_MESSAGE);
+
     table.push_back(core_id);
 
     core_id

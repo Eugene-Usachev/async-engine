@@ -1,3 +1,6 @@
+//! This module contains [`BorrowedFile`] and [`BorrowedSocket`] traits to use
+//! `files` and `sockets` on any OS.
+
 /// `BorrowedSocket` is a synonym for `BorrowedFd` (`std::os::fd::BorrowedFd`) on `unix`
 /// or [`BorrowedSocket`](std::os::windows::io::BorrowedSocket) on `windows`.
 #[cfg(windows)]

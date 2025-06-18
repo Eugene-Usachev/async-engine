@@ -1,3 +1,5 @@
+//! This module contains the definitions of the fixed I/O buffer traits:
+//! [`FixedBuffer`], [`FixedBufferMut`].
 use crate::utils::Sealed;
 
 /// Represents an immutable __fixed__ I/O buffer.

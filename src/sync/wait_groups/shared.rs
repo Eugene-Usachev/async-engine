@@ -1,9 +1,10 @@
+//! This module contains the [`WaitGroup`].
 use crate::panic_if_local_in_future;
-use crate::runtime::call::Call;
-use crate::runtime::{IsLocal, local_executor};
+use crate::runtime::Call;
+use crate::runtime::{local_executor, IsLocal};
 use crate::sync::wait_groups::AsyncWaitGroup;
 use crate::utils::{
-    SyncTaskListFromPool, acquire_sync_task_list_from_pool, acquire_task_vec_from_pool,
+    acquire_sync_task_list_from_pool, acquire_task_vec_from_pool, SyncTaskListFromPool,
 };
 use std::future::Future;
 use std::panic::{RefUnwindSafe, UnwindSafe};

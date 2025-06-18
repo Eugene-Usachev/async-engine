@@ -1,3 +1,5 @@
+//! This module contains tests for the `Buffer` struct.
+
 #[cfg(test)]
 mod buffer_tests {
     use crate as orengine;

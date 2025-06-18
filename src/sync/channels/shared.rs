@@ -1,24 +1,25 @@
+//! This module contains the implementation of the [`Channel`].
 use crate::panic_if_local_in_future;
-use crate::runtime::call::Call;
 use crate::runtime::waiting_task::WaitingTask;
-use crate::runtime::{IsLocal, Task, TaskWithDeadline, local_executor};
+use crate::runtime::Call;
+use crate::runtime::{local_executor, IsLocal, Task, TaskWithDeadline};
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
 use crate::sync::channels::state::{CallState, CallStatePtr};
 use crate::sync::channels::waiting_task::waiting_select_task_deque::WaitingTaskSharedDequeGuard;
 use crate::sync::channels::waiting_task::{PopIfAcquiredResult, TaskInSelectBranch};
 use crate::sync::channels::{SelectReceiver, SelectSender};
-use crate::sync::mutexes::naive_shared::NaiveMutex;
+use crate::sync::mutexes::NaiveMutex;
 use crate::sync::{
     AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, RecvErr, RecvTimeoutErr, SendErr,
     SendTimeoutErr, TryRecvErr, TrySendErr, Unlock,
 };
-use crate::utils::{OrengineInstant, Ptr, unwrap_or_bug_hint};
 use crate::utils::{unlikely, unreachable_hint};
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant, Ptr};
 use std::collections::VecDeque;
 use std::future::Future;
 use std::mem::ManuallyDrop;
 use std::panic::{RefUnwindSafe, UnwindSafe};
-use std::ptr::{NonNull, copy_nonoverlapping};
+use std::ptr::{copy_nonoverlapping, NonNull};
 use std::task::{Context, Poll};
 use std::{mem, ptr};
 
@@ -901,17 +902,49 @@ macro_rules! generate_recv_or_subscribe {
 ///
 /// Read [`Executor`](crate::Executor) for more details.
 ///
-/// # Example
+/// # Examples
+///
+/// ## No splitting
 ///
 /// ```rust
 /// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
 ///
-///  async fn foo() {
+/// async fn foo() {
 ///     let channel = orengine::sync::Channel::bounded(1); // capacity = 1
 ///
 ///     channel.send(1).await.unwrap();
+///
 ///     let res = channel.recv().await.unwrap();
+///
 ///     assert_eq!(res, 1);
+/// }
+/// ```
+///
+/// ## Splitting
+///
+/// You can split the channel by using only one trait of [`AsyncSender`] and [`AsyncReceiver`].
+///
+/// ```rust
+/// use orengine::sync::{AsyncChannel, AsyncReceiver, AsyncSender};
+/// use orengine::local_executor;
+///
+/// use std::sync::Arc;
+///
+/// async fn return_value(sender: impl AsyncSender<u32>) {
+///     sender.send(1).await.unwrap();
+/// }
+///
+/// async fn print_value(receiver: impl AsyncReceiver<u32>) {
+///     let res = receiver.recv().await.unwrap();
+///
+///     assert_eq!(res, 1);
+/// }
+///
+/// async fn foo() {
+///     let channel = Arc::new(orengine::sync::Channel::bounded(1)); // capacity = 1
+///
+///     local_executor().spawn_shared(return_value(channel.clone()));
+///     local_executor().spawn_shared(print_value(channel));
 /// }
 /// ```
 pub struct Channel<T> {

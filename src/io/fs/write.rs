@@ -1,12 +1,14 @@
-use orengine_macros::poll_for_io_request;
+//! This module provides the [`WriteBytes`], [`WriteFixed`], [`PositionedWriteBytes`]
+//! and [`PositionedWriteFixed`] IO operations and [`AsyncWrite`] trait.
+
 use std::future::Future;
 use std::io::Result;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use crate as orengine;
 use crate::io::io_request_data::{IoRequestData, IoRequestDataPtr};
+use crate::io::macros::poll_for_io_request;
 use crate::io::sys::{AsRawFile, RawFile};
 use crate::io::worker::{IoWorker, local_worker};
 use crate::io::{Buffer, FixedBuffer};
@@ -40,17 +42,21 @@ impl Future for WriteBytes<'_> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().write(
-                this.raw_file,
-                this.buf.as_ptr(),
-                this.buf.len() as u32,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().write(
+                    this.raw_file,
+                    this.buf.as_ptr(),
+                    this.buf.len() as u32,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret
-        ));
+        );
     }
 }
 
@@ -90,18 +96,22 @@ impl Future for WriteFixed<'_> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().write_fixed(
-                this.raw_file,
-                this.ptr,
-                this.len,
-                this.fixed_index,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().write_fixed(
+                    this.raw_file,
+                    this.ptr,
+                    this.len,
+                    this.fixed_index,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret as u32
-        ));
+        );
     }
 }
 
@@ -137,18 +147,22 @@ impl Future for PositionedWriteBytes<'_> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().pwrite(
-                this.raw_file,
-                this.buf.as_ptr(),
-                this.buf.len() as u32,
-                this.offset,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().pwrite(
+                    this.raw_file,
+                    this.buf.as_ptr(),
+                    this.buf.len() as u32,
+                    this.offset,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret
-        ));
+        );
     }
 }
 
@@ -196,19 +210,23 @@ impl Future for PositionedWriteFixed<'_> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = &mut *self;
-        let ret;
 
-        poll_for_io_request!((
-            local_worker().pwrite_fixed(
-                this.raw_file,
-                this.ptr,
-                this.len,
-                this.fixed_index,
-                this.offset,
-                IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut()))
-            ),
+        poll_for_io_request!(
+            {
+                local_worker().pwrite_fixed(
+                    this.raw_file,
+                    this.ptr,
+                    this.len,
+                    this.fixed_index,
+                    this.offset,
+                    IoRequestDataPtr::new(unwrap_or_bug_hint(this.io_request_data.as_mut())),
+                );
+            },
+            this.io_request_data,
+            cx,
+            ret,
             ret as u32
-        ));
+        );
     }
 }
 
@@ -244,7 +262,7 @@ unsafe impl Send for PositionedWriteFixed<'_> {}
 pub trait AsyncWrite: AsRawFile {
     /// Asynchronously writes data from the provided byte slice to the file descriptor.
     ///
-    /// This method write some bytes from the byte slice to the file descriptor.
+    /// This method writes some bytes from the byte slice to the file descriptor.
     /// It returns a future that resolves to the number of bytes written.
     ///
     /// # Difference between `write` and `write_bytes`
@@ -273,7 +291,7 @@ pub trait AsyncWrite: AsRawFile {
 
     /// Asynchronously writes data from the provided [`Buffer`] to the file descriptor.
     ///
-    /// This method write some bytes from the [`Buffer`] to the file descriptor.
+    /// This method writes some bytes from the [`Buffer`] to the file descriptor.
     /// It returns a future that resolves to the number of bytes written.
     ///
     /// # Difference between `write` and `write_bytes`
@@ -321,7 +339,7 @@ pub trait AsyncWrite: AsRawFile {
         }
     }
 
-    /// Asynchronously performs a positioned write, writing the provided byte slice to the file
+    /// Asynchronously performs a positioned writing, writing the provided byte slice to the file
     /// at the specified offset.
     ///
     /// This method does not modify the file's current position but instead writes to the specified
@@ -351,7 +369,7 @@ pub trait AsyncWrite: AsRawFile {
         PositionedWriteBytes::new(self.as_raw_file(), buf, offset)
     }
 
-    /// Asynchronously performs a positioned write, writing the provided [`Buffer`]
+    /// Asynchronously performs a positioned writing, writing the provided [`Buffer`]
     /// to the file at the specified offset.
     ///
     /// This method does not modify the file's current position but instead writes to the specified
@@ -497,7 +515,7 @@ pub trait AsyncWrite: AsRawFile {
         Ok(())
     }
 
-    /// Asynchronously performs a positioned write, writing the entire provided byte slice
+    /// Asynchronously performs a positioned writing, writing the entire provided byte slice
     /// from the buffer starting at the specified offset.
     ///
     /// This method continues writing from the specified `offset` until the entire byte slice
@@ -531,7 +549,7 @@ pub trait AsyncWrite: AsRawFile {
         Ok(())
     }
 
-    /// Asynchronously performs a positioned write, writing the entire provided [`Buffer`]
+    /// Asynchronously performs a positioned writing, writing the entire provided [`Buffer`]
     /// from the buffer starting at the specified offset.
     ///
     /// This method continues writing from the specified `offset` until the entire [`Buffer`]

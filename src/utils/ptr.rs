@@ -1,4 +1,5 @@
-use std::alloc::{Layout, alloc, dealloc};
+//! This module contains definitions for the [`Ptr`].
+use std::alloc::{alloc, dealloc, Layout};
 use std::fmt::Debug;
 use std::ptr;
 

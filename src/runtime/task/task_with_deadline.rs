@@ -1,7 +1,8 @@
+//! This module contains the [`TaskWithDeadline`].
 use crate::local_executor;
 use crate::runtime::Task;
 use crate::sync::channels::{CallState, CallStatePtr};
-use crate::utils::{OrengineInstant, likely};
+use crate::utils::{likely, OrengineInstant};
 use std::cell::UnsafeCell;
 use std::ptr;
 use std::ptr::NonNull;
@@ -172,7 +173,7 @@ mod tests {
     use crate::sync::{
         AsyncCondVar, AsyncMutex, AsyncWaitGroup, LocalCondVar, LocalMutex, LocalWaitGroup,
     };
-    use crate::{Local, sleep_until};
+    use crate::{sleep_until, Local};
     use std::time::Duration;
 
     #[orengine::test_local]

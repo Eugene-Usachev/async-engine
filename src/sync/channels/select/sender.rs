@@ -1,7 +1,12 @@
-use crate::sync::AsyncSender;
+//! This module contains the [`SelectSender`].
+//!
+//! It is public only for implementation the [`select`](crate::select).
+//! If you don't want to write your own `select` or understand how does `Orengine` works,
+//! you don't need to read it.
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
 use crate::sync::channels::state::CallStatePtr;
 use crate::sync::channels::waiting_task::TaskInSelectBranch;
+use crate::sync::AsyncSender;
 use std::ptr::NonNull;
 
 /// The `SelectSender` trait provides methods for [`select`](crate::select).

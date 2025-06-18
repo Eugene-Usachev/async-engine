@@ -1,6 +1,7 @@
-use crate::runtime::{IsLocal, Task, local_executor};
+//! This module contains the [`LocalWaitGroup`].
+use crate::runtime::{local_executor, IsLocal, Task};
 use crate::sync::wait_groups::AsyncWaitGroup;
-use crate::utils::{TaskVecFromPool, acquire_task_vec_from_pool};
+use crate::utils::{acquire_task_vec_from_pool, TaskVecFromPool};
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::pin::Pin;

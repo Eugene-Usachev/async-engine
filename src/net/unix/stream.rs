@@ -1,7 +1,7 @@
 //! This module contains [`UnixStream`].
 
-use crate::io::sys::{AsRawSocket, AsSocket, FromRawSocket, IntoRawSocket, RawSocket};
 use crate::io::AsyncShutdown;
+use crate::io::sys::{AsRawSocket, AsSocket, FromRawSocket, IntoRawSocket, RawSocket};
 use crate::io::{
     AsyncConnectStream, AsyncPeek, AsyncPollSocket, AsyncRecv, AsyncSend, AsyncSocketClose,
 };
@@ -162,8 +162,8 @@ impl Drop for UnixStream {
 mod tests {
     use crate as orengine;
     use crate::io::{
-        buffer, get_fixed_buffer, AsyncAccept, AsyncBind, AsyncConnectStream, AsyncPeek,
-        AsyncPollSocket, AsyncRecv, AsyncSend, FixedBuffer,
+        AsyncAccept, AsyncBind, AsyncConnectStream, AsyncPeek, AsyncPollSocket, AsyncRecv,
+        AsyncSend, FixedBuffer, buffer, get_fixed_buffer,
     };
     use crate::net::{UnixListener, UnixStream};
     use crate::sync::{
@@ -317,13 +317,13 @@ mod tests {
         assert_eq!(REQUEST, buffered_request.as_bytes());
 
         let wg = Rc::new(LocalWaitGroup::new());
-        wg.inc();
+        wg.inc().await;
         let wg_clone = wg.clone();
 
         local_executor().spawn_local(async move {
             let mut listener = UnixListener::bind(ADDR).await.expect("bind failed");
 
-            wg_clone.done();
+            wg_clone.done().await;
 
             let mut stream = listener.accept().await.expect("accept failed").0;
 
@@ -410,13 +410,13 @@ mod tests {
         let wg = Rc::new(LocalWaitGroup::new());
         let wg_clone = wg.clone();
 
-        wg.inc();
+        wg.inc().await;
 
         local_executor().spawn_local(async move {
             let mut listener = UnixListener::bind(ADDR).await.expect("bind failed");
             let mut expected_state = 0;
 
-            wg_clone.done();
+            wg_clone.done().await;
 
             loop {
                 {

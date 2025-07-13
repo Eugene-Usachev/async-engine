@@ -1,33 +1,26 @@
 //! This module contains the [`WaitGroup`].
 use crate::panic_if_local_in_future;
-use crate::runtime::Call;
-use crate::runtime::{local_executor, IsLocal};
+use crate::runtime::{Call, IsLocal, Task, local_executor};
 use crate::sync::wait_groups::AsyncWaitGroup;
-use crate::utils::{
-    acquire_sync_task_list_from_pool, acquire_task_vec_from_pool, SyncTaskListFromPool,
-};
+use crate::sync::{AsyncMutex, NaiveMutex, NaiveMutexGuard};
+use crate::utils::{TaskVecFromPool, acquire_task_vec_from_pool, clear_with};
 use std::future::Future;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
-use std::ptr::NonNull;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::{Acquire, Release};
 use std::task::{Context, Poll};
 
 /// A [`Future`] to wait for all tasks in the [`WaitGroup`] to complete.
 #[repr(C)]
 pub struct WaitSharedWaitGroup<'wait_group> {
-    wait_group: &'wait_group WaitGroup,
-    was_called: bool,
+    maybe_guard: Option<NaiveMutexGuard<'wait_group, Inner>>,
 }
 
 impl<'wait_group> WaitSharedWaitGroup<'wait_group> {
     /// Creates a new [`WaitSharedWaitGroup`] future.
     #[inline]
-    pub(crate) fn new(wait_group: &'wait_group WaitGroup) -> Self {
+    fn new(guard: NaiveMutexGuard<'wait_group, Inner>) -> Self {
         Self {
-            wait_group,
-            was_called: false,
+            maybe_guard: Some(guard),
         }
     }
 }
@@ -40,35 +33,26 @@ impl Future for WaitSharedWaitGroup<'_> {
         let this = &mut *self;
         unsafe { panic_if_local_in_future!(cx, "WaitGroup") };
 
-        if !this.was_called {
-            this.was_called = true;
+        if let Some(mut guard) = this.maybe_guard.take() {
+            debug_assert!(guard.counter > 0);
 
-            // Here I need to explain this decision.
-            //
-            // I think it's a rare case where all the tasks were completed before the wait was called.
-            // Therefore, I sacrifice performance in this case to get much faster in the frequent case.
-            //
-            // Otherwise, I'd have to keep track of how many tasks are in the queue,
-            // which means calling out one more atomic operation in each done call.
-            //
-            // So, I enqueue the task first, and only then do the check.
+            guard.waiting_tasks.push(unsafe { Task::from_context(cx) });
+
             unsafe {
-                local_executor().invoke_call(
-                    Call::push_current_task_to_and_remove_it_if_counter_is_zero(
-                        NonNull::new_unchecked(
-                            (&raw const *this.wait_group.waited_tasks).cast_mut(),
-                        ),
-                        NonNull::new_unchecked((&raw const this.wait_group.counter).cast_mut()),
-                        Acquire,
-                    ),
-                );
-            }
+                local_executor().invoke_call(Call::release_atomic_bool(guard.leak_to_atomic()))
+            };
 
-            Poll::Pending
-        } else {
-            Poll::Ready(())
+            return Poll::Pending;
         }
+
+        Poll::Ready(())
     }
+}
+
+/// Inner of [`WaitGroup`].
+struct Inner {
+    counter: usize,
+    waiting_tasks: TaskVecFromPool,
 }
 
 /// `WaitGroup` is a synchronization primitive that allows to [`wait`](Self::wait)
@@ -90,19 +74,19 @@ impl Future for WaitSharedWaitGroup<'_> {
 /// use orengine::sync::{AsyncWaitGroup, WaitGroup};
 ///
 /// # async fn foo() {
-/// let wait_group = Arc::new(WaitGroup::new());
+/// let wait_group = Arc::new(WaitGroup::new_with_count(10));
 /// let number_executed_tasks = Arc::new(AtomicUsize::new(0));
 ///
 /// for i in 0..10 {
 ///     let wait_group = wait_group.clone();
 ///     let number_executed_tasks = number_executed_tasks.clone();
 ///
-///     wait_group.inc();
-///
 ///     local_executor().spawn_shared(async move {
 ///         sleep(Duration::from_millis(i)).await;
+///
 ///         number_executed_tasks.fetch_add(1, SeqCst);
-///         wait_group.done();
+///
+///         wait_group.done().await;
 ///     });
 /// }
 ///
@@ -111,8 +95,7 @@ impl Future for WaitSharedWaitGroup<'_> {
 /// # }
 /// ```
 pub struct WaitGroup {
-    counter: AtomicUsize,
-    waited_tasks: SyncTaskListFromPool,
+    inner: NaiveMutex<Inner>,
 }
 
 impl WaitGroup {
@@ -135,7 +118,7 @@ impl WaitGroup {
     ///     local_executor().spawn_shared(async move {
     ///         sleep(Duration::from_millis(i)).await;
     ///
-    ///         wg.done();
+    ///         wg.done().await;
     ///     });
     /// }
     ///
@@ -144,8 +127,10 @@ impl WaitGroup {
     /// ```
     pub fn new_with_count(count: usize) -> Self {
         Self {
-            counter: AtomicUsize::new(count),
-            waited_tasks: acquire_sync_task_list_from_pool(),
+            inner: NaiveMutex::new(Inner {
+                counter: count,
+                waiting_tasks: acquire_task_vec_from_pool(),
+            }),
         }
     }
 
@@ -179,7 +164,7 @@ impl WaitGroup {
     ///     local_executor().spawn_shared(async move {
     ///         sleep(Duration::from_millis(i)).await;
     ///
-    ///         wg.done();
+    ///         wg.done().await;
     ///     });
     /// }
     ///
@@ -187,7 +172,14 @@ impl WaitGroup {
     /// # }
     /// ```
     pub fn set_mut(&mut self, count: usize) {
-        *self.counter.get_mut() = count;
+        self.inner.get_mut().counter = count;
+    }
+
+    /// Wakes up all waiting tasks.
+    fn wake_all_waiters(inner: &mut Inner) {
+        clear_with(&mut inner.waiting_tasks, |task| {
+            local_executor().spawn_shared_task(task);
+        });
     }
 }
 
@@ -197,50 +189,49 @@ impl IsLocal for WaitGroup {
 
 impl AsyncWaitGroup for WaitGroup {
     #[inline]
-    fn add(&self, count: usize) {
-        debug_assert!(
-            self.counter.load(Acquire) < usize::MAX / 4,
-            "WaitGroup counter overflow"
-        );
+    async fn add(&self, count: usize) {
+        let mut inner = self.inner.lock().await;
 
-        self.counter.fetch_add(count, Acquire);
+        debug_assert!(inner.counter < usize::MAX / 4, "WaitGroup counter overflow");
+
+        inner.counter += count;
     }
 
     #[inline]
-    fn count(&self) -> usize {
-        debug_assert!(
-            self.counter.load(Acquire) < usize::MAX / 4,
-            "WaitGroup counter overflow"
-        );
+    async fn count(&self) -> usize {
+        let inner = self.inner.lock().await;
 
-        self.counter.load(Acquire)
+        debug_assert!(inner.counter < usize::MAX / 4, "WaitGroup counter overflow");
+
+        inner.counter
     }
 
     #[inline]
-    fn done(&self) -> usize {
-        let prev_count = self.counter.fetch_sub(1, Release);
+    async fn done(&self) -> usize {
+        let mut inner = self.inner.lock().await;
+
         debug_assert!(
-            prev_count > 0,
+            inner.counter > 0,
             "WaitGroup::done called after counter reached 0"
         );
-        debug_assert!(prev_count < usize::MAX / 4, "WaitGroup counter overflow");
+        debug_assert!(inner.counter < usize::MAX / 4, "WaitGroup counter overflow");
 
-        if prev_count == 1 {
-            let executor = local_executor();
-            let mut tasks = acquire_task_vec_from_pool();
-
-            self.waited_tasks.pop_all_in(&mut tasks);
-            for task in tasks.drain(..) {
-                executor.spawn_shared_task(task);
-            }
+        if inner.counter == 1 {
+            Self::wake_all_waiters(&mut inner);
         }
 
-        prev_count - 1
+        inner.counter -= 1;
+
+        inner.counter
     }
 
     #[inline]
-    fn wait(&self) -> impl Future<Output = ()> {
-        WaitSharedWaitGroup::new(self)
+    async fn wait(&self) {
+        let guard = self.inner.lock().await;
+
+        if guard.counter > 0 {
+            WaitSharedWaitGroup::new(guard).await;
+        }
     }
 }
 
@@ -254,6 +245,49 @@ unsafe impl Sync for WaitGroup {}
 unsafe impl Send for WaitGroup {}
 impl UnwindSafe for WaitGroup {}
 impl RefUnwindSafe for WaitGroup {}
+
+// TODO
+impl<WG, T> AsyncWaitGroup for T
+where
+    WG: AsyncWaitGroup,
+    T: std::ops::Deref<Target = WG>,
+{
+    #[inline]
+    #[allow(
+        clippy::future_not_send,
+        reason = "It is not send for non send types, it is fine"
+    )]
+    async fn add(&self, count: usize) {
+        self.deref().add(count).await;
+    }
+
+    #[inline]
+    #[allow(
+        clippy::future_not_send,
+        reason = "It is not send for non send types, it is fine"
+    )]
+    async fn count(&self) -> usize {
+        self.deref().count().await
+    }
+
+    #[inline]
+    #[allow(
+        clippy::future_not_send,
+        reason = "It is not send for non send types, it is fine"
+    )]
+    async fn done(&self) -> usize {
+        self.deref().done().await
+    }
+
+    #[inline]
+    #[allow(
+        clippy::future_not_send,
+        reason = "It is not `Send` only when T is not `Send`, it is fine"
+    )]
+    async fn wait(&self) {
+        self.deref().wait().await;
+    }
+}
 
 /// ```rust
 /// use orengine::sync::{WaitGroup, AsyncWaitGroup};
@@ -274,7 +308,7 @@ mod tests {
     use super::*;
     use crate as orengine;
     use crate::sync::{AsyncMutex, Mutex};
-    use crate::test::sched_future_to_another_thread;
+    use crate::test::sched_future;
     use crate::{sleep, yield_now};
     use std::sync::Arc;
     use std::time::Duration;
@@ -283,44 +317,51 @@ mod tests {
 
     #[orengine::test::test_shared]
     fn test_shared_wg_many_wait_one() {
-        let check_value = Arc::new(std::sync::Mutex::new(false));
+        let check_value = Arc::new(Mutex::new(false));
         let wait_group = Arc::new(WaitGroup::new());
-        wait_group.inc();
+
+        wait_group.inc().await;
 
         for _ in 0..PAR {
             let check_value = check_value.clone();
             let wait_group = wait_group.clone();
 
-            sched_future_to_another_thread(async move {
+            sched_future(async move {
                 wait_group.wait().await;
-                assert!(*check_value.lock().unwrap(), "not waited");
+
+                assert!(*check_value.lock().await, "not waited");
             });
         }
 
         yield_now().await;
 
-        *check_value.lock().unwrap() = true;
-        wait_group.done();
+        *check_value.lock().await = true;
+
+        wait_group.done().await;
     }
 
     #[orengine::test::test_shared]
     fn test_shared_wg_one_wait_many_task_finished_after_wait() {
         let check_value = Arc::new(std::sync::Mutex::new(PAR));
         let wait_group = Arc::new(WaitGroup::new());
-        wait_group.add(PAR);
+
+        wait_group.add(PAR).await;
 
         for _ in 0..PAR {
             let check_value = check_value.clone();
             let wait_group = wait_group.clone();
 
-            sched_future_to_another_thread(async move {
+            sched_future(async move {
                 *check_value.lock().unwrap() -= 1;
+
                 sleep(Duration::from_millis(100)).await;
-                wait_group.done();
+
+                wait_group.done().await;
             });
         }
 
         wait_group.wait().await;
+
         assert_eq!(*check_value.lock().unwrap(), 0, "not waited");
     }
 
@@ -328,19 +369,22 @@ mod tests {
     fn test_shared_wg_one_wait_many_task_finished_before_wait() {
         let check_value = Arc::new(std::sync::Mutex::new(PAR));
         let wait_group = Arc::new(WaitGroup::new());
-        wait_group.add(PAR);
+
+        wait_group.add(PAR).await;
 
         for _ in 0..PAR {
             let check_value = check_value.clone();
             let wait_group = wait_group.clone();
 
-            sched_future_to_another_thread(async move {
+            sched_future(async move {
                 *check_value.lock().unwrap() -= 1;
-                wait_group.done();
+
+                wait_group.done().await;
             });
         }
 
         wait_group.wait().await;
+
         assert_eq!(*check_value.lock().unwrap(), 0, "not waited");
     }
 
@@ -348,7 +392,8 @@ mod tests {
     fn test_shared_wg_as_barrier() {
         let check_value = Arc::new(Mutex::new(0));
         let wait_group = Arc::new(WaitGroup::new());
-        wait_group.add(6);
+
+        wait_group.add(6).await;
 
         for _ in 0..5 {
             let check_value = check_value.clone();
@@ -359,7 +404,7 @@ mod tests {
 
                 *check_value.lock().await += 1;
 
-                wait_group.done();
+                wait_group.done().await;
                 wait_group.wait().await;
 
                 assert_eq!(*check_value.lock().await, 6);
@@ -370,7 +415,8 @@ mod tests {
 
         *check_value.lock().await += 1;
 
-        wait_group.done();
+        wait_group.done().await;
+
         wait_group.wait().await;
 
         assert_eq!(*check_value.lock().await, 6);

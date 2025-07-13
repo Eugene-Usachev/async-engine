@@ -2,7 +2,7 @@
 use crate::local_executor;
 use crate::runtime::Task;
 use crate::sync::channels::{CallState, CallStatePtr};
-use crate::utils::{likely, OrengineInstant};
+use crate::utils::{OrengineInstant, likely};
 use std::cell::UnsafeCell;
 use std::ptr;
 use std::ptr::NonNull;
@@ -173,7 +173,7 @@ mod tests {
     use crate::sync::{
         AsyncCondVar, AsyncMutex, AsyncWaitGroup, LocalCondVar, LocalMutex, LocalWaitGroup,
     };
-    use crate::{sleep_until, Local};
+    use crate::{Local, sleep_until};
     use std::time::Duration;
 
     #[orengine::test_local]
@@ -190,7 +190,7 @@ mod tests {
                 let start = OrengineInstant::now();
                 let $deadline_ident = start + Duration::from_millis(1000);
 
-                wg.inc();
+                wg.inc().await;
 
                 local_executor().exec_local_future(async move {
                     let mut guard = task_clone.lock().await;
@@ -212,7 +212,7 @@ mod tests {
 
                     *result.borrow_mut() += 1;
 
-                    wg_clone.done();
+                    wg_clone.done().await;
                 });
 
                 let mut task_guard = task.wait_while(task.lock().await, |v| v.is_none()).await;

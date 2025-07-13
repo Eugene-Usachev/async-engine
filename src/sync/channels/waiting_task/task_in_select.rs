@@ -12,14 +12,14 @@
 use crate::local_executor;
 use crate::runtime::{Task, TaskWithDeadline};
 use crate::sync::channels::state::CallStatePtr;
+use crate::utils::Backoff;
+use crate::utils::{clear_with, unlikely};
 use crate::utils::{likely, unreachable_hint};
-use crate::utils::{unlikely, Backoff};
 use std::cell::UnsafeCell;
 use std::ptr;
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst};
-use std::sync::atomic::{fence, AtomicUsize};
-
+use std::sync::atomic::{AtomicUsize, fence};
 
 /// It means that [`TaskInSelect`] is not acquired.
 const NOT_ACQUIRED: usize = 0;
@@ -251,7 +251,7 @@ impl TaskInSelectBranch {
                     // It may fail (and set `NOT_ACQUIRED`) or succeed (and set `ACQUIRED`).
                     // We will for this update. It is not a performance issue because it
                     // happens very rarely, and we wait at the max time of `load` + `store`.
-                    backoff.spin();
+                    backoff.snooze();
                 } else {
                     self.task_in_select
                         .set_resolved_branch_id(self.associated_branch_id);
@@ -519,7 +519,7 @@ impl TaskInSelectBranch {
                             }
                             ACQUIRING_NOW => {
                                 if !backoff.is_completed() {
-                                    backoff.spin();
+                                    backoff.snooze();
                                 } else {
                                     // Probably a deadlock has occurred
 
@@ -646,9 +646,9 @@ unsafe impl Send for TaskInSelectPool {}
 
 impl Drop for TaskInSelectPool {
     fn drop(&mut self) {
-        for inner in self.vec.drain(..) {
+        clear_with(&mut self.vec, |inner| {
             unsafe { drop(Box::from_raw(inner.as_ptr())) };
-        }
+        });
     }
 }
 

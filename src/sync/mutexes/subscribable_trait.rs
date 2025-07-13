@@ -1,10 +1,16 @@
 //! This module contains the [`AsyncSubscribableMutex`] trait.
 use crate::runtime::Task;
-use crate::sync::AsyncMutex;
+use crate::sync::{AsyncMutex, AsyncMutexGuard};
 use std::future::Future;
 use std::marker::PhantomData;
+use std::mem;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
+enum GuardOrMutexRef<'mutex, T: ?Sized + 'mutex, Mu: AsyncSubscribableMutex<T> + ?Sized> {
+    Guard(Mu::Guard<'mutex>),
+    MutexRef(&'mutex Mu),
+}
 
 /// `WaitLockOfSubscribableMutex` implements [`Future`] that waits for a `lock`
 /// with `subscription`.
@@ -15,8 +21,7 @@ where
     T: 'mutex + ?Sized,
     Mutex: AsyncSubscribableMutex<T> + ?Sized,
 {
-    mutex: &'mutex Mutex,
-    was_called: bool,
+    guard_or_mutex_ref: GuardOrMutexRef<'mutex, T, Mutex>,
     phantom_data: PhantomData<T>,
 }
 
@@ -26,10 +31,9 @@ where
     Mutex: AsyncSubscribableMutex<T> + ?Sized,
 {
     /// Creates a new `WaitLockOfSubscribableMutex`.
-    pub fn new(mutex: &'mutex Mutex) -> Self {
+    pub fn new(guard: Mutex::Guard<'mutex>) -> Self {
         WaitLockOfSubscribableMutex {
-            mutex,
-            was_called: false,
+            guard_or_mutex_ref: GuardOrMutexRef::Guard(guard),
             phantom_data: PhantomData,
         }
     }
@@ -44,16 +48,25 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = unsafe { self.get_unchecked_mut() };
+        let mutex;
 
-        if !this.was_called {
-            this.was_called = true;
+        match &mut this.guard_or_mutex_ref {
+            GuardOrMutexRef::Guard(guard) => {
+                guard.mutex().low_level_subscribe(cx, guard);
 
-            this.mutex.low_level_subscribe(cx);
-
-            Poll::Pending
-        } else {
-            Poll::Ready(unsafe { this.mutex.get_locked() })
+                mutex = guard.mutex();
+            }
+            GuardOrMutexRef::MutexRef(mutex) => {
+                return Poll::Ready(unsafe { mutex.get_locked() });
+            }
         }
+
+        drop(mem::replace(
+            &mut this.guard_or_mutex_ref,
+            GuardOrMutexRef::MutexRef(mutex),
+        ));
+
+        Poll::Pending
     }
 }
 
@@ -69,10 +82,15 @@ pub trait AsyncSubscribableMutex<T: ?Sized>: AsyncMutex<T> {
     /// the provided task up. It doesn't guarantee that [`unlock`] will be called
     /// or that the task will not wait if [`mutex`](AsyncMutex) is unlocked.
     ///
-    /// This method is a bit efficient than [`subscribe`](Self::subscribe).
+    /// It accepts the [`guard`](AsyncSubscribableMutex::Guard) to ensure that this method is called only while
+    /// the [`mutex`](AsyncMutex) is locked.
+    ///
+    /// Indeed, this method is used to implement [`AsyncCondVar`](crate::sync::AsyncCondVar).
+    ///
+    /// This method is a bit more efficient than [`subscribe`](Self::subscribe).
     ///
     /// [`unlock`]: crate::sync::mutexes::Unlock::unlock
-    fn subscribe_task(&self, task: Task);
+    fn subscribe_task<'mutex>(&self, task: Task, guard: &mut Self::Guard<'mutex>);
 
     /// Subscribing allows you to wait for the following [`unlock`] call.
     ///
@@ -80,10 +98,15 @@ pub trait AsyncSubscribableMutex<T: ?Sized>: AsyncMutex<T> {
     /// the current task up. It doesn't guarantee that [`unlock`] will be called
     /// or that the task will not wait if [`mutex`](AsyncMutex) is unlocked.
     ///
-    /// This method is a bit efficient than [`subscribe`](Self::subscribe).
+    /// It accepts the [`guard`](AsyncSubscribableMutex::Guard) to ensure that this method is called only while
+    /// the [`mutex`](AsyncMutex) is locked.
+    ///
+    /// Indeed, this method is used to implement [`AsyncCondVar`](crate::sync::AsyncCondVar).
+    ///
+    /// This method is a bit more efficient than [`subscribe`](Self::subscribe).
     ///
     /// [`unlock`]: crate::sync::mutexes::Unlock::unlock
-    fn low_level_subscribe(&self, cx: &Context);
+    fn low_level_subscribe<'mutex>(&self, cx: &Context, guard: &mut Self::Guard<'mutex>);
 
     /// Subscribing allows you to wait for the following [`unlock`] call.
     ///
@@ -91,42 +114,20 @@ pub trait AsyncSubscribableMutex<T: ?Sized>: AsyncMutex<T> {
     /// the current task up. It doesn't guarantee that [`unlock`] will be called
     /// or that the task will not wait if [`mutex`](AsyncMutex) is unlocked.
     ///
-    /// __Code below is incorrect__:
+    /// It accepts the [`guard`](AsyncSubscribableMutex::Guard) to ensure that this method is called only while
+    /// the [`mutex`](AsyncMutex) is locked.
     ///
-    /// ```rust
-    /// use orengine::sync::mutexes::AsyncSubscribableMutex;
-    ///
-    /// async fn do_with_locked_value<T, Mutex, F>(mutex: &Mutex, func: F)
-    /// where
-    ///     T: ?Sized,
-    ///     Mutex: AsyncSubscribableMutex<T>,
-    ///     F: FnOnce(&mut T)
-    /// {
-    ///     if let(Some(mut guard)) = mutex.try_lock() { // 1
-    ///         func(&mut *guard);
-    ///         return;
-    ///     }
-    ///
-    ///     // 2 - here another thread can unlock the mutex
-    ///
-    ///     let mut guard = mutex.subscribe().await; // 3
-    ///     func(&mut *guard);
-    /// }
-    /// ```
-    ///
-    /// Because between 1 and 3 the [`mutex`](AsyncMutex) can be unlocked. Use
-    /// [`lock`](AsyncMutex::lock) instead, because it is valid and more likely implemented via
-    /// [`low_level_subscribe`](Self::low_level_subscribe) under the hood.
+    /// Indeed, this method is used to implement [`AsyncCondVar`](crate::sync::AsyncCondVar).
     ///
     /// [`subscribe`](Self::subscribe) is a bit more expensive than
     /// [`low_level_subscribe`](Self::low_level_subscribe).
     ///
     /// [`unlock`]: crate::sync::mutexes::Unlock::unlock
-    fn subscribe<'mutex>(&'mutex self) -> impl Future<Output = Self::Guard<'mutex>>
+    fn subscribe<'mutex>(guard: Self::Guard<'mutex>) -> impl Future<Output = Self::Guard<'mutex>>
     where
         Self: 'mutex,
         T: 'mutex,
     {
-        WaitLockOfSubscribableMutex::new(self)
+        WaitLockOfSubscribableMutex::<T, Self>::new(guard)
     }
 }

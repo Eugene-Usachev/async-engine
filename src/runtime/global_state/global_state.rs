@@ -1,12 +1,12 @@
 //! This module provides the [`GlobalState`] and the [`stop_executor`] and [`stop_all_executors`] functions.
+use crate::runtime::ExecutorSharedTaskList;
 use crate::runtime::global_state::subscribed_state::SubscribedState;
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::runtime::interaction_between_executors::SyncBatchOptimizedTaskQueue;
-use crate::runtime::ExecutorSharedTaskList;
+use crate::utils::unwrap_or_bug_hint;
 use crate::utils::vec_map::VecMap;
-use crate::utils::{SpinLock, SpinLockGuard};
-use crate::{local_executor, Executor};
-use std::sync::Arc;
+use crate::{Executor, local_executor};
+use std::sync::{Arc, Mutex as SyncMutex, MutexGuard as SyncMutexGuard};
 
 /// Contains [`SubscribedState`] and, optionally (`cfg(not(feature = "disable_send_task_to"))`),
 /// [`SyncBatchOptimizedTaskQueue`].
@@ -17,7 +17,7 @@ pub(crate) struct StateOfAliveExecutor {
 }
 
 impl StateOfAliveExecutor {
-    /// Creates a new `StateOfAliveExecutor` of the provided [`Executor`](crate::Executor).
+    /// Creates a new `StateOfAliveExecutor` of the provided [`Executor`].
     fn new(executor: &Executor) -> Self {
         Self {
             subscribed_state: executor.subscribed_state(),
@@ -140,10 +140,10 @@ unsafe impl Send for GlobalState {}
 ///
 /// # Thread safety
 ///
-/// It is thread-safe because it uses [`SpinLock`](SpinLock).
-static GLOBAL_STATE: SpinLock<GlobalState> = SpinLock::new(GlobalState::new());
+/// It is thread-safe because it uses [`std::sync::Mutex`].
+static GLOBAL_STATE: SyncMutex<GlobalState> = SyncMutex::new(GlobalState::new());
 
-/// Locks `GLOBAL_STATE` and returns [`SpinLockGuard<'static, GlobalState>`](SpinLockGuard).
+/// Locks `GLOBAL_STATE` and returns [`SyncMutexGuard<'static, GlobalState>`](std::sync::MutexGuard).
 ///
 /// Frequent calls to this function may cause performance problems.
 ///
@@ -158,15 +158,13 @@ static GLOBAL_STATE: SpinLock<GlobalState> = SpinLock::new(GlobalState::new());
 /// async fn run_shard() {}
 ///
 /// let number_of_cores = get_core_ids().unwrap().len();
-/// let wait_group = Arc::new(WaitGroup::new());
-///
-/// wait_group.add(number_of_cores);
+/// let wait_group = Arc::new(WaitGroup::new_with_count(number_of_cores));
 ///
 /// run_shared_future_on_all_cores(move || {
 ///     let wait_group = wait_group.clone();
 ///
 ///     async move {
-///         wait_group.done();
+///         wait_group.done().await;
 ///         wait_group.wait().await;
 ///
 ///         assert_eq!(executors_ids().len(), number_of_cores);
@@ -177,8 +175,8 @@ static GLOBAL_STATE: SpinLock<GlobalState> = SpinLock::new(GlobalState::new());
 ///     }
 /// });
 /// ```
-pub(crate) fn lock_and_get_global_state() -> SpinLockGuard<'static, GlobalState> {
-    GLOBAL_STATE.lock()
+pub(crate) fn lock_and_get_global_state() -> SyncMutexGuard<'static, GlobalState> {
+    unwrap_or_bug_hint(GLOBAL_STATE.lock())
 }
 
 /// Registers the executor of the current thread (by calling [`local_executor()`](local_executor))
@@ -264,7 +262,7 @@ mod tests {
     use super::*;
     use crate as orengine;
     use crate::runtime::Config;
-    use crate::{local_executor, sleep, Executor};
+    use crate::{Executor, local_executor, sleep};
     use std::thread;
     use std::time::Duration;
 

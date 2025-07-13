@@ -1,11 +1,11 @@
-//! This module contains [`EndLocalThreadAndWriteIntoPtr`] struct.
+//! This module contains [`FinishLocalExecutorAndWriteIntoPtr`] struct.
 use crate::local_executor;
 use crate::runtime::global_state::stop_executor;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-/// `EndLocalThreadAndWriteIntoPtr` is a wrapper of a future. After the future is done,
+/// `FinishLocalExecutorAndWriteIntoPtr` is a wrapper of a future. After the future is done,
 /// a result of the future is written into the pointer.
 ///
 /// # Why it is necessary?
@@ -14,14 +14,14 @@ use std::task::{Context, Poll};
 /// But if we use an async block in `Future::poll`, it allocates only one memory.
 ///
 /// When I say "async block," I mean the future represented by `async {}`.
-pub(crate) struct EndLocalThreadAndWriteIntoPtr<R, Fut: Future<Output = R>> {
+pub(crate) struct FinishLocalExecutorAndWriteIntoPtr<R, Fut: Future<Output = R>> {
     res_ptr: *mut Option<R>,
     future: Fut,
     local_executor_id: usize,
 }
 
-impl<R, Fut: Future<Output = R>> EndLocalThreadAndWriteIntoPtr<R, Fut> {
-    /// Creates a new `EndLocalThreadAndWriteIntoPtr`.
+impl<R, Fut: Future<Output = R>> FinishLocalExecutorAndWriteIntoPtr<R, Fut> {
+    /// Creates a new `FinishLocalExecutorAndWriteIntoPtr`.
     pub(crate) fn new(res_ptr: *mut Option<R>, future: Fut) -> Self {
         Self {
             res_ptr,
@@ -31,7 +31,7 @@ impl<R, Fut: Future<Output = R>> EndLocalThreadAndWriteIntoPtr<R, Fut> {
     }
 }
 
-impl<R, Fut: Future<Output = R>> Future for EndLocalThreadAndWriteIntoPtr<R, Fut> {
+impl<R, Fut: Future<Output = R>> Future for FinishLocalExecutorAndWriteIntoPtr<R, Fut> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -51,4 +51,4 @@ impl<R, Fut: Future<Output = R>> Future for EndLocalThreadAndWriteIntoPtr<R, Fut
     }
 }
 
-unsafe impl<R, Fut: Future<Output = R> + Send> Send for EndLocalThreadAndWriteIntoPtr<R, Fut> {}
+unsafe impl<R, Fut: Future<Output = R> + Send> Send for FinishLocalExecutorAndWriteIntoPtr<R, Fut> {}

@@ -1,5 +1,5 @@
 //! This module provides a pool of task structures that are used to
-//! implement the `Task` and `TaskQueue` data structures.
+//! implement data structures that contains [`tasks`](crate::runtime::Task).
 
 macro_rules! create_control_cap_wrapper {
     ($name:ident, $acquire:expr, $guard_name:ident) => {
@@ -29,10 +29,10 @@ macro_rules! create_control_cap_wrapper {
 
         impl Drop for $name {
             fn drop(&mut self) {
-                if $crate::utils::likely(self.guard.capacity() < 32) {
+                if $crate::utils::likely(self.guard.capacity() <= 32) {
                     // Drop guard to return the object to the pool.
                 } else {
-                    // Shrink the pool.
+                    // Shrink the item.
                     self.guard.shrink_to(2);
                 }
             }
@@ -99,16 +99,3 @@ create_pool_of_objects_with_control_cap_wrapper! {
     TaskVecFromPool,
     acquire_task_vec_from_pool
 }
-
-create_pool_of_objects_with_control_cap_wrapper! {
-    pub,
-    SYNC_TASK_LIST_LOCAL_POOL,
-    SyncTaskListPool,
-    crate::sync_task_queue::SyncTaskList,
-    SyncTaskListPoolGuard,
-    { crate::sync_task_queue::SyncTaskList::new() },
-    SyncTaskListFromPool,
-    acquire_sync_task_list_from_pool
-}
-
-pub(crate) use create_pool_of_objects_with_control_cap_wrapper;

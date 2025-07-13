@@ -1,6 +1,6 @@
 //! This module provides the [`Local`].
 
-use crate::utils::{unlikely, Ptr};
+use crate::utils::{Ptr, unlikely};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Deref, DerefMut};
@@ -222,7 +222,7 @@ impl<T> Drop for LocalRefMut<'_, T> {
 /// This design is aligned with the shared-nothing concurrency model, which avoids shared memory
 /// between threads to reduce the complexity of synchronization.
 ///
-/// # What does concurrent context mean in single-threaded execution?
+/// # How can concurrency exist in single-threaded execution?
 ///
 /// ## Invalid code (with single-threaded concurrency):
 ///
@@ -237,7 +237,7 @@ impl<T> Drop for LocalRefMut<'_, T> {
 /// async fn write_and_dump_data_and_return_was_sent(counter: Local<Data>) -> bool {
 ///     let mut local_ref = counter.borrow_mut();
 ///     if is_valid_data(&*local_ref) {
-///         dump_data(&*local_ref).await; // Here the executor can execute other task, that change the data to invalid
+///         dump_data(&*local_ref).await; // Here the executor can execute another task, that change the data to invalid
 ///         send_data(&*local_ref).await;
 ///
 ///         return true;
@@ -250,8 +250,10 @@ impl<T> Drop for LocalRefMut<'_, T> {
 /// # Safety
 ///
 /// - `Local` is used in one thread;
-/// - Before every `await operation`, [`LocalRef`] and [`LocalRefMut`] need to be dropped, if
-///   another task can mutate the value and.
+/// - Before every `await operation`, [`LocalRef`] needs to be dropped if another task can call
+///   [`borrow_mut`](Local::borrow_mut),
+///   and [`LocalRefMut`] needs to be dropped if another task can call [`borrow`](Local::borrow)
+///   or [`borrow_mut`](Local::borrow_mut).
 ///
 /// It is checked with `debug_assertions`. If you cannot guarantee compliance with the above rules,
 /// you should use [`LocalMutex`](crate::sync::LocalMutex) or

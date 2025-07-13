@@ -136,8 +136,13 @@ macro_rules! generate_struct {
 
         impl<T> $name<T> {
             /// Return a number of senders or receivers of the underlying queue.
-            pub(crate) fn number_of_senders_or_receivers(&self) -> isize {
-                self.queue.number_of_senders_or_receivers()
+            pub(crate) fn len(&self) -> usize {
+                self.queue.len()
+            }
+
+            /// Returns [`SenderReceiverQueueOption`] of the underlying queue.
+            pub(crate) fn option(&self) -> SenderReceiverQueueOption {
+                self.queue.option()
             }
         }
     };
@@ -502,10 +507,10 @@ impl<T> WaitingTaskSharedDequeGuard<T> {
 
     generate_push_back!();
 
-    /// Pops a [`waiting task`](WaitingTask) from the deque, next calls provided function,
+    /// Pops a [`waiting task`](WaitingTask) from the deque, next calls the provided function,
     /// and after it executes the task.
     ///
-    /// Return `false` if a next task cannot be executed. Otherwise, returns `true`.
+    /// Return `false` if the next task cannot be executed. Otherwise, returns `true`.
     ///
     /// * `setter_fn` is a function that must write/read data to/from receiver/sender.
     #[must_use]

@@ -1,9 +1,8 @@
-use crate::acquire_global_lock;
 use orengine::sync::{
     AsyncChannel, AsyncReceiver, AsyncSender, AsyncWaitGroup, Channel, TryRecvErr, TrySendErr,
     WaitGroup,
 };
-use orengine::test::sched_future_to_another_thread;
+use orengine::test::sched_future;
 use orengine::utils::get_core_ids;
 use orengine::{local_executor, yield_now};
 use std::sync::Arc;
@@ -11,8 +10,6 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, SeqCst};
 
 async fn stress_test(channel: Channel<usize>, count: usize) {
-    let lock = acquire_global_lock();
-
     let channel = Arc::new(channel);
     for _ in 0..20 {
         let wg = Arc::new(WaitGroup::new());
@@ -24,9 +21,10 @@ async fn stress_test(channel: Channel<usize>, count: usize) {
             let wg = wg.clone();
             let sent = sent.clone();
             let received = received.clone();
-            wg.add(1);
 
-            sched_future_to_another_thread(async move {
+            wg.add(1).await;
+
+            sched_future(async move {
                 if i % 2 == 0 {
                     for j in 0..count {
                         channel.send(j).await.unwrap();
@@ -39,28 +37,27 @@ async fn stress_test(channel: Channel<usize>, count: usize) {
                     }
                 }
 
-                wg.done();
+                wg.done().await;
             });
         }
 
         wg.wait().await;
+
         assert_eq!(sent.load(Relaxed), received.load(Relaxed));
     }
-
-    drop(lock);
 }
 
-#[orengine::test::test_shared(timeout_ms = 10000)]
+#[orengine::test::test_shared(timeout_ms = 10000, exclusive_in = "*")]
 fn stress_test_bounded_shared_channel() {
     stress_test(Channel::bounded(1024), 1000).await;
 }
 
-#[orengine::test::test_shared(timeout_ms = 10000)]
+#[orengine::test::test_shared(timeout_ms = 10000, exclusive_in = "*")]
 fn stress_test_unbounded_shared_channel() {
     stress_test(Channel::unbounded(), 1000).await;
 }
 
-#[orengine::test::test_shared(timeout_ms = 10000)]
+#[orengine::test::test_shared(timeout_ms = 10000, exclusive_in = "*")]
 fn stress_test_zero_capacity_shared_channel() {
     stress_test(Channel::bounded(0), 200).await;
 }
@@ -70,8 +67,6 @@ async fn stress_test_local_channel_try(original_channel: Arc<Channel<usize>>) {
     const PAR: usize = 10;
     const COUNT: usize = 1000;
 
-    let lock = acquire_global_lock();
-
     for _ in 0..100 {
         let original_res = Arc::new(AtomicUsize::new(0));
         let original_wg = Arc::new(WaitGroup::new());
@@ -79,7 +74,8 @@ async fn stress_test_local_channel_try(original_channel: Arc<Channel<usize>>) {
         for i in 0..PAR {
             let wg = original_wg.clone();
             let channel = original_channel.clone();
-            wg.inc();
+
+            wg.inc().await;
 
             local_executor().spawn_shared(async move {
                 if i % 2 == 0 {
@@ -102,13 +98,14 @@ async fn stress_test_local_channel_try(original_channel: Arc<Channel<usize>>) {
                     }
                 }
 
-                wg.done();
+                wg.done().await;
             });
 
             let wg = original_wg.clone();
             let res = original_res.clone();
             let channel = original_channel.clone();
-            wg.inc();
+
+            wg.inc().await;
 
             local_executor().spawn_shared(async move {
                 if i % 2 == 0 {
@@ -135,7 +132,7 @@ async fn stress_test_local_channel_try(original_channel: Arc<Channel<usize>>) {
                     }
                 }
 
-                wg.done();
+                wg.done().await;
             });
         }
 
@@ -143,16 +140,14 @@ async fn stress_test_local_channel_try(original_channel: Arc<Channel<usize>>) {
 
         assert_eq!(original_res.load(SeqCst), PAR * COUNT * (COUNT - 1) / 2);
     }
-
-    drop(lock);
 }
 
-#[orengine::test::test_shared(timeout_ms = 10000)]
+#[orengine::test::test_shared(timeout_ms = 10000, exclusive_in = "*")]
 fn stress_test_local_channel_try_unbounded() {
     stress_test_local_channel_try(Arc::new(Channel::unbounded())).await;
 }
 
-#[orengine::test::test_shared(timeout_ms = 10000)]
+#[orengine::test::test_shared(timeout_ms = 10000, exclusive_in = "*")]
 fn stress_test_local_channel_try_bounded() {
     stress_test_local_channel_try(Arc::new(Channel::bounded(1024))).await;
 }

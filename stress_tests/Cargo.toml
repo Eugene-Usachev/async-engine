@@ -5,3 +5,10 @@ edition = "2024"
 
 [dependencies]
 orengine = { path = "../../orengine-rs" }
+memory-stats = "1.2.0"
+
+[profile.release]
+opt-level = 3
+overflow-checks = true
+lto = "thin"
+

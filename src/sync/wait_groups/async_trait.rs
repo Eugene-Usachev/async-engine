@@ -15,19 +15,17 @@ use std::future::Future;
 /// use orengine::sync::{AsyncWaitGroup, WaitGroup};
 ///
 /// # async fn foo() {
-/// let wait_group = Arc::new(WaitGroup::new());
+/// let wait_group = Arc::new(WaitGroup::new_with_count(10));
 /// let number_executed_tasks = Arc::new(AtomicUsize::new(0));
 ///
 /// for i in 0..10 {
 ///     let number_executed_tasks = number_executed_tasks.clone();
 ///     let wait_group = wait_group.clone();
 ///
-///     wait_group.inc();
-///
 ///     local_executor().spawn_shared(async move {
 ///         sleep(Duration::from_millis(i)).await;
 ///         number_executed_tasks.fetch_add(1, SeqCst);
-///         wait_group.done();
+///         wait_group.done().await;
 ///     });
 /// }
 ///
@@ -50,7 +48,8 @@ pub trait AsyncWaitGroup: IsLocal {
     /// let wait_group = Rc::new(LocalWaitGroup::new());
     /// let number_executed_tasks = Rc::new(Local::new(0));
     ///
-    /// wait_group.add(10);
+    /// wait_group.add(10).await;
+    ///
     /// for i in 0..10 {
     ///     let wait_group = wait_group.clone();
     ///     let number_executed_tasks = number_executed_tasks.clone();
@@ -58,7 +57,7 @@ pub trait AsyncWaitGroup: IsLocal {
     ///     local_executor().spawn_local(async move {
     ///         sleep(Duration::from_millis(i)).await;
     ///         *number_executed_tasks.borrow_mut() += 1;
-    ///         wait_group.done();
+    ///         wait_group.done().await;
     ///     });
     /// }
     ///
@@ -66,7 +65,7 @@ pub trait AsyncWaitGroup: IsLocal {
     /// assert_eq!(*number_executed_tasks.borrow(), 10);
     /// # }
     /// ```
-    fn add(&self, count: usize);
+    fn add(&self, count: usize) -> impl Future<Output = ()>;
 
     /// [`Adds`](Self::add) 1 to the `WaitGroup` counter.
     ///
@@ -86,12 +85,12 @@ pub trait AsyncWaitGroup: IsLocal {
     ///     let wait_group = wait_group.clone();
     ///     let number_executed_tasks = number_executed_tasks.clone();
     ///
-    ///     wait_group.inc();
+    ///     wait_group.inc().await;
     ///
     ///     local_executor().spawn_local(async move {
     ///         sleep(Duration::from_millis(i)).await;
     ///         *number_executed_tasks.borrow_mut() += 1;
-    ///         wait_group.done();
+    ///         wait_group.done().await;
     ///     });
     /// }
     ///
@@ -100,8 +99,8 @@ pub trait AsyncWaitGroup: IsLocal {
     /// # }
     /// ```
     #[inline]
-    fn inc(&self) {
-        self.add(1);
+    fn inc(&self) -> impl Future<Output = ()> {
+        self.add(1)
     }
 
     /// Returns the `WaitGroup` counter.
@@ -113,14 +112,18 @@ pub trait AsyncWaitGroup: IsLocal {
     ///
     /// # async fn foo() {
     /// let wait_group = LocalWaitGroup::new();
-    /// assert_eq!(wait_group.count(), 0);
-    /// wait_group.inc();
-    /// assert_eq!(wait_group.count(), 1);
-    /// wait_group.done();
-    /// assert_eq!(wait_group.count(), 0);
+    /// assert_eq!(wait_group.count().await, 0);
+    ///
+    /// wait_group.inc().await;
+    ///
+    /// assert_eq!(wait_group.count().await, 1);
+    ///
+    /// wait_group.done().await;
+    ///
+    /// assert_eq!(wait_group.count().await, 0);
     /// # }
     /// ```
-    fn count(&self) -> usize;
+    fn count(&self) -> impl Future<Output = usize>;
 
     /// Decreases the `WaitGroup` counter by 1 and wakes up all tasks that are waiting
     /// if the counter reaches 0.
@@ -135,21 +138,20 @@ pub trait AsyncWaitGroup: IsLocal {
     /// use orengine::sync::{AsyncWaitGroup, LocalWaitGroup};
     ///
     /// # async fn foo() {
-    /// let wait_group = Rc::new(LocalWaitGroup::new());
+    /// let wait_group = Rc::new(LocalWaitGroup::new_with_count(1));
     /// let wait_group_clone = wait_group.clone();
-    ///
-    /// wait_group.inc();
     ///
     /// local_executor().spawn_local(async move {
     ///     // wake up the waiting task, because a current and the only one task is done
-    ///     let count = wait_group_clone.done();
+    ///     let count = wait_group_clone.done().await;
+    ///
     ///     assert_eq!(count, 0);
     /// });
     ///
     /// wait_group.wait().await; // wait until all tasks are completed
     /// # }
     /// ```
-    fn done(&self) -> usize;
+    fn done(&self) -> impl Future<Output = usize>;
 
     /// Waits until the `WaitGroup` counter reaches 0.
     ///
@@ -162,19 +164,17 @@ pub trait AsyncWaitGroup: IsLocal {
     /// use orengine::sync::{AsyncWaitGroup, LocalWaitGroup};
     ///
     /// # async fn foo() {
-    /// let wait_group = Rc::new(LocalWaitGroup::new());
+    /// let wait_group = Rc::new(LocalWaitGroup::new_with_count(10));
     /// let number_executed_tasks = Rc::new(Local::new(0));
     ///
     /// for i in 0..10 {
     ///     let wait_group = wait_group.clone();
     ///     let number_executed_tasks = number_executed_tasks.clone();
     ///
-    ///     wait_group.inc();
-    ///
     ///     local_executor().spawn_local(async move {
     ///         sleep(Duration::from_millis(i)).await;
     ///         *number_executed_tasks.borrow_mut() += 1;
-    ///         wait_group.done();
+    ///         wait_group.done().await;
     ///     });
     /// }
     ///

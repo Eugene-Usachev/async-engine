@@ -1,7 +1,7 @@
 //! This module contains the [`AsyncCondVar`] trait.
 use crate::runtime::IsLocal;
-use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::AsyncMutex;
+use crate::sync::mutexes::AsyncSubscribableMutex;
 use std::future::Future;
 use std::ops::Deref;
 
@@ -109,13 +109,12 @@ pub trait AsyncCondVar<T>: IsLocal + Deref<Target = Self::Mutex> {
     /// ```
     async fn wait_while<'lock>(
         &'lock self,
-        guard: <Self::Mutex as AsyncMutex<T>>::Guard<'lock>,
+        mut guard: <Self::Mutex as AsyncMutex<T>>::Guard<'lock>,
         predicate: impl Fn(&mut T) -> bool,
     ) -> <Self::Mutex as AsyncMutex<T>>::Guard<'lock>
     where
         T: 'lock,
     {
-        let mut guard = guard;
         while predicate(&mut guard) {
             guard = self.wait(guard).await;
         }

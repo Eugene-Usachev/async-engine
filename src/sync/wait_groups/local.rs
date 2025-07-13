@@ -1,7 +1,7 @@
 //! This module contains the [`LocalWaitGroup`].
-use crate::runtime::{local_executor, IsLocal, Task};
+use crate::runtime::{IsLocal, Task, local_executor};
 use crate::sync::wait_groups::AsyncWaitGroup;
-use crate::utils::{acquire_task_vec_from_pool, TaskVecFromPool};
+use crate::utils::{TaskVecFromPool, acquire_task_vec_from_pool, clear_with};
 use std::cell::UnsafeCell;
 use std::future::Future;
 use std::pin::Pin;
@@ -65,19 +65,17 @@ struct Inner {
 /// use orengine::sync::{AsyncWaitGroup, LocalWaitGroup};
 ///
 /// # async fn foo() {
-/// let wait_group = Rc::new(LocalWaitGroup::new());
+/// let wait_group = Rc::new(LocalWaitGroup::new_with_count(10));
 /// let number_executed_tasks = Local::new(0);
 ///
 /// for i in 0..10 {
 ///     let wait_group = wait_group.clone();
 ///     let number_executed_tasks = number_executed_tasks.clone();
 ///
-///     wait_group.inc();
-///
 ///     local_executor().spawn_local(async move {
 ///         sleep(Duration::from_millis(i)).await;
 ///         *number_executed_tasks.borrow_mut() += 1;
-///         wait_group.done();
+///         wait_group.done().await;
 ///     });
 /// }
 ///
@@ -111,7 +109,7 @@ impl LocalWaitGroup {
     ///     local_executor().spawn_local(async move {
     ///         sleep(Duration::from_millis(i)).await;
     ///
-    ///         wg.done();
+    ///         wg.done().await;
     ///     });
     /// }
     ///
@@ -165,7 +163,7 @@ impl LocalWaitGroup {
     ///     local_executor().spawn_local(async move {
     ///         sleep(Duration::from_millis(i)).await;
     ///
-    ///         wg.done();
+    ///         wg.done().await;
     ///     });
     /// }
     ///
@@ -183,7 +181,7 @@ impl IsLocal for LocalWaitGroup {
 
 impl AsyncWaitGroup for LocalWaitGroup {
     #[inline]
-    fn add(&self, count: usize) {
+    async fn add(&self, count: usize) {
         let inner = self.get_inner();
 
         debug_assert!(inner.count < usize::MAX / 4, "WaitGroup counter overflow");
@@ -196,12 +194,12 @@ impl AsyncWaitGroup for LocalWaitGroup {
     }
 
     #[inline]
-    fn count(&self) -> usize {
+    async fn count(&self) -> usize {
         self.get_inner().count
     }
 
     #[inline]
-    fn done(&self) -> usize {
+    async fn done(&self) -> usize {
         let inner = self.get_inner();
 
         debug_assert!(inner.count < usize::MAX / 4, "WaitGroup counter overflow");
@@ -211,9 +209,9 @@ impl AsyncWaitGroup for LocalWaitGroup {
         if inner.count == 0 {
             let executor = local_executor();
 
-            for task in inner.waited_tasks.drain(..) {
+            clear_with(&mut inner.waited_tasks, |task| {
                 executor.exec_task(task);
-            }
+            });
         }
 
         inner.count
@@ -261,7 +259,7 @@ mod tests {
     fn test_local_wg_many_wait_one() {
         let check_value = Local::new(false);
         let wait_group = Rc::new(LocalWaitGroup::new());
-        wait_group.inc();
+        wait_group.inc().await;
 
         for _ in 0..5 {
             let check_value = check_value.clone();
@@ -275,22 +273,24 @@ mod tests {
         yield_now().await;
 
         *check_value.borrow_mut() = true;
-        wait_group.done();
+        wait_group.done().await;
     }
 
     #[orengine::test::test_local]
     fn test_local_wg_one_wait_many() {
         let check_value = Local::new(5);
         let wait_group = Rc::new(LocalWaitGroup::new());
-        wait_group.add(5);
+        wait_group.add(5).await;
 
         for _ in 0..5 {
             let check_value = check_value.clone();
             let wait_group = wait_group.clone();
             local_executor().spawn_local(async move {
                 yield_now().await;
+
                 *check_value.borrow_mut() -= 1;
-                wait_group.done();
+
+                wait_group.done().await;
             });
         }
 
@@ -302,7 +302,7 @@ mod tests {
     fn test_local_wg_as_barrier() {
         let check_value = Local::new(0);
         let wait_group = Rc::new(LocalWaitGroup::new());
-        wait_group.add(6);
+        wait_group.add(6).await;
 
         for _ in 0..5 {
             let check_value = check_value.clone();
@@ -313,7 +313,7 @@ mod tests {
 
                 *check_value.borrow_mut() += 1;
 
-                wait_group.done();
+                wait_group.done().await;
                 wait_group.wait().await;
 
                 assert_eq!(*check_value.borrow(), 6);
@@ -324,7 +324,7 @@ mod tests {
 
         *check_value.borrow_mut() += 1;
 
-        wait_group.done();
+        wait_group.done().await;
         wait_group.wait().await;
 
         assert_eq!(*check_value.borrow(), 6);

@@ -1,4 +1,3 @@
-use crate::acquire_global_lock;
 use orengine::sync::{
     AsyncChannel, AsyncReceiver, AsyncSender, AsyncWaitGroup, LocalChannel, LocalWaitGroup,
     TryRecvErr, TrySendErr,
@@ -11,14 +10,13 @@ async fn stress_test_local_channel_try(channel: LocalChannel<usize>) {
     const PAR: usize = 10;
     const COUNT: usize = 100;
 
-    let guard = acquire_global_lock();
     let channel = Rc::new(channel);
 
     for _ in 0..10 {
         let res = Local::new(0);
         let wg = Rc::new(LocalWaitGroup::new());
 
-        wg.add(PAR * 2);
+        wg.add(PAR * 2).await;
 
         for i in 0..PAR {
             let wg = wg.clone();
@@ -49,7 +47,7 @@ async fn stress_test_local_channel_try(channel: LocalChannel<usize>) {
                     }
                 }
 
-                wg.done();
+                wg.done().await;
             });
 
             local_executor().spawn_local(async move {
@@ -77,7 +75,7 @@ async fn stress_test_local_channel_try(channel: LocalChannel<usize>) {
                     }
                 }
 
-                wg2.done();
+                wg2.done().await;
             });
         }
 
@@ -85,8 +83,6 @@ async fn stress_test_local_channel_try(channel: LocalChannel<usize>) {
 
         assert_eq!(*res.borrow(), PAR * COUNT * (COUNT - 1) / 2);
     }
-
-    drop(guard);
 }
 
 #[orengine::test_local(timeout_ms = 10000)]

@@ -1,5 +1,5 @@
-use orengine::io::sys::FallbackConfig;
-use orengine::io::{full_buffer, IOUringConfig, IoWorkerConfig};
+use orengine::io::sys::{FallbackConfig, IOUringConfig};
+use orengine::io::{full_buffer, IoWorkerConfig};
 use orengine::runtime::Config;
 use orengine::utils::{get_core_ids, CoreId};
 use orengine::Executor;
@@ -185,7 +185,9 @@ fn orengine() {
                 .disable_work_sharing()
                 .set_io_worker_config(Some(IoWorkerConfig {
                     number_of_fixed_buffers: 128,
-                    io_uring: IOUringConfig::default(),
+                    io_uring: IOUringConfig {
+                        number_of_entries: 10000,
+                    },
                     fallback: FallbackConfig::default(),
                 }))
                 .unwrap()

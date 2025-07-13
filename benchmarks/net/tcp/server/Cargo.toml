@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-orengine = "1.0.0"
+# TODO orengine = "1.0.0"
+orengine = { path = "../../../../../orengine-rs" }
 # When you aren't testing the performance with Docker, you can use orengine = { path = "../../../../../orengine-rs" }
 may = "0.3.51"
 tokio = { version = "1.45.1", features = ["full"] }

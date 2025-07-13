@@ -1,0 +1,228 @@
+// TODO update whole docs about handles
+//! This module contains utilities for parallel testing via
+//! [`sched_future_to_another_thread`] or [`sched_future`](ExecutorPool::sched_future).
+use crate::bug_message::BUG_MESSAGE;
+use crate::runtime::Config;
+use crate::test::job::{Job, Result, SyncSender};
+use crate::test::{add_new_executor_to_main_test_endpoint_handlers, clone_main_test_endpoint_handlers, deregister_local_main_fn_endpoint_handlers, main_test_endpoint_handlers_was_panicked, register_main_test_endpoint_handlers, ExecutorPoolJoinHandle, MainTestEndpointHandlers};
+use crate::{local_executor, sleep, Executor};
+use crossbeam::queue::SegQueue;
+use std::future::Future;
+use std::panic::{catch_unwind, UnwindSafe};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::{Acquire, Release};
+use std::sync::mpsc::{sync_channel, Receiver};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+
+/// `ExecutorPool` allows reusing [`Executor`] instances. It is used in tests.
+///
+/// # Thread safety
+///
+/// `ExecutorPool` is thread-safe.
+pub struct ExecutorPool {
+    pub(crate) senders_to_executors: SegQueue<SyncSender<Job>>,
+}
+
+unsafe impl Send for ExecutorPool {}
+impl UnwindSafe for ExecutorPool {}
+
+/// Returns [`Config`] for creating [`Executor`] in the [`pool`](ExecutorPool).
+fn executor_pool_cfg() -> Config {
+    Config::default().disable_work_sharing()
+}
+
+/// `EXECUTOR_POOL` allows to reuse [`Executor`] instances. It is used to test parallelism.
+pub(crate) static EXECUTOR_POOL: ExecutorPool = ExecutorPool::new();
+
+impl ExecutorPool {
+    /// Creates a new `ExecutorPool` instance.
+    pub(crate) const fn new() -> Self {
+        Self {
+            senders_to_executors: SegQueue::new(),
+        }
+    }
+
+    fn run_executor(receiver: Receiver<Job>) {
+        while let Ok(job) = receiver.recv() {
+            let sender_for_panic = job.sync_result_sender.clone().unwrap();
+
+            if let Some(handles) = job
+                .main_test_endpoint_handlers
+                .as_ref()
+                .map(Clone::clone)
+            {
+                register_main_test_endpoint_handlers(handles);
+            }
+
+            let res = catch_unwind(move || {
+                async fn wait_with_expanding_sleep(predicate: impl Fn() -> bool) {
+                    let mut dur = Duration::from_millis(1);
+
+                    while !predicate() {
+                        sleep(dur).await;
+
+                        if dur < Duration::from_millis(64) {
+                            dur *= 2;
+                        }
+                    }
+                }
+
+                let executor = Executor::init_with_config(executor_pool_cfg());
+
+                executor.run_and_block_on_local(async move {
+                    let is_handle_ready = Arc::new(AtomicBool::new(false));
+                    let is_handle_ready_clone = is_handle_ready.clone();
+                    let exec_fn = if job.is_local {
+                        Executor::exec_shared_future
+                    } else {
+                        Executor::exec_shared_future
+                    };
+                    let res_slot = Arc::new(Mutex::new(None));
+                    let res_slot_clone = res_slot.clone();
+
+                    exec_fn(local_executor(), async move {
+                        let res = job.await;
+
+                        *res_slot_clone.lock().unwrap() = Some(res);
+                        is_handle_ready_clone.store(true, Release);
+                    });
+
+                    wait_with_expanding_sleep(|| {
+                        let has_spawned_tasks = local_executor().number_of_spawned_tasks() > 0;
+                        let has_work_except_spawned_tasks = local_executor().has_work_except_spawned_tasks();
+                        let has_work = has_spawned_tasks || has_work_except_spawned_tasks;
+                        let was_test_panicked = main_test_endpoint_handlers_was_panicked();
+                        let is_handle_ready = is_handle_ready.load(Acquire);
+
+                        // Here are two ways to finish the test:
+                        //
+                        // 1. Some handle panicked.
+                        // 2. The executor finished all its work and the handle main fn is ready.
+
+                        was_test_panicked || !has_work && is_handle_ready
+                    }).await;
+                }).expect(BUG_MESSAGE)
+            });
+
+            match res {
+                Ok(result_sender_) => {
+                    if let Some(result_sender) = result_sender_ {
+                        let _ = result_sender.try_send(Result {
+                            future_result: Ok(()),
+                        }); // Error means that the main fn has panicked
+                    }
+                },
+                Err(panic_msg) => unsafe {
+                    local_executor().graceful_stop();
+
+                    sender_for_panic.try_send(Result {
+                        future_result: Err(Box::new(panic_msg)),
+                    }).expect(BUG_MESSAGE);
+                },
+            }
+
+            deregister_local_main_fn_endpoint_handlers();
+        }
+    }
+
+    /// Creates a new executor in a new thread and returns its [`channel`](Channel).
+    fn new_executor() -> SyncSender<Job> {
+        let (sender, receiver) = sync_channel::<Job>(1);
+
+        thread::Builder::new()
+            .name("orengine-test-executor".to_string())
+            .spawn(move || {
+                Self::run_executor(receiver)
+            })
+            .expect("Spawned for test executor panicked, but it should not happen. It is a bug.");
+
+        sender
+    }
+
+    fn create_job_and_handle<Fut: Future<Output=()> + UnwindSafe + 'static>(
+        future: Fut,
+        is_local: bool,
+    ) -> ExecutorPoolJoinHandle {
+        let (result_sender, result_receiver) = sync_channel(1);
+        let sender = EXECUTOR_POOL
+            .senders_to_executors
+            .pop()
+            .unwrap_or_else(Self::new_executor);
+
+        sender
+            .try_send(Job::new(future, sender.clone(), result_sender, is_local, clone_main_test_endpoint_handlers()))
+            .expect(BUG_MESSAGE);
+
+        ExecutorPoolJoinHandle::new(result_receiver, &EXECUTOR_POOL)
+    }
+
+    // TODO docs
+    pub(crate) fn sched_future_for_main_fn<Fut: Future<Output=()> + UnwindSafe + 'static>(
+        future: Fut,
+        is_local: bool,
+        handles: MainTestEndpointHandlers,
+    ) -> ExecutorPoolJoinHandle {
+        register_main_test_endpoint_handlers(handles);
+
+        Self::create_job_and_handle(future, is_local)
+    }
+
+    /// Schedules a future to any free executor in the [`pool`](ExecutorPool).
+    ///
+    /// It is used to test parallelism.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use std::sync::Arc;
+    /// use std::sync::atomic::AtomicUsize;
+    /// use std::sync::atomic::Ordering::SeqCst;
+    /// use std::time::Duration;
+    /// use orengine::test::{run_test_and_block_on_shared, ExecutorPool};
+    /// use orengine::yield_now;
+    ///
+    /// async fn awesome_function(atomic_to_sync_test: Arc<AtomicUsize>) {
+    ///     atomic_to_sync_test.fetch_add(1, SeqCst);
+    ///     yield_now().await;
+    ///     atomic_to_sync_test.fetch_add(1, SeqCst);
+    /// }
+    ///
+    /// #[cfg(test)]
+    /// fn test_awesome_function() {
+    ///     run_test_and_block_on_shared(async {
+    ///         let atomic_to_sync_test = Arc::new(AtomicUsize::new(0));
+    ///         let mut handles = Vec::with_capacity(10);
+    ///
+    ///         for _ in 0..10 {
+    ///             let join = ExecutorPool::sched_future(
+    ///                 awesome_function(atomic_to_sync_test.clone())
+    ///             ).await;
+    ///
+    ///             handles.push(join);
+    ///         }
+    ///
+    ///         for handle in handles {
+    ///             handle.join().await;
+    ///         }
+    ///
+    ///         assert_eq!(atomic_to_sync_test.load(SeqCst), 20);
+    ///     }, Some(Duration::from_millis(1))); // Times out after 1 ms
+    /// }
+    /// ```
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "It panics only when a bug is occurred"
+    )]
+    pub fn sched_future<Fut>(future: Fut)
+    where
+        Fut: Future<Output=()> + Send + 'static + UnwindSafe,
+    {
+        let handle = Self::create_job_and_handle(future, false);
+
+        add_new_executor_to_main_test_endpoint_handlers(handle);
+    }
+}
+
+// TODO: remove from docs `sched_future_to_another_thread`  

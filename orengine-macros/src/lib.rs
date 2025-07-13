@@ -12,7 +12,7 @@ mod ident_helper;
 mod select;
 mod test;
 
-use crate::test::{generate_test, parse_args_to_timeout};
+use crate::test::{generate_test, parse_test_args};
 use proc_macro::TokenStream;
 
 /// Generates a test function by running an `Executor` with a `local` task.
@@ -55,9 +55,9 @@ use proc_macro::TokenStream;
 /// ```ignore
 /// #[test]
 /// fn test_sleep() {
-///     println!("Test sleep started!");
-///
 ///     orengine::test::run_test_and_block_on_local(async {
+///         println!("Test sleep started!");
+///
 ///         let start = std::time::Instant::now();
 ///
 ///         orengine::sleep(std::time::Duration::from_secs(1)).await;
@@ -70,9 +70,12 @@ use proc_macro::TokenStream;
 /// ```
 #[proc_macro_attribute]
 pub fn test_local(args: TokenStream, input: TokenStream) -> TokenStream {
-    generate_test(input, true, parse_args_to_timeout(args))
+    let (timeout, exclusive_in) = parse_test_args(args);
+
+    generate_test(input, true, timeout, exclusive_in)
 }
 
+// TODO exclusive
 /// Generates a test function by running an `Executor` with a `local` task.
 ///
 /// # The difference between `test_shared` and [`test_local()`]
@@ -115,9 +118,9 @@ pub fn test_local(args: TokenStream, input: TokenStream) -> TokenStream {
 /// ```ignore
 /// #[test]
 /// fn test_sleep() {
-///     println!("Test sleep started!");
-///
 ///     orengine::test::run_test_and_block_on_shared(async {
+///         println!("Test sleep started!");
+///
 ///         let start = std::time::Instant::now();
 ///
 ///         orengine::sleep(std::time::Duration::from_secs(1)).await;
@@ -130,7 +133,9 @@ pub fn test_local(args: TokenStream, input: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn test_shared(args: TokenStream, input: TokenStream) -> TokenStream {
-    generate_test(input, false, parse_args_to_timeout(args))
+    let (timeout, exclusive_in) = parse_test_args(args);
+
+    generate_test(input, false, timeout, exclusive_in)
 }
 
 ///# `select!` Macro

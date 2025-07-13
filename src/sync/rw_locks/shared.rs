@@ -3,17 +3,17 @@
 //! It allows for asynchronous read or write locking and unlocking, and provides
 //! ownership-based locking through [`ReadLockGuard`] and [`WriteLockGuard`].
 
-use crate::runtime::{Call, IsLocal, Task};
+use crate::runtime::{Call, IsLocal, SyncTaskList, Task};
 use crate::sync::{AsyncRWLock, AsyncReadLockGuard, AsyncWriteLockGuard, LockStatus};
-use crate::utils::{
-    Backoff, SpinLock, TaskVecFromPool, acquire_task_vec_from_pool, likely, unlikely,
-    unwrap_or_bug_hint,
-};
+use crate::utils::{likely, unlikely, unwrap_or_bug_hint};
 use crate::{local_executor, panic_if_local_in_future};
+use smallvec::SmallVec;
 use std::cell::UnsafeCell;
-use std::mem::ManuallyDrop;
+use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
+use std::ptr;
+use std::ptr::NonNull;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::task::{Context, Poll};
@@ -21,8 +21,8 @@ use std::task::{Context, Poll};
 /// Contains the read and write waiters lists.
 #[repr(C)]
 struct RWWaitersLists {
-    writers_list: SpinLock<TaskVecFromPool>,
-    readers_list: SpinLock<TaskVecFromPool>,
+    writers_list: SyncTaskList,
+    readers_list: SyncTaskList,
 }
 
 unsafe impl Send for RWWaitersLists {}
@@ -56,16 +56,15 @@ impl<'rw_lock, T: 'rw_lock + ?Sized> Future for WaitWriteLock<'rw_lock, T> {
             clippy::future_not_send,
             reason = "It is not `Send` only when T is not `Send`, it is fine"
         )]
-        unsafe fn park_writer_task<'rw_lock, T: 'rw_lock + ?Sized>(
+        unsafe fn park_writer_current_task<'rw_lock, T: 'rw_lock + ?Sized>(
             rw_lock: &'rw_lock RWLock<T>,
-            task: Task,
         ) {
-            let mut writers = rw_lock.queue.writers_list.lock();
-
-            writers.push(task);
+            let writers_ptr = (&raw const rw_lock.waiting.writers_list).cast_mut();
 
             unsafe {
-                local_executor().invoke_call(Call::release_atomic_bool(writers.leak_to_atomic()));
+                local_executor().invoke_call(Call::push_current_task_to(NonNull::new_unchecked(
+                    writers_ptr,
+                )));
             }
         }
 
@@ -87,7 +86,7 @@ impl<'rw_lock, T: 'rw_lock + ?Sized> Future for WaitWriteLock<'rw_lock, T> {
             // We need to park the current task
             // Now the counter is updated, so any unlocker knows about this task
 
-            unsafe { park_writer_task(this.rw_lock, Task::from_context(cx)) };
+            unsafe { park_writer_current_task(this.rw_lock) };
 
             return Poll::Pending;
         }
@@ -116,7 +115,7 @@ impl<'rw_lock, T: 'rw_lock + ?Sized> Future for WaitWriteLock<'rw_lock, T> {
                         // We need to park the current task
                         // Now the counter is updated, so any unlocker knows about this task
 
-                        unsafe { park_writer_task(this.rw_lock, Task::from_context(cx)) };
+                        unsafe { park_writer_current_task(this.rw_lock) };
 
                         return Poll::Pending;
                     }
@@ -174,12 +173,12 @@ impl<'rw_lock, T: 'rw_lock + ?Sized> Future for WaitReadLock<'rw_lock, T> {
             // We need to park the current task
             // Now the counter is updated, so any unlocker knows about this task
 
-            let mut readers = this.rw_lock.queue.readers_list.lock();
-
-            readers.push(unsafe { Task::from_context(cx) });
+            let readers_ptr = (&raw const this.rw_lock.waiting.readers_list).cast_mut();
 
             unsafe {
-                local_executor().invoke_call(Call::release_atomic_bool(readers.leak_to_atomic()));
+                local_executor().invoke_call(Call::push_current_task_to(NonNull::new_unchecked(
+                    readers_ptr,
+                )));
 
                 return Poll::Pending;
             }
@@ -367,7 +366,7 @@ pub struct RWLock<T: ?Sized> {
     ///
     /// The number of readers can be got by `state & READERS_COUNT_MASK`.
     state: AtomicU64,
-    queue: RWWaitersLists,
+    waiting: RWWaitersLists,
     value: UnsafeCell<T>,
 }
 
@@ -387,9 +386,9 @@ impl<T: ?Sized> RWLock<T> {
 
         Self {
             state: AtomicU64::new(0),
-            queue: RWWaitersLists {
-                readers_list: SpinLock::new(acquire_task_vec_from_pool()),
-                writers_list: SpinLock::new(acquire_task_vec_from_pool()),
+            waiting: RWWaitersLists {
+                readers_list: SyncTaskList::new(),
+                writers_list: SyncTaskList::new(),
             },
             value: UnsafeCell::new(value),
         }
@@ -419,23 +418,9 @@ impl<T: ?Sized> RWLock<T> {
             }
         }
 
-        let mut writer_task_ = self.queue.writers_list.lock().pop();
+        let writer_task = unsafe { self.waiting.writers_list.busy_pop() };
 
-        if unlikely(writer_task_.is_none()) {
-            let backoff = Backoff::new();
-
-            loop {
-                backoff.spin();
-
-                writer_task_ = self.queue.writers_list.lock().pop();
-
-                if writer_task_.is_some() {
-                    break;
-                }
-            }
-        }
-
-        local_executor().spawn_shared_task(unwrap_or_bug_hint(writer_task_));
+        local_executor().spawn_shared_task(writer_task);
 
         Ok(())
     }
@@ -461,27 +446,23 @@ impl<T: ?Sized> RWLock<T> {
             return Err(res.unwrap_err());
         }
 
-        let backoff = Backoff::new();
-        let mut readers_list = self.queue.readers_list.lock();
+        let mut list = SmallVec::<MaybeUninit<Task>, 16>::with_capacity(to_wake as usize);
 
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "Number of readers is less than u32::MAX"
-        )]
-        while readers_list.len() != to_wake as usize {
-            drop(readers_list);
+        unsafe {
+            list.set_len(to_wake as usize);
 
-            backoff.spin();
-
-            readers_list = self.queue.readers_list.lock();
+            self.waiting
+                .readers_list
+                .busy_pop_many(&mut list[..to_wake as usize]);
         }
 
         while to_wake > 0 {
-            let reader_task = unwrap_or_bug_hint(readers_list.pop());
+            to_wake -= 1;
+
+            let reader_task =
+                unsafe { ptr::read(unwrap_or_bug_hint(list.get(to_wake as usize))).assume_init() };
 
             local_executor().spawn_shared_task(reader_task);
-
-            to_wake -= 1;
         }
 
         Ok(())

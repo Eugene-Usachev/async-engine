@@ -1,6 +1,6 @@
 //! This module provides an asynchronous mutex (e.g. [`std::sync::Mutex`]) type [`Mutex`].
 //!
-//! It allows for asynchronous locking and unlocking, and provides
+//! It allows for asynchronous locking and unlocking and provides
 //! ownership-based locking through [`MutexGuard`].
 use std::cell::UnsafeCell;
 use std::future::Future;
@@ -15,12 +15,11 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::task::{Context, Poll};
 
 use crate::panic_if_local_in_future;
-use crate::runtime::Call;
-use crate::runtime::{local_executor, IsLocal, Task};
+use crate::runtime::{Call, SyncTaskList};
+use crate::runtime::{IsLocal, Task, local_executor};
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncMutex, AsyncMutexGuard, Unlock};
-use crate::utils::{acquire_sync_task_list_from_pool, PairedWithLock, SyncTaskListFromPool};
-use crate::utils::{likely, Backoff};
+use crate::utils::{PairedWithLock, likely};
 
 /// An RAII implementation of a "scoped lock" of a mutex. When this structure is
 /// dropped (falls out of scope), the lock will be unlocked.
@@ -115,7 +114,7 @@ impl<'mutex, T: ?Sized> Future for MutexWait<'mutex, T> {
             this.was_called = true;
             unsafe {
                 local_executor().invoke_call(Call::push_current_task_to(NonNull::new_unchecked(
-                    (&raw const *this.mutex.wait_queue).cast_mut(),
+                    (&raw const this.mutex.wait_list).cast_mut(),
                 )));
             };
 
@@ -161,7 +160,7 @@ const DEFAULT_COUNTER: usize = DEFAULT_EXPECTED_COUNT - 1;
 ///
 /// Use `Mutex` when a lot of tasks are waiting for the same lock because the lock is acquired
 /// for a __long__ time. If a lot of tasks are waiting for the same lock because the lock
-/// is acquired for a __short__ time try to share the `Mutex`.
+/// is acquired for a __short__ time, try to share the `Mutex`.
 ///
 /// If the lock is mostly acquired the first time, it is better to
 /// use [`NaiveMutex`](crate::sync::NaiveMutex), as it spends less time on successful operations.
@@ -190,8 +189,8 @@ pub struct Mutex<T: ?Sized> {
     /// We can release lock only when `expected_count` is equal to `counter` - `DEFAULT_EXPECTED_COUNT`.
     /// It guarantees that we processed all tasks in the queue.
     /// It allows not using atomics in the `subscribe` method.
-    expected_count: PairedWithLock<usize, T, Mutex<T>>,
-    wait_queue: SyncTaskListFromPool,
+    expected_count: PairedWithLock<usize, T, Self>,
+    wait_list: SyncTaskList,
     value: UnsafeCell<T>,
 }
 
@@ -203,7 +202,7 @@ impl<T: ?Sized> Mutex<T> {
     {
         Self {
             counter: AtomicUsize::new(DEFAULT_COUNTER),
-            wait_queue: acquire_sync_task_list_from_pool(),
+            wait_list: SyncTaskList::new(),
             value: UnsafeCell::new(value),
             expected_count: PairedWithLock::new(DEFAULT_EXPECTED_COUNT),
         }
@@ -253,6 +252,10 @@ impl<T: ?Sized> IsLocal for Mutex<T> {
 impl<T: ?Sized> Unlock for Mutex<T> {
     #[inline]
     unsafe fn unlock(&self) {
+        fn slow_take_from_list_and_exec(waiting_list: &SyncTaskList) {
+            local_executor().exec_task(unsafe { waiting_list.busy_pop() });
+        }
+
         debug_assert!(
             self.counter.load(Acquire) != DEFAULT_COUNTER,
             "Mutex is already unlocked"
@@ -272,21 +275,10 @@ impl<T: ?Sized> Unlock for Mutex<T> {
 
         *expected_count += 1;
 
-        if let Some(next) = self.wait_queue.pop() {
+        if let Some(next) = self.wait_list.try_pop() {
             local_executor().exec_task(next);
         } else {
-            // Another task failed to acquire a lock, but it is not yet in the queue
-            let backoff = Backoff::new();
-
-            loop {
-                backoff.spin();
-
-                if let Some(next) = self.wait_queue.pop() {
-                    local_executor().exec_task(next);
-
-                    break;
-                }
-            }
+            slow_take_from_list_and_exec(&self.wait_list);
         }
     }
 }
@@ -345,23 +337,21 @@ impl<T: ?Sized> AsyncMutex<T> for Mutex<T> {
 
 impl<T> AsyncSubscribableMutex<T> for Mutex<T> {
     #[inline]
-    fn subscribe_task(&self, task: Task) {
+    fn subscribe_task(&self, task: Task, _: &mut Self::Guard<'_>) {
         debug_assert!(self.is_locked());
 
         let expected_count = self.expected_count.get_by_mutex(self);
 
         *expected_count -= 1;
 
-        unsafe {
-            self.wait_queue.push(task);
-        }
+        self.wait_list.push(task);
     }
 
     #[inline]
-    fn low_level_subscribe(&self, cx: &Context) {
+    fn low_level_subscribe(&self, cx: &Context, guard: &mut Self::Guard<'_>) {
         let task = unsafe { Task::from_context(cx) };
 
-        self.subscribe_task(task);
+        self.subscribe_task(task, guard);
     }
 }
 
@@ -429,7 +419,7 @@ mod tests {
 
     use super::*;
     use crate as orengine;
-    use crate::test::sched_future_to_another_thread;
+    use crate::test::sched_future;
 
     #[orengine::test::test_shared]
     fn test_shared_mutex() {
@@ -437,16 +427,22 @@ mod tests {
 
         let mutex = Arc::new(Mutex::new(false));
         let wg = Arc::new(WaitGroup::new());
-
         let mutex_clone = mutex.clone();
         let wg_clone = wg.clone();
-        wg_clone.add(1);
-        sched_future_to_another_thread(async move {
+
+        wg_clone.add(1).await;
+
+        sched_future(async move {
             let mut value = mutex_clone.lock().await;
-            wg_clone.done();
+
+            wg_clone.done().await;
+
             println!("1");
+
             sleep(SLEEP_DURATION).await;
+
             println!("3");
+
             *value = true;
         });
 
@@ -472,32 +468,46 @@ mod tests {
         let second_lock = Arc::new(WaitGroup::new());
         let second_lock_clone = second_lock.clone();
 
-        lock_wg.add(1);
-        unlock_wg.add(1);
+        lock_wg.add(1).await;
+        unlock_wg.add(1).await;
 
-        sched_future_to_another_thread(async move {
+        sched_future(async move {
             let mut value = mutex_clone.lock().await;
+
             println!("1");
-            lock_wg_clone.done();
+
+            lock_wg_clone.done().await;
             unlock_wg_clone.wait().await;
+
             println!("4");
+
             *value = true;
             drop(value);
-            second_lock_clone.done();
+
+            second_lock_clone.done().await;
+
             println!("5");
         });
 
         lock_wg.wait().await;
+
         println!("2");
+
         let value = try_lock(&mutex);
+
         println!("3");
+
         assert!(value.is_none());
-        second_lock.inc();
-        unlock_wg.done();
+
+        second_lock.inc().await;
+        unlock_wg.done().await;
 
         second_lock.wait().await;
+
         let value = try_lock(&mutex);
+
         println!("6");
+
         match value {
             Some(v) => assert!(*v, "not waited"),
             None => panic!("can't acquire lock"),

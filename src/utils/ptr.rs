@@ -1,5 +1,5 @@
 //! This module contains definitions for the [`Ptr`].
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{Layout, alloc, dealloc};
 use std::fmt::Debug;
 use std::ptr;
 
@@ -318,7 +318,7 @@ mod tests {
         }
     }
 
-    #[orengine::test::test_local]
+    #[test]
     #[should_panic(expected = "ptr is null")]
     fn test_as_ref_null() {
         let ptr: Ptr<i32> = Ptr::null();
@@ -327,7 +327,7 @@ mod tests {
         }
     }
 
-    #[orengine::test::test_local]
+    #[test]
     #[should_panic(expected = "ptr is null")]
     fn test_as_mut_null() {
         let ptr: Ptr<i32> = Ptr::null();
@@ -348,7 +348,7 @@ mod tests {
         }
     }
 
-    #[orengine::test::test_local]
+    #[test]
     #[should_panic(expected = "dropped")]
     fn test_drop_in_place() {
         let value = MustDropIfCounterMoreThanOne { counter: 5 };
@@ -358,7 +358,7 @@ mod tests {
         }
     }
 
-    #[orengine::test::test_local]
+    #[test]
     #[should_panic(expected = "dropped")]
     fn test_drop_and_deallocate() {
         let value = MustDropIfCounterMoreThanOne { counter: 5 };
@@ -389,7 +389,7 @@ mod tests {
         }
     }
 
-    #[orengine::test::test_local]
+    #[test]
     #[should_panic(expected = "dropped")]
     fn test_write_with_drop() {
         let value = MustDropIfCounterMoreThanOne { counter: 2 };

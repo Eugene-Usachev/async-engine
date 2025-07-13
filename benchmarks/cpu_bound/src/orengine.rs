@@ -22,7 +22,7 @@ macro_rules! generate_create_task_and_yield {
                 let wg = Rc::new(LocalWaitGroup::new());
 
                 for _ in 0..$number_of_repetitions / BATCH_SIZE {
-                    wg.add(BATCH_SIZE);
+                    wg.add(BATCH_SIZE).await;
 
                     for _ in 0..BATCH_SIZE {
                         let wg_clone = wg.clone();
@@ -34,7 +34,7 @@ macro_rules! generate_create_task_and_yield {
 
                             black_box(a);
 
-                            wg_clone.done();
+                            wg_clone.done().await;
                         });
                     }
 
@@ -162,7 +162,7 @@ impl Runtime for OrengineRuntime {
                 let start = Instant::now();
                 let wg = Rc::new(LocalWaitGroup::new());
 
-                wg.add(BATCH_SIZE);
+                wg.add(BATCH_SIZE).await;
 
                 for _ in 0..BATCH_SIZE {
                     let wg = wg.clone();
@@ -172,7 +172,7 @@ impl Runtime for OrengineRuntime {
                             yield_now().await;
                         }
 
-                        wg.done();
+                        wg.done().await;
                     });
                 }
 

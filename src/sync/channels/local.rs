@@ -6,12 +6,13 @@ use crate::sync::channels::state::{CallState, CallStatePtr};
 use crate::sync::channels::waiting_task::waiting_select_task_deque::WaitingTaskLocalDequeGuard;
 use crate::sync::channels::waiting_task::{PopIfAcquiredResult, TaskInSelectBranch};
 use crate::sync::channels::{SelectReceiver, SelectSender};
+use crate::sync::waiting_task::SenderReceiverQueueOption;
 use crate::sync::{
     AsyncChannel, AsyncReceiver, AsyncSender, RecvErr, RecvTimeoutErr, SendErr, SendTimeoutErr,
     TryRecvErr, TrySendErr,
 };
+use crate::utils::{OrengineInstant, Ptr, unwrap_or_bug_hint};
 use crate::utils::{unlikely, unreachable_hint};
-use crate::utils::{unwrap_or_bug_hint, OrengineInstant, Ptr};
 use crate::{local_executor, panic_if_shared_in_future};
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
@@ -808,13 +809,11 @@ impl<T> LocalChannel<T> {
     #[inline]
     pub fn fullness_state(&self) -> (usize, usize, usize) {
         let inner = unsafe { &mut *self.inner.get() };
-        let number_of_senders_or_receivers = inner.deque.number_of_senders_or_receivers();
-        let len = number_of_senders_or_receivers.unsigned_abs();
 
-        if number_of_senders_or_receivers > 0 {
-            (len, len, 0)
-        } else {
-            (len, 0, len)
+        match inner.deque.option() {
+            SenderReceiverQueueOption::Empty => (0, 0, 0),
+            SenderReceiverQueueOption::Receiver => (inner.deque.len(), inner.deque.len(), 0),
+            SenderReceiverQueueOption::Sender => (inner.deque.len(), 0, inner.deque.len()),
         }
     }
 
@@ -999,11 +998,11 @@ mod tests {
         AsyncChannel, AsyncReceiver, AsyncSender, LocalChannel, RecvErr, RecvTimeoutErr, SendErr,
         SendTimeoutErr, TryRecvErr, TrySendErr,
     };
+    use crate::utils::Ptr;
     use crate::utils::droppable_element::DroppableElement;
-    use crate::utils::{Ptr, SpinLock};
     use crate::{local_executor, yield_now};
     use std::rc::Rc;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex as SyncMutex};
     use std::time::Duration;
 
     #[orengine::test::test_local]
@@ -1214,7 +1213,7 @@ mod tests {
 
     #[orengine::test::test_local]
     fn test_drop_local_channel() {
-        let dropped = Arc::new(SpinLock::new(Vec::new()));
+        let dropped = Arc::new(SyncMutex::new(Vec::new()));
         let channel = LocalChannel::bounded(1);
 
         let _ = channel
@@ -1227,7 +1226,7 @@ mod tests {
         prev_elem = channel.recv().await.unwrap();
 
         assert_eq!(prev_elem.value, 1);
-        assert_eq!(dropped.lock().as_slice(), [2]);
+        assert_eq!(dropped.lock().unwrap().as_slice(), [2]);
 
         let _ = channel
             .send(DroppableElement::new(3, dropped.clone()))
@@ -1239,7 +1238,7 @@ mod tests {
                 .unwrap();
         };
         assert_eq!(prev_elem.value, 3);
-        assert_eq!(dropped.lock().as_slice(), [2]);
+        assert_eq!(dropped.lock().unwrap().as_slice(), [2]);
 
         channel.close().await;
 
@@ -1250,10 +1249,10 @@ mod tests {
         {
             SendErr::Closed(elem) => {
                 assert_eq!(elem.value, 5);
-                assert_eq!(dropped.lock().as_slice(), [2]);
+                assert_eq!(dropped.lock().unwrap().as_slice(), [2]);
             }
         }
-        assert_eq!(dropped.lock().as_slice(), [2, 5]);
+        assert_eq!(dropped.lock().unwrap().as_slice(), [2, 5]);
     }
 
     #[orengine::test::test_local]

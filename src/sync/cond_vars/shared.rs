@@ -1,9 +1,9 @@
 //! This module contains the [`CondVar`] struct that implements the [`AsyncCondVar`].
 use crate::panic_if_local_in_future;
-use crate::runtime::{local_executor, Call, Task};
+use crate::runtime::{Call, Task, local_executor};
 use crate::sync::{AsyncCondVar, AsyncMutex, AsyncMutexGuard, AsyncSubscribableMutex, Mutex};
 use crate::utils::{
-    acquire_task_vec_from_pool, unlikely, unwrap_or_bug_hint, PairedWithLock, TaskVecFromPool,
+    PairedWithLock, TaskVecFromPool, acquire_task_vec_from_pool, unlikely, unwrap_or_bug_hint,
 };
 use std::mem;
 use std::ops::Deref;
@@ -172,7 +172,7 @@ where
         }
     }
 
-    fn notify_all(&self, guard: <S as AsyncMutex<T>>::Guard<'_>) {
+    fn notify_all(&self, mut guard: <S as AsyncMutex<T>>::Guard<'_>) {
         let list = self.list.get(&guard);
         let len = list.len();
 
@@ -180,15 +180,15 @@ where
             return;
         }
 
-        let _ = unsafe { guard.leak() };
-
         let task = unwrap_or_bug_hint(list.pop());
 
         for _ in 0..len - 1 {
             let task = unwrap_or_bug_hint(list.pop());
 
-            self.mutex.subscribe_task(task);
+            self.mutex.subscribe_task(task, &mut guard);
         }
+
+        let _ = unsafe { guard.leak() };
 
         local_executor().spawn_shared_task(task);
     }
@@ -274,7 +274,7 @@ mod tests {
 
     use super::*;
     use crate as orengine;
-    use crate::test::sched_future_to_another_thread;
+    use crate::test::sched_future;
 
     const TIME_TO_SLEEP: Duration = Duration::from_millis(10);
 
@@ -283,7 +283,7 @@ mod tests {
         let cvar = Arc::new(CondVar::new(Mutex::new(false)));
         let cvar2 = cvar.clone();
 
-        sched_future_to_another_thread(async move {
+        sched_future(async move {
             let mut started = cvar2.lock().await;
 
             sleep(TIME_TO_SLEEP).await;
@@ -319,20 +319,21 @@ mod tests {
         });
 
         let wg = Arc::new(WaitGroup::new());
+
         for _ in 0..NUMBER_OF_WAITERS {
             let cvar = cvar.clone();
             let wg = wg.clone();
 
-            wg.add(1);
+            wg.add(1).await;
 
-            sched_future_to_another_thread(async move {
+            sched_future(async move {
                 let mut started = cvar.lock().await;
 
                 while !*started {
                     started = cvar.wait(started).await;
                 }
 
-                wg.done();
+                wg.done().await;
             });
         }
 

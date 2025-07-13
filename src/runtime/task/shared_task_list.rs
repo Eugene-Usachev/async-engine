@@ -1,7 +1,6 @@
 //! This module contains the [`ExecutorSharedTaskList`].
 use crate::runtime::Task;
-use crate::utils::never_wait_lock::NeverWaitLock;
-use crate::utils::SpinLockGuard;
+use crate::utils::never_wait_lock::{NeverWaitLock, NeverWaitLockGuard};
 use std::collections::VecDeque;
 use std::ptr;
 
@@ -28,9 +27,9 @@ impl ExecutorSharedTaskList {
         self.executor_id
     }
 
-    /// Returns the `SpinLockGuard<Vec<Task>>` of the underlying list if it is not locked.
+    /// Returns the `NeverWaitLockGuard<Vec<Task>>` of the underlying list if it is not locked.
     /// Otherwise, returns `None`.
-    pub(crate) fn try_lock_and_return_as_vec(&self) -> Option<SpinLockGuard<Vec<Task>>> {
+    pub(crate) fn try_lock_and_return_as_vec(&self) -> Option<NeverWaitLockGuard<Vec<Task>>> {
         self.list.try_lock()
     }
 

@@ -68,11 +68,14 @@ mod tests {
     fn test_yield_now() {
         let i = Local::new(false);
         let i_clone = i.clone();
+
         local_executor().spawn_local(async move {
             assert!(!*i.borrow());
             *i.borrow_mut() = true;
         });
+
         yield_now().await;
+
         assert!(*i_clone.borrow());
     }
 }

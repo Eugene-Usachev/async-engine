@@ -1,9 +1,9 @@
 //! This module contains the [`Interactor`] and [`SharedTaskListForSendTo`] structs
 //! and the [`ExecutorIsNotRegisteredErr`] error.
-use crate::runtime::interaction_between_executors::SyncBatchOptimizedTaskQueue;
 use crate::runtime::Task;
+use crate::runtime::interaction_between_executors::SyncBatchOptimizedTaskQueue;
 use crate::utils::vec_map::VecMap;
-use crate::utils::{unwrap_or_bug_hint, OrengineInstant};
+use crate::utils::{OrengineInstant, clear_with, unwrap_or_bug_hint};
 use std::collections::VecDeque;
 use std::fmt::{Debug, Display};
 use std::mem;
@@ -129,7 +129,7 @@ impl Interactor {
     ///
     /// It doesn't guarantee that the tasks will be flushed, but the chance is very high.
     fn retry_flush(&mut self) {
-        for id in self.id_to_retry.drain(..) {
+        clear_with(&mut self.id_to_retry, |id| {
             let shared_task_list = unwrap_or_bug_hint(self.all.get_mut(id));
 
             #[cfg(not(debug_assertions))]
@@ -148,7 +148,7 @@ impl Interactor {
                     id,
                 );
             }
-        }
+        });
     }
 
     /// Tries to take task from the current executor's `shared_task_list`.

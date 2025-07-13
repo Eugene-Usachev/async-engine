@@ -4,8 +4,8 @@
 //! - [`run_local_future_on_all_cores_with_config`].
 //! - [`run_shared_future_on_all_cores`].
 //! - [`run_shared_future_on_all_cores_with_config`].
-use crate::runtime::{local_executor, Config};
-use crate::{utils, Executor};
+use crate::runtime::{Config, local_executor};
+use crate::{Executor, utils};
 use std::future::Future;
 
 /// It does the next steps on each core:
@@ -163,10 +163,8 @@ where
 /// }
 ///
 /// fn main() {
-///     let example_state = Arc::new(WaitGroup::new()); // Because of `shared` it can be any `Send` type.
 ///     let number_of_cores = get_core_ids().unwrap().len();
-///
-///     example_state.add(number_of_cores);
+///     let example_state = Arc::new(WaitGroup::new_with_count(number_of_cores)); // Because of `shared` it can be any `Send` type.
 ///
 ///     run_shared_future_on_all_cores_with_config(move || {
 ///         let example_state = example_state.clone();
@@ -176,7 +174,7 @@ where
 ///             // Shared architecture is used in this example, but in this case
 ///             // `Shared-nothing` architecture is better.
 ///
-///             let has_current_executor_run_last = example_state.done() == 0;
+///             let has_current_executor_run_last = example_state.done().await == 0;
 ///             example_state.wait().await;
 ///
 ///             if has_current_executor_run_last {

@@ -279,17 +279,17 @@ impl<T: ?Sized> AsyncMutex<T> for LocalMutex<T> {
 
 impl<T: ?Sized> AsyncSubscribableMutex<T> for LocalMutex<T> {
     #[inline]
-    fn subscribe_task(&self, task: Task) {
+    fn subscribe_task<'mutex>(&self, task: Task, _: &mut Self::Guard<'mutex>) {
         let wait_queue = unsafe { &mut *self.wait_queue.get() };
 
         wait_queue.push(task);
     }
 
     #[inline]
-    fn low_level_subscribe(&self, cx: &Context) {
+    fn low_level_subscribe<'mutex>(&self, cx: &Context, guard: &mut Self::Guard<'mutex>) {
         let task = unsafe { Task::from_context(cx) };
 
-        self.subscribe_task(task);
+        self.subscribe_task(task, guard);
     }
 }
 

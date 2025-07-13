@@ -1,6 +1,7 @@
 //! This module provides the [`Task`] and the [`Locality`].
 mod locality;
 pub(crate) mod shared_task_list;
+mod sync_task_list;
 mod task;
 mod task_data;
 #[cfg(not(feature = "disable_task_pool"))]
@@ -10,6 +11,7 @@ pub(crate) mod waiting_task;
 
 pub use locality::*;
 pub(crate) use shared_task_list::*;
+pub use sync_task_list::*;
 pub use task::*;
 #[cfg(not(feature = "disable_task_pool"))]
 pub(crate) use task_pool::*;

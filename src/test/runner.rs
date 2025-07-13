@@ -1,40 +1,12 @@
-//! This module provides a way to run tests by reusing
-//! the same [`Executor`] via [`run_test_and_block_on_local`]
-//! and [`run_test_and_block_on_shared`].
-//!
-//! # Example
-//!
-//! ```no_run
-//! use std::time::Duration;
-//! use orengine::test::run_test_and_block_on_local;
-//!
-//! async fn awesome_async_function() -> usize {
-//!     42
-//! }
-//!
-//! #[cfg(test)]
-//! fn test_awesome_async_function() {
-//!     run_test_and_block_on_local(async {
-//!         assert_eq!(awesome_async_function().await, 42);
-//!     }, Some(Duration::from_millis(1))); // Panics due to timeout after 1 ms
-//! }
-//! ```
-//!
-//! # Shortcuts
-//!
-//! You can use macro [`orengine::test::test_local`](crate::test::test_local) instead
-//! of [`run_test_and_block_on_local`] and [`orengine::test::test_shared`](crate::test::test_shared)
-//! instead of [`run_test_and_block_on_shared`]. Read [`run_test_and_block_on_local`] and
-//! [`run_test_and_block_on_shared`] to find examples.
-use crate::bug_message::BUG_MESSAGE;
-use crate::runtime::executor::get_local_executor_ref;
-use crate::runtime::{Config, Locality, Task};
-use crate::{Executor, local_executor, stop_executor, yield_now};
-use std::future::Future;
-use std::panic::UnwindSafe;
-use std::sync::mpsc::RecvTimeoutError;
-use std::time::Duration;
-use std::{panic, thread};
+// TODO docs
+
+use crate::runtime::Locality;
+use crate::test::{ExecutingThread, MainTestEndpointHandlers, check_main_test_endpoint_handlers};
+use ahash::{HashMap, HashMapExt};
+use std::panic::AssertUnwindSafe;
+use std::sync::{Arc, LazyLock, Once};
+use std::time::{Duration, Instant};
+use std::{mem, panic, thread};
 
 /// Prints the first test message. It contains information about build configuration.
 fn print_first_test_message() {
@@ -57,246 +29,145 @@ fn print_first_test_message() {
     }
 }
 
-/// Initializes the local executor only if it is not initialized
-/// and returns `&'static mut Executor`.
-pub(crate) fn get_local_executor() -> &'static mut Executor {
-    static PRINTED: std::sync::Once = std::sync::Once::new();
-    PRINTED.call_once(print_first_test_message);
+static PRINT_ONCE: Once = Once::new();
 
-    if get_local_executor_ref().is_none() {
-        let cfg = Config::default().disable_work_sharing();
-
-        Executor::init_with_config(cfg);
-    }
-
-    local_executor()
-}
-
-/// Upgrades provided future to release all previous tasks.
-#[allow(clippy::future_not_send, reason = "This can be non-Send")]
-pub(crate) async fn upgrade_future<Fut>(future: Fut)
-where
+// TODO docs
+fn run_test_and_block_on<Fut>(
+    creator: fn() -> Fut,
+    timeout: Option<Duration>,
+    locality: Locality,
+    exclusive_in: Option<String>,
+) where
     Fut: Future<Output = ()> + 'static,
 {
-    while local_executor().number_of_spawned_tasks() > 0 {
-        yield_now().await;
+    type SyncMutex<T> = std::sync::Mutex<T>;
+    type SyncRWLock<T> = std::sync::RwLock<T>;
+
+    static FULL_LOCK: SyncRWLock<()> = SyncRWLock::new(());
+    static LOCKS: LazyLock<SyncMutex<HashMap<String, Arc<SyncMutex<()>>>>> =
+        LazyLock::new(|| SyncMutex::new(HashMap::new()));
+
+    #[allow(unused, reason = "It is needed to drop")]
+    enum FullLockGuard<'a> {
+        Read(std::sync::RwLockReadGuard<'a, ()>),
+        Write(std::sync::RwLockWriteGuard<'a, ()>),
     }
 
-    future.await;
-}
+    PRINT_ONCE.call_once(print_first_test_message);
 
-/// Upgrades provided future to release all previous tasks and close its executor after its executing.
-#[allow(clippy::future_not_send, reason = "This can be non-Send")]
-pub(crate) async fn upgrade_future_for_with_timeout<Fut>(future: Fut)
-where
-    Fut: Future<Output = ()> + 'static,
-{
-    upgrade_future(async move {
-        let id = local_executor().id();
+    let locks = exclusive_in.map_or_else(
+        || (FullLockGuard::Read(FULL_LOCK.read().unwrap()), None),
+        |exclusive_in| {
+            if exclusive_in == "*" {
+                (FullLockGuard::Write(FULL_LOCK.write().unwrap()), None)
+            } else {
+                let mut locks = LOCKS.lock().unwrap();
+                let part_lock = locks
+                    .entry(exclusive_in)
+                    .or_insert_with(|| Arc::new(SyncMutex::new(())));
+                let static_part_lock = unsafe {
+                    mem::transmute::<
+                        &std::sync::Mutex<()>,
+                        &'static std::sync::Mutex<()>, // It never drops, but it needs to be Arc (to implement Send)
+                    >(Arc::as_ref(part_lock))
+                };
 
-        future.await;
+                (
+                    FullLockGuard::Read(FULL_LOCK.read().unwrap()),
+                    Some(static_part_lock.lock().unwrap()),
+                )
+            }
+        },
+    );
 
-        stop_executor(id);
-    })
-    .await;
-}
+    let future = creator();
+    let handlers = MainTestEndpointHandlers::new();
 
-/// An error that is returned by [`run_in_another_thread_and_wait_for_result_with_timeout`]
-/// on timeout.
-pub struct ErrTimeout;
-
-impl std::fmt::Debug for ErrTimeout {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Test timed out")
-    }
-}
-
-/// Runs a function in another thread and waits for its result with timeout.
-///
-/// # Panics
-///
-/// It panics when the provided function panics.
-fn run_in_another_thread_and_wait_for_result_with_timeout<F>(
-    f: F,
-    timeout: Duration,
-) -> Result<(), ErrTimeout>
-where
-    F: UnwindSafe + Send + 'static + FnOnce() -> Task,
-{
-    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-
-    thread::spawn(move || {
-        let ex = get_local_executor();
-        let task = f();
-
-        ex.spawn_task(task);
-
-        let res = panic::catch_unwind(move || {
-            local_executor().run();
-        });
-
-        let _ = sender.send(res);
+    let mut handle = ExecutingThread::sched_future_for_main_fn(
+        AssertUnwindSafe(future),
+        locality.is_local(),
+        handlers,
+    );
+    let mut was_main_fn_ready = false;
+    let limit = timeout.map_or(Duration::from_secs(100_000), |t| {
+        t.max(Duration::from_millis(1000))
     });
+    let deadline = Instant::now() + limit;
+    let mut sleep_time = Duration::from_micros(100);
+    let mut number_of_handlers_ = 0;
 
-    match receiver.recv_timeout(timeout) {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(msg)) => panic::resume_unwind(msg),
-        Err(RecvTimeoutError::Timeout) => panic!("Test timed out!"),
-        _ => panic!("{BUG_MESSAGE}"),
+    while Instant::now() < deadline {
+        if !was_main_fn_ready {
+            if let Ok(job_result) = handle.join_timeout(Some(sleep_time)) {
+                if let Err(err) = job_result {
+                    drop(locks);
+
+                    panic::resume_unwind(err);
+                }
+
+                was_main_fn_ready = true;
+            }
+        }
+
+        thread::sleep(sleep_time);
+
+        sleep_time = (sleep_time * 3 / 2).min(Duration::from_millis(100));
+
+        // Maybe another handler has panicked.
+        // Then we probably can't wait for the main fn and need to throw the panic.
+        match check_main_test_endpoint_handlers() {
+            Ok(number_of_handlers) => {
+                number_of_handlers_ = number_of_handlers;
+
+                if number_of_handlers == 0 && was_main_fn_ready {
+                    drop(locks);
+
+                    return;
+                }
+            }
+            Err(panic_msg) => {
+                drop(locks);
+
+                panic::resume_unwind(panic_msg);
+            }
+        }
     }
+
+    drop(locks);
+
+    let helpful_msg = if was_main_fn_ready {
+        format!("main test endpoint is ready but {number_of_handlers_} handlers are still running")
+    } else if number_of_handlers_ == 0 {
+        "main test endpoint is not ready".to_string()
+    } else {
+        format!(
+            "main test endpoint is not ready and {number_of_handlers_} handlers are still running"
+        )
+    };
+
+    panic!("Test timed out: {helpful_msg}");
 }
 
-/// Initializes the local executor (if it is not initialized) and blocks the current
-/// thread until the created `local` future is completed or the provided timeout is reached.
-///
-/// # The difference between `run_test_and_block_on_local` and [`run_test_and_block_on_shared`]
-///
-/// `run_test_and_block_on_local` creates a `local` task, while `run_test_and_block_on_shared`
-/// creates a `shared` task.
-///
-/// Read more about `local` and `shared` tasks in [`Executor`].
-///
-/// # Example
-///
-/// ```no_run
-/// use std::time::Duration;
-/// use orengine::test::run_test_and_block_on_local;
-///
-/// async fn awesome_async_function() -> usize {
-///     42
-/// }
-///
-/// #[cfg(test)]
-/// fn test_awesome_async_function() {
-///     run_test_and_block_on_local(|| async {
-///         assert_eq!(awesome_async_function().await, 42);
-///     }, Some(Duration::from_millis(1))); // Panics due to timeout after 1 ms
-/// }
-/// ```
-///
-/// # Shortcut
-///
-/// You can use [`orengine::test::test_local`](crate::test::test_local).
-/// The example below is equivalent to the one above:
-///
-/// ```no_run
-/// async fn awesome_async_function() -> usize {
-///     42
-/// }
-///
-/// #[orengine::test::test_local]
-/// fn test_awesome_async_function() {
-///     assert_eq!(awesome_async_function().await, 42);
-/// }
-/// ```
-///
-/// # Panics
-///
-/// It panics if the spawned future is panic or if the timeout is reached.
-pub fn run_test_and_block_on_local<Fut>(creator: fn() -> Fut, timeout: Option<Duration>)
-where
+// TODO docs
+pub fn run_test_and_block_on_local<Fut>(
+    creator: fn() -> Fut,
+    timeout: Option<Duration>,
+    exclusive_in: Option<String>,
+) where
     Fut: Future<Output = ()> + 'static,
 {
-    if let Some(timeout) = timeout {
-        run_in_another_thread_and_wait_for_result_with_timeout(
-            move || unsafe {
-                Task::from_future(
-                    upgrade_future_for_with_timeout(creator()),
-                    Locality::local(),
-                )
-            },
-            timeout,
-        )
-        .unwrap();
-    } else {
-        get_local_executor()
-            .run_and_block_on_local(async move {
-                upgrade_future(creator()).await;
-            })
-            .expect(BUG_MESSAGE);
-    }
+    run_test_and_block_on(creator, timeout, Locality::local(), exclusive_in);
 }
 
-/// Initializes the local executor (if it is not initialized) and blocks the current
-/// thread until the created `shared` future is completed or the provided timeout is reached.
-///
-/// # The difference between `run_test_and_block_on_shared` and [`run_test_and_block_on_local`]
-///
-/// `run_test_and_block_on_shared` creates a `shared` task, while `run_test_and_block_on_local`
-/// creates a `local` task.
-///
-/// Read more about `local` and `shared` tasks in [`Executor`].
-///
-/// # Example
-///
-/// ```no_run
-/// use std::time::Duration;
-/// use orengine::test::run_test_and_block_on_shared;
-/// # async fn get_some_result_from_shared_state() -> Result<(), ()> { Ok(()) }
-///
-/// async fn awesome_async_shared_function() -> usize {
-///     if get_some_result_from_shared_state().await.is_err() {
-///         return 0;
-///     }
-///
-///     3
-/// }
-///
-/// #[cfg(test)]
-/// fn test_awesome_async_function() {
-///     run_test_and_block_on_shared(|| async {
-///         assert_eq!(awesome_async_shared_function().await, 3);
-///     }, Some(Duration::from_millis(1))); // Panics due to timeout after 1 ms
-/// }
-/// ```
-///
-/// # Shortcut
-///
-/// You can use [`orengine::test::test_shared`](crate::test::test_shared).
-/// An example below is equivalent to the one above:
-///
-/// ```no_run
-/// # async fn get_some_result_from_shared_state() -> Result<(), ()> { Ok(()) }
-///
-/// async fn awesome_async_shared_function() -> usize {
-///     if get_some_result_from_shared_state().await.is_err() {
-///         return 0;
-///     }
-///
-///     3
-/// }
-///
-/// #[orengine::test::test_shared]
-/// fn test_awesome_async_function() {
-///     assert_eq!(awesome_async_shared_function().await, 3);
-/// }
-/// ```
-#[allow(
-    clippy::missing_panics_doc,
-    reason = "Panics on when a bug is occurred"
-)]
-pub fn run_test_and_block_on_shared<Fut>(creator: fn() -> Fut, timeout: Option<Duration>)
-where
-    Fut: Future<Output = ()> + Send + 'static,
+// TODO docs
+pub fn run_test_and_block_on_shared<Fut>(
+    creator: fn() -> Fut,
+    timeout: Option<Duration>,
+    exclusive_in: Option<String>,
+) where
+    Fut: Future<Output = ()> + 'static,
 {
-    if let Some(timeout) = timeout {
-        run_in_another_thread_and_wait_for_result_with_timeout(
-            move || unsafe {
-                Task::from_future(
-                    upgrade_future_for_with_timeout(creator()),
-                    Locality::shared(),
-                )
-            },
-            timeout,
-        )
-        .unwrap();
-    } else {
-        get_local_executor()
-            .run_and_block_on_shared(async move {
-                upgrade_future(creator()).await;
-            })
-            .expect(BUG_MESSAGE);
-    }
+    run_test_and_block_on(creator, timeout, Locality::shared(), exclusive_in);
 }
 
 #[cfg(test)]
@@ -304,6 +175,8 @@ mod tests {
     use super::*;
     use crate as orengine;
     use crate::sleep;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering::SeqCst;
     use std::thread;
 
     async fn awesome_fn() {}
@@ -317,12 +190,15 @@ mod tests {
     }
 
     #[test]
-    fn test_test_runner_not_timeout() {
-        run_test_and_block_on_shared(awesome_fn, None);
-        run_test_and_block_on_shared(awesome_fn, Some(Duration::from_secs(1)));
+    fn test_test_runner_local_not_timeout() {
+        run_test_and_block_on_local(awesome_fn, None, None);
+        run_test_and_block_on_local(awesome_fn, Some(Duration::from_secs(1)), None);
+    }
 
-        run_test_and_block_on_local(awesome_fn, None);
-        run_test_and_block_on_local(awesome_fn, Some(Duration::from_secs(1)));
+    #[test]
+    fn test_test_runner_shared_not_timeout() {
+        run_test_and_block_on_shared(awesome_fn, None, None);
+        run_test_and_block_on_shared(awesome_fn, Some(Duration::from_secs(1)), None);
     }
 
     #[test]
@@ -333,15 +209,17 @@ mod tests {
                 awesome_fn_that_sync_time_out();
             },
             Some(Duration::from_millis(1)),
+            None,
         );
     }
 
     #[test]
-    #[should_panic = "Test timed out"]
+    #[should_panic = "Test timed out: main test endpoint is not ready"]
     fn test_test_runner_async_timeout() {
         run_test_and_block_on_local(
             awesome_fn_that_async_time_out,
             Some(Duration::from_millis(1)),
+            None,
         );
     }
 
@@ -349,14 +227,72 @@ mod tests {
     fn test_test_macro_not_timeout() {}
 
     #[orengine::test::test_local(timeout_ms = 500)]
-    #[should_panic = "Test timed out"]
+    #[should_panic = "Test timed out: main test endpoint is not ready"]
     fn test_test_macro_sync_timeout() {
         awesome_fn_that_sync_time_out();
     }
 
     #[orengine::test::test_local(timeout_ms = 500)]
-    #[should_panic = "Test timed out"]
+    #[should_panic = "Test timed out: main test endpoint is not ready"]
     fn test_test_macro_async_timeout() {
         awesome_fn_that_async_time_out().await;
+    }
+
+    #[test]
+    fn test_test_full_exclusive() {
+        static IS_RUNNING: AtomicBool = AtomicBool::new(false);
+
+        thread::spawn(|| {
+            run_test_and_block_on_local(
+                || async move {
+                    assert!(!IS_RUNNING.swap(true, SeqCst));
+
+                    sleep(Duration::from_millis(100)).await;
+
+                    IS_RUNNING.store(false, SeqCst);
+                },
+                None,
+                Some("*".to_string()),
+            );
+        });
+
+        thread::sleep(Duration::from_millis(10));
+
+        run_test_and_block_on_local(
+            || async move {
+                assert!(!IS_RUNNING.load(SeqCst));
+            },
+            None,
+            Some("test_test_full_exclusive".to_string()),
+        );
+    }
+
+    #[test]
+    fn test_test_part_exclusive() {
+        static IS_RUNNING: AtomicBool = AtomicBool::new(false);
+
+        thread::spawn(|| {
+            run_test_and_block_on_local(
+                || async move {
+                    assert!(!IS_RUNNING.swap(true, SeqCst));
+
+                    sleep(Duration::from_millis(100)).await;
+
+                    IS_RUNNING.store(false, SeqCst);
+                },
+                None,
+                Some("test_test_part_exclusive".to_string()),
+            );
+        });
+
+        thread::sleep(Duration::from_millis(10));
+
+        run_test_and_block_on_local(
+            || async move {
+                assert!(!IS_RUNNING.load(SeqCst));
+            },
+            None,
+            Some("test_test_part_exclusive".to_string()),
+        );
     }
 }

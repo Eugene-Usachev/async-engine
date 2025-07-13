@@ -1,40 +1,41 @@
 //! This module provides the [`Executor`] struct and the [`local_executor`] function.
 use crate::bug_message::BUG_MESSAGE;
 use crate::io::sys::WorkerSys;
-use crate::io::worker::{get_local_worker_ref, init_local_worker, IoWorker};
+use crate::io::worker::{IoWorker, get_local_worker_ref, init_local_worker};
 use crate::io::{init_local_buf_pool, uninit_local_buf_pool};
+#[cfg(not(feature = "disable_task_pool"))]
+use crate::runtime::TaskPool;
 use crate::runtime::call::Call;
-use crate::runtime::executor::end_local_thread_and_write_into_ptr::EndLocalThreadAndWriteIntoPtr;
+use crate::runtime::epoch_gc::{local_epoch_gc, register_local_epoch_gc};
+use crate::runtime::executor::end_local_thread_and_write_into_ptr::FinishLocalExecutorAndWriteIntoPtr;
 use crate::runtime::executor::sleeping_manager::SleepingManager;
-use crate::runtime::global_state::{register_local_executor, SubscribedState};
+use crate::runtime::global_state::{SubscribedState, register_local_executor};
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::runtime::interaction_between_executors::{ExecutorIsNotRegisteredErr, Interactor};
 use crate::runtime::local_thread_pool::LocalThreadWorkerPool;
 use crate::runtime::task::Task;
 use crate::runtime::waker::create_waker;
-#[cfg(not(feature = "disable_task_pool"))]
-use crate::runtime::TaskPool;
-use crate::runtime::{
-    get_core_id_for_executor, ExecutorSharedTaskList, Locality, TaskWithDeadline,
-};
 use crate::runtime::{Config, ValidConfig};
-use crate::sync::channels::waiting_task::TaskInSelectBranch;
-use crate::sync::channels::CallStatePtr;
+use crate::runtime::{
+    ExecutorSharedTaskList, Locality, TaskWithDeadline, get_core_id_for_executor,
+};
 use crate::sync::Unlock;
+use crate::sync::channels::CallStatePtr;
+use crate::sync::channels::waiting_task::TaskInSelectBranch;
 use crate::utils::{
-    assert_hint, likely, unlikely, unwrap_or_bug_hint, unwrap_or_bug_message_hint, CoreId, OrengineInstant,
-    ProgressiveTimeout,
+    CoreId, OrengineInstant, ProgressiveTimeout, assert_hint, likely, unlikely, unwrap_or_bug_hint,
+    unwrap_or_bug_message_hint,
 };
 use fastrand::Rng;
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::Ordering::{AcqRel, Release};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{mem, ptr, thread};
 
 macro_rules! shrink {
@@ -184,7 +185,7 @@ const MAX_NUMBER_OF_TASKS_TAKEN: usize = 16;
 macro_rules! generate_run_and_block_on_function {
     ($func:expr, $future:expr, $executor:expr) => {{
         let mut res = None;
-        let static_future = EndLocalThreadAndWriteIntoPtr::new(&mut res, $future);
+        let static_future = FinishLocalExecutorAndWriteIntoPtr::new(&mut res, $future);
         $func($executor, static_future);
         $executor.run();
         res.ok_or(
@@ -407,8 +408,8 @@ impl Executor {
         self.shared_tasks_list.as_ref()
     }
 
-    /// Returns the number of spawned tasks (shared and local).
-    pub(crate) fn number_of_spawned_tasks(&self) -> usize {
+    /// Returns the number of spawned tasks (`shared` and `local`).
+    pub fn number_of_spawned_tasks(&self) -> usize {
         self.shared_tasks.len() + self.local_tasks.len()
     }
 
@@ -480,19 +481,6 @@ impl Executor {
             Call::ReleaseDynMutex(mutex) => unsafe {
                 mutex.as_ref().unlock();
             },
-            Call::PushCurrentTaskToAndRemoveItIfCounterIsZero(task_list, counter, order) => {
-                unsafe {
-                    let list = task_list.as_ref();
-                    list.push(task);
-                    let counter = counter.as_ref();
-
-                    if unlikely(counter.load(order) == 0) {
-                        if let Some(task) = list.pop() {
-                            self.exec_task(task);
-                        } // else another thread already executed the task
-                    }
-                }
-            }
             Call::ReleaseAtomicBool(atomic_ptr) => {
                 let atomic_ref = unsafe { atomic_ptr.as_ref() };
                 atomic_ref.store(false, Ordering::Release);
@@ -1133,7 +1121,7 @@ impl Executor {
     ///
     /// Called after [`check_version_and_update_if_needed`](SubscribedState::check_version_and_update_if_needed).
     #[inline(never)]
-    unsafe fn graceful_stop(&mut self) {
+    pub(crate) unsafe fn graceful_stop(&mut self) {
         self.is_running.store(false, Release);
 
         uninit_local_buf_pool();
@@ -1149,7 +1137,7 @@ impl Executor {
                                 .unwrap()
                                 .try_lock_and_return_as_vec()
                             {
-                                shared_tasks_list_of_current_executor.extend(tasks_list.drain(..));
+                                shared_tasks_list_of_current_executor.append(&mut tasks_list);
                                 break;
                             }
                         }
@@ -1163,11 +1151,13 @@ impl Executor {
                         }
 
                         tasks_list.extend(self.shared_tasks.drain(..));
-                        tasks_list.extend(shared_tasks_list_of_current_executor);
+                        tasks_list.append(&mut shared_tasks_list_of_current_executor);
                     }
                 });
             }
         }
+
+        unsafe { local_epoch_gc().deregister() };
 
         *get_local_executor_ref() = None;
         *get_local_worker_ref() = None;
@@ -1208,8 +1198,23 @@ impl Executor {
         );
 
         register_local_executor();
+        register_local_epoch_gc();
+
+        // TODO r
+        let mut prev_print_time = Instant::now();
 
         loop {
+            if prev_print_time + Duration::from_millis(1000) < Instant::now() {
+                prev_print_time = Instant::now();
+
+                // TODO r
+                println!(
+                    "Number of tasks: {}, id: {}",
+                    self.number_of_spawned_tasks(),
+                    self.id(),
+                ); // TODO
+            }
+
             self.subscribed_state.check_version_and_update_if_needed(
                 self.id,
                 #[cfg(not(feature = "disable_send_task_to"))]
@@ -1231,6 +1236,8 @@ impl Executor {
             }
 
             self.exec_cpu_tasks();
+
+            local_epoch_gc().maybe_pass_epoch(self.start_round_time);
 
             self.take_work_if_needed();
 
@@ -1377,6 +1384,7 @@ impl Executor {
         future: Fut,
     ) {
         self.spawn_shared(future);
+
         self.run();
     }
 

@@ -1,18 +1,17 @@
 //! This module contains the [`Call`] that can be used to call an operation after
 //! the [`Future::poll`] returns.
-use crate::runtime::Task;
+use crate::runtime::{SyncTaskList, Task};
 use crate::sync::{AsyncMutex, AsyncMutexGuard, Mutex, Unlock};
-use crate::sync_task_queue::SyncTaskList;
 use std::fmt::Debug;
 use std::mem;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicBool;
 
 /// Represents a call from a [`Future::poll`] to the [`Executor`](crate::runtime::Executor)
 /// that can be used to call an operation after the [`Future::poll`] returns.
 ///
 /// The `Call` enum encapsulates different actions that an executor can take
-/// after a future yields [`Poll::Pending`](std::task::Poll::Pending).
+/// after future yields [`Poll::Pending`](std::task::Poll::Pending).
 /// These actions may involve scheduling
 /// the current task, signaling readiness, or interacting with sync primitives.
 ///
@@ -32,13 +31,13 @@ pub enum Call {
     ///
     /// # Safety
     ///
-    /// * `send_to` must be a valid pointer to [`SyncTaskQueue`](SyncTaskList)
+    /// * `send_to` must be a valid pointer to [`SyncTaskList`](SyncTaskList)
     ///
     /// * the reference must live at least as long as this state of the task
     ///
     /// * task must return [`Poll::Pending`](std::task::Poll::Pending) immediately after calling this function
     ///
-    /// * calling task must be shared (else you don't need any [`Calls`](Call))
+    /// * calling task must be shared (else you don't need any [`calls`](Call))
     PushCurrentTaskTo(NonNull<SyncTaskList>),
     /// Releases the given [`Mutex`].
     ///
@@ -56,26 +55,7 @@ pub enum Call {
     ///
     /// * the `lock` must live at least as long as this state of the task
     ReleaseDynMutex(NonNull<dyn Unlock>),
-    /// Pushes the current task to the given `AtomicTaskList` and removes it if the given `AtomicUsize`
-    /// is `0` with given `Ordering` after removing executes it.
-    ///
-    /// # Safety
-    ///
-    /// * `send_to` must be a valid pointer to [`SyncTaskQueue`](SyncTaskList)
-    ///
-    /// * task must return [`Poll::Pending`](std::task::Poll::Pending) immediately after calling this function
-    ///
-    /// * counter must be a valid pointer to [`AtomicUsize`]
-    ///
-    /// * the references must live at least as long as this state of the task
-    ///
-    /// * calling task must be shared (else you don't need any [`Calls`](Call))
-    PushCurrentTaskToAndRemoveItIfCounterIsZero(
-        NonNull<SyncTaskList>,
-        NonNull<AtomicUsize>,
-        Ordering,
-    ),
-    /// Stores `false` for the given `AtomicBool` with [`Release`](Ordering::Release) ordering.
+    /// Stores `false` for the given `AtomicBool` with [`Release`](std::sync::atomic::Ordering::Release) ordering.
     ///
     /// # Safety
     ///
@@ -129,29 +109,7 @@ impl Call {
         Self::PushCurrentTaskTo(send_to)
     }
 
-    /// Pushes the current task to the given `AtomicTaskList` and removes it if the given `AtomicUsize`
-    /// is `0` with given `Ordering` after removing executes it.
-    ///
-    /// # Safety
-    ///
-    /// * `send_to` must be a valid pointer to [`SyncTaskQueue`](SyncTaskList)
-    ///
-    /// * task must return [`Poll::Pending`](std::task::Poll::Pending) immediately after calling this function
-    ///
-    /// * counter must be a valid pointer to [`AtomicUsize`]
-    ///
-    /// * the references must live at least as long as this state of the task
-    ///
-    /// * calling task must be shared (else you don't need any [`Calls`](Call))
-    pub unsafe fn push_current_task_to_and_remove_it_if_counter_is_zero(
-        send_to: NonNull<SyncTaskList>,
-        counter: NonNull<AtomicUsize>,
-        ordering: Ordering,
-    ) -> Self {
-        Self::PushCurrentTaskToAndRemoveItIfCounterIsZero(send_to, counter, ordering)
-    }
-
-    /// Stores `false` for the given `AtomicBool` with [`Release`](Ordering::Release) ordering.
+    /// Stores `false` for the given `AtomicBool` with [`Release`](std::sync::atomic::Ordering::Release) ordering.
     ///
     /// # Safety
     ///
@@ -239,9 +197,6 @@ impl Debug for Call {
             Self::PushCurrentTaskTo(_) => write!(f, "Call::PushCurrentTaskTo"),
             Self::ReleaseMutex(_) => write!(f, "Call::ReleaseMutex"),
             Self::ReleaseDynMutex(_) => write!(f, "Call::ReleaseDynMutex"),
-            Self::PushCurrentTaskToAndRemoveItIfCounterIsZero(_, _, _) => {
-                write!(f, "Call::PushCurrentTaskToAndRemoveItIfCounterIsZero")
-            }
             Self::ReleaseAtomicBool(_) => write!(f, "Call::ReleaseAtomicBool"),
             Self::PushFnToThreadPool(_) => write!(f, "Call::PushFnToThreadPool"),
             Self::CallFn(_) => write!(f, "Call::CallFn"),

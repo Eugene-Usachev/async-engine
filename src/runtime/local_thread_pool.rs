@@ -1,7 +1,7 @@
 //! This module provides the [`LocalThreadWorkerPool`].
-use crate::runtime::Task;
-use crate::sync_task_queue::SyncTaskList;
+use crate::runtime::{SyncTaskList, Task};
 use std::collections::VecDeque;
+use std::mem::MaybeUninit;
 use std::sync::Arc;
 use std::thread;
 
@@ -108,9 +108,28 @@ impl LocalThreadWorkerPool {
             return false;
         }
 
-        let prev_len = other_list.len();
-        self.result_list.pop_all_in_deque(other_list);
-        self.wait -= other_list.len() - prev_len;
+        let mut stack = [const { MaybeUninit::uninit() }; 32];
+        let can_pop = self.wait.min(stack.len());
+
+        let popped = self.result_list.try_pop_many(&mut stack[..can_pop]);
+
+        {
+            // VecDeque::extend is optimized for slices.
+
+            // TODO test
+
+            type CopiableTask = [u8; size_of::<Task>()];
+
+            let stack_ref = unsafe { &*(&raw const stack[..popped] as *const [CopiableTask]) };
+            let other_list_mut_ref = unsafe {
+                &mut *std::ptr::from_mut::<VecDeque<Task>>(other_list)
+                    .cast::<VecDeque<CopiableTask>>()
+            };
+
+            other_list_mut_ref.extend(stack_ref);
+        }
+
+        self.wait -= popped;
 
         true
     }

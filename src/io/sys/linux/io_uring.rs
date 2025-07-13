@@ -5,16 +5,16 @@ use crate::io::config::IoWorkerConfig;
 use crate::io::io_request_data::IoRequestDataPtr;
 use crate::io::sys;
 use crate::io::sys::{
-    os_sockaddr, MessageRecvHeader, OsMessageHeader, OsPathPtr, RawFile, RawSocket,
+    MessageRecvHeader, OsMessageHeader, OsPathPtr, RawFile, RawSocket, os_sockaddr,
 };
 use crate::io::time_bounded_io_task::TimeBoundedIoTask;
 use crate::io::worker::IoWorker;
 use crate::runtime::local_executor;
-use crate::utils::{likely, unlikely, OrengineInstant};
-use crate::{Executor, BUG_MESSAGE};
+use crate::utils::{OrengineInstant, likely, unlikely};
+use crate::{BUG_MESSAGE, Executor};
 use io_uring::squeue::Entry;
 use io_uring::types::{OpenHow, SubmitArgs, Timespec};
-use io_uring::{cqueue, opcode, types, IoUring, Probe};
+use io_uring::{IoUring, Probe, cqueue, opcode, types};
 use libc;
 use std::cell::UnsafeCell;
 use std::collections::{BTreeSet, VecDeque};
@@ -62,14 +62,32 @@ impl IOUringWorker {
     }
 
     /// Register __fixed__ buffers.
-    pub(crate) fn register_buffers(&mut self, buffers: &[libc::iovec]) {
+    pub(crate) fn register_buffers(&mut self, buffers: &[libc::iovec]) -> Result<(), ()> {
         let submitter = unsafe { &mut *self.ring.get() }.submitter();
-        unsafe { submitter.register_buffers(buffers) }.expect(BUG_MESSAGE);
+        let mut tries_count = 0;
+
+        loop {
+            match unsafe { submitter.register_buffers(buffers) } {
+                Ok(()) => return Ok(()),
+                Err(err) if err.kind() == ErrorKind::OutOfMemory => {
+                    if tries_count < 5 {
+                        // Maybe OS can allocate it after OS deregister other buffers (in background).
+                        std::thread::yield_now();
+
+                        tries_count += 1;
+                    } else {
+                        return Err(());
+                    }
+                }
+                Err(_) => return Err(()),
+            }
+        }
     }
 
     /// Deregister __fixed__ buffers.
     pub(crate) fn deregister_buffers(&mut self) {
         let submitter = unsafe { &mut *self.ring.get() }.submitter();
+
         submitter.unregister_buffers().expect(BUG_MESSAGE);
     }
 
@@ -77,7 +95,9 @@ impl IOUringWorker {
     #[inline]
     fn add_sqe(&mut self, sqe: Entry) {
         self.number_of_active_tasks += 1;
+
         let ring = unsafe { &mut *self.ring.get() };
+
         unsafe {
             if unlikely(ring.submission().push(&sqe).is_err()) {
                 self.backlog.push_back(sqe);
@@ -89,6 +109,7 @@ impl IOUringWorker {
     #[inline]
     fn register_entry_with_u64_data(&mut self, sqe: Entry, data: u64) {
         let sqe = sqe.user_data(data);
+
         self.add_sqe(sqe);
     }
 
@@ -189,8 +210,11 @@ impl IOUringWorker {
 
 impl IoWorker for IOUringWorker {
     fn new(config: IoWorkerConfig) -> Self {
+        let ring = IoUring::builder()
+            .build(config.io_uring.number_of_entries)
+            .unwrap();
         let mut s = Self {
-            ring: UnsafeCell::new(IoUring::new(config.io_uring.number_of_entries).unwrap()),
+            ring: UnsafeCell::new(ring),
             backlog: VecDeque::new(),
             probe: Probe::new(),
             time_bounded_io_task_queue: BTreeSet::new(),

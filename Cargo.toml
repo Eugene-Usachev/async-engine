@@ -23,7 +23,7 @@ unstable_features = []
 disable_task_pool = []
 
 [dependencies]
-orengine-macros = { version = "7.0.0", path = "./orengine-macros" }
+orengine-macros = { version = "8.0.0", path = "./orengine-macros" }
 core_affinity = "0.8.3"
 socket2 = { version = "0.5.9", features = ["all"] }
 smallvec = "2.0.0-alpha.11"

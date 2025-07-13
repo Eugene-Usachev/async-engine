@@ -215,8 +215,8 @@ struct Inner<T: ?Sized> {
 /// An asynchronous version of a [`reader-writer lock`](std::sync::RwLock)
 ///
 /// This type of lock allows a number of readers or at most one writer at any
-/// point in time. The write portion of this lock typically allows modification
-/// of the underlying data (exclusive access) and the read portion of this lock
+/// point in time. The writing portion of this lock typically allows modification
+/// of the underlying data (exclusive access), and the read portion of this lock
 /// typically allows for read-only access (shared access).
 ///
 /// In comparison, a [`LocalMutex`](crate::sync::LocalMutex)
@@ -269,7 +269,7 @@ struct Inner<T: ?Sized> {
 ///
 /// # async fn write_to_the_dump_file(key: usize, value: usize) {}
 ///
-/// // Correct usage, because after `write_to_log_file(*key, *value).await` and before the future is resolved
+/// // Correct usage, because after `write_to_log_file(*key, *value).await` and before the future is resolved,
 /// // another task can modify the storage. So, we need to lock the storage.
 /// async fn dump_storage(storage: Rc<LocalRWLock<HashMap<usize, usize>>>) {
 ///     let mut read_guard = storage.read().await;
@@ -583,7 +583,7 @@ mod tests {
             let read_wg = read_wg.clone();
             let mutex = rw_lock.clone();
 
-            wg.add(1);
+            wg.add(1).await;
 
             let task = unsafe {
                 Task::from_future(
@@ -594,15 +594,18 @@ mod tests {
                         {
                             let read_wg = read_wg.clone();
                             let mutex = mutex.clone();
-                            read_wg.add(1);
+                            read_wg.add(1).await;
 
                             let task = Task::from_future(
                                 async move {
                                     assert_eq!(mutex.get_inner().number_of_readers, -1);
+
                                     let value = mutex.read().await;
+
                                     assert_ne!(*value, 0);
                                     assert_ne!(mutex.get_inner().number_of_readers, 0);
-                                    read_wg.done();
+
+                                    read_wg.done().await;
                                 },
                                 Locality::local(),
                             );
@@ -613,7 +616,7 @@ mod tests {
                         assert_eq!(mutex.get_inner().number_of_readers, -1);
                         *value += 1;
 
-                        wg.done();
+                        wg.done().await;
                     },
                     Locality::local(),
                 )

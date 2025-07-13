@@ -1,25 +1,26 @@
 //! This module contains the implementation of the [`Channel`].
 use crate::panic_if_local_in_future;
-use crate::runtime::waiting_task::WaitingTask;
 use crate::runtime::Call;
-use crate::runtime::{local_executor, IsLocal, Task, TaskWithDeadline};
+use crate::runtime::waiting_task::WaitingTask;
+use crate::runtime::{IsLocal, Task, TaskWithDeadline, local_executor};
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
 use crate::sync::channels::state::{CallState, CallStatePtr};
 use crate::sync::channels::waiting_task::waiting_select_task_deque::WaitingTaskSharedDequeGuard;
 use crate::sync::channels::waiting_task::{PopIfAcquiredResult, TaskInSelectBranch};
 use crate::sync::channels::{SelectReceiver, SelectSender};
 use crate::sync::mutexes::NaiveMutex;
+use crate::sync::waiting_task::SenderReceiverQueueOption;
 use crate::sync::{
     AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, RecvErr, RecvTimeoutErr, SendErr,
     SendTimeoutErr, TryRecvErr, TrySendErr, Unlock,
 };
+use crate::utils::{OrengineInstant, Ptr, unwrap_or_bug_hint};
 use crate::utils::{unlikely, unreachable_hint};
-use crate::utils::{unwrap_or_bug_hint, OrengineInstant, Ptr};
 use std::collections::VecDeque;
 use std::future::Future;
 use std::mem::ManuallyDrop;
 use std::panic::{RefUnwindSafe, UnwindSafe};
-use std::ptr::{copy_nonoverlapping, NonNull};
+use std::ptr::{NonNull, copy_nonoverlapping};
 use std::task::{Context, Poll};
 use std::{mem, ptr};
 
@@ -614,13 +615,24 @@ macro_rules! generate_send_or_subscribe {
         ) -> SelectNonBlockingBranchResult {
             let mut inner_lock = {
                 let backoff = $crate::utils::Backoff::new();
+                // TODO r
+                let mut attempts = 0;
 
                 loop {
                     let Some(inner_lock) = self.inner.try_lock() else {
-                        backoff.spin();
+                        backoff.snooze();
 
                         continue;
                     };
+
+                    attempts += 1;
+
+                    if attempts % 10 == 0 {
+                        println!(
+                            "Executor with id {}, tried {attempts} times",
+                            local_executor().id()
+                        );
+                    }
 
                     break inner_lock;
                 }
@@ -789,7 +801,7 @@ macro_rules! generate_recv_or_subscribe {
 
                 loop {
                     let Some(inner_lock) = self.inner.try_lock() else {
-                        backoff.spin();
+                        backoff.snooze();
 
                         continue;
                     };
@@ -967,13 +979,11 @@ impl<T> Channel<T> {
     #[inline]
     pub async fn fullness_state(&self) -> (usize, usize, usize) {
         let inner = self.inner.lock().await;
-        let number_of_senders_or_receivers = inner.deque.number_of_senders_or_receivers();
-        let len = number_of_senders_or_receivers.unsigned_abs();
 
-        if number_of_senders_or_receivers > 0 {
-            (len, len, 0)
-        } else {
-            (len, 0, len)
+        match inner.deque.option() {
+            SenderReceiverQueueOption::Empty => (0, 0, 0),
+            SenderReceiverQueueOption::Receiver => (inner.deque.len(), inner.deque.len(), 0),
+            SenderReceiverQueueOption::Sender => (inner.deque.len(), 0, inner.deque.len()),
         }
     }
 }
@@ -1181,7 +1191,7 @@ fn test_compile_shared_channel() {}
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex as SyncMutex};
     use std::time::Duration;
 
     use crate as orengine;
@@ -1190,16 +1200,16 @@ mod tests {
         AsyncChannel, AsyncReceiver, AsyncSender, AsyncWaitGroup, Channel, RecvErr, RecvTimeoutErr,
         SendErr, SendTimeoutErr, TryRecvErr, TrySendErr, WaitGroup,
     };
-    use crate::test::sched_future_to_another_thread;
+    use crate::test::sched_future;
+    use crate::utils::Ptr;
     use crate::utils::droppable_element::DroppableElement;
-    use crate::utils::{Ptr, SpinLock};
 
     #[orengine::test::test_shared]
     fn test_zero_capacity_shared_channel() {
         let ch = Arc::new(Channel::bounded(0));
         let ch_clone = ch.clone();
 
-        sched_future_to_another_thread(async move {
+        sched_future(async move {
             ch_clone.send(1).await.unwrap();
             ch_clone.send(2).await.unwrap();
             ch_clone.receiver_close().await;
@@ -1276,9 +1286,9 @@ mod tests {
         let ch_clone = ch.clone();
         let wg_clone = wg.clone();
 
-        wg.add(N);
+        wg.add(N).await;
 
-        sched_future_to_another_thread(async move {
+        sched_future(async move {
             for i in 0..N {
                 ch_clone.send(i).await.unwrap();
             }
@@ -1289,8 +1299,10 @@ mod tests {
 
         for i in 0..N {
             let res = ch.recv().await.unwrap();
+
             assert_eq!(res, i);
-            wg.done();
+
+            wg.done().await;
         }
 
         assert!(
@@ -1307,12 +1319,13 @@ mod tests {
         let ch = Arc::new(Channel::bounded(1));
         let ch_clone = ch.clone();
 
-        sched_future_to_another_thread(async move {
+        sched_future(async move {
             sleep(Duration::from_millis(1)).await;
             ch_clone.send(1).await.unwrap();
         });
 
         let res = ch.recv().await.unwrap();
+
         assert_eq!(res, 1);
     }
 
@@ -1321,7 +1334,7 @@ mod tests {
         let ch = Arc::new(Channel::bounded(1));
         let ch_clone = ch.clone();
 
-        sched_future_to_another_thread(async move {
+        sched_future(async move {
             ch_clone.send(1).await.unwrap();
             ch_clone.send(2).await.unwrap();
 
@@ -1334,10 +1347,12 @@ mod tests {
 
         let res = ch.recv().await.unwrap();
         assert_eq!(res, 1);
+
         let res = ch.recv().await.unwrap();
         assert_eq!(res, 2);
 
         let _ = ch.send(3).await;
+
         match ch.send(4).await.expect_err("should be closed") {
             SendErr::Closed(value) => assert_eq!(value, 4),
         };
@@ -1350,8 +1365,8 @@ mod tests {
         let ch_clone = ch.clone();
         let wg_clone = wg.clone();
 
-        wg.inc();
-        sched_future_to_another_thread(async move {
+        wg.inc().await;
+        sched_future(async move {
             for i in 0..N {
                 ch_clone.send(i).await.unwrap();
             }
@@ -1366,7 +1381,7 @@ mod tests {
             assert_eq!(res, i);
         }
 
-        wg.done();
+        wg.done().await;
 
         assert!(
             matches!(
@@ -1379,7 +1394,7 @@ mod tests {
 
     #[orengine::test::test_shared]
     fn test_drop_shared_channel() {
-        let dropped = Arc::new(SpinLock::new(Vec::new()));
+        let dropped = Arc::new(SyncMutex::new(Vec::new()));
         let channel = Channel::bounded(1);
 
         let _ = channel
@@ -1392,14 +1407,14 @@ mod tests {
         prev_elem = channel.recv().await.unwrap();
 
         assert_eq!(prev_elem.value, 1);
-        assert_eq!(dropped.lock().as_slice(), [2]);
+        assert_eq!(dropped.lock().unwrap().as_slice(), [2]);
 
         let _ = channel
             .send(DroppableElement::new(3, dropped.clone()))
             .await;
         unsafe { channel.recv_in_ptr(Ptr::from(&mut prev_elem)).await }.unwrap();
         assert_eq!(prev_elem.value, 3);
-        assert_eq!(dropped.lock().as_slice(), [2]);
+        assert_eq!(dropped.lock().unwrap().as_slice(), [2]);
 
         channel.receiver_close().await;
         match channel
@@ -1409,10 +1424,10 @@ mod tests {
         {
             SendErr::Closed(elem) => {
                 assert_eq!(elem.value, 5);
-                assert_eq!(dropped.lock().as_slice(), [2]);
+                assert_eq!(dropped.lock().unwrap().as_slice(), [2]);
             }
         }
-        assert_eq!(dropped.lock().as_slice(), [2, 5]);
+        assert_eq!(dropped.lock().unwrap().as_slice(), [2, 5]);
     }
 
     #[orengine::test::test_shared]

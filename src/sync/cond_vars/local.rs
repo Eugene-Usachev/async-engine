@@ -1,9 +1,9 @@
 //! This module contains the [`LocalCondVar`] struct that implements the [`AsyncCondVar`].
-use crate::runtime::{local_executor, Task};
+use crate::runtime::{Task, local_executor};
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncCondVar, AsyncMutex, AsyncMutexGuard, LocalMutex};
 use crate::utils::{
-    acquire_task_vec_from_pool, unlikely, unwrap_or_bug_hint, PairedWithLock, TaskVecFromPool,
+    PairedWithLock, TaskVecFromPool, acquire_task_vec_from_pool, unlikely, unwrap_or_bug_hint,
 };
 use std::marker::PhantomData;
 use std::mem;
@@ -171,7 +171,7 @@ impl<T, S: AsyncSubscribableMutex<T>> AsyncCondVar<T> for LocalCondVar<T, S> {
         }
     }
 
-    fn notify_all(&self, guard: <S as AsyncMutex<T>>::Guard<'_>) {
+    fn notify_all(&self, mut guard: <S as AsyncMutex<T>>::Guard<'_>) {
         let list = self.list.get(&guard);
         let len = list.len();
 
@@ -179,15 +179,15 @@ impl<T, S: AsyncSubscribableMutex<T>> AsyncCondVar<T> for LocalCondVar<T, S> {
             return;
         }
 
-        let _ = unsafe { guard.leak() };
-
         let task = list.pop().unwrap();
 
         for _ in 0..len - 1 {
             let task = unwrap_or_bug_hint(list.pop());
 
-            self.mutex.subscribe_task(task);
+            self.mutex.subscribe_task(task, &mut guard);
         }
+
+        let _ = unsafe { guard.leak() };
 
         local_executor().exec_task(task);
     }
@@ -327,7 +327,7 @@ mod tests {
             let cvar = cvar.clone();
             let wg = wg.clone();
 
-            wg.add(1);
+            wg.add(1).await;
 
             local_executor().spawn_local(async move {
                 let mut started = cvar.lock().await;
@@ -336,7 +336,7 @@ mod tests {
                     started = cvar.wait(started).await;
                 }
 
-                wg.done();
+                wg.done().await;
             });
         }
 

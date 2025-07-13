@@ -20,9 +20,12 @@
 //! If you want to write parallel tests, you can use [`sched_future_to_another_thread`]
 //! or [`sched_future`](ExecutorPool::sched_future).
 
-pub mod executor_pool;
+mod executing_thread;
+mod handles;
+mod job;
 pub mod runner;
 
-pub use executor_pool::*;
+pub use executing_thread::*;
+pub(crate) use handles::*;
 pub use orengine_macros::{test_local, test_shared};
 pub use runner::*;

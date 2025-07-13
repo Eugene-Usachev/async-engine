@@ -131,6 +131,7 @@ macro_rules! new_local_pool {
                 $pool_thread_static_name.with(|pool_cell| {
                     let pool = unsafe { &mut *pool_cell.get() };
                     let value = unsafe { std::mem::ManuallyDrop::take(&mut self.value) };
+
                     pool.storage.push(value);
                 });
             }

@@ -1,7 +1,7 @@
 //! This module contains [`TcpStream`].
 
-use crate::io::sys::{AsRawSocket, AsSocket, FromRawSocket, IntoRawSocket, RawSocket};
 use crate::io::AsyncShutdown;
+use crate::io::sys::{AsRawSocket, AsSocket, FromRawSocket, IntoRawSocket, RawSocket};
 use crate::io::{
     AsyncConnectStream, AsyncPeek, AsyncPollSocket, AsyncRecv, AsyncSend, AsyncSocketClose,
 };
@@ -198,8 +198,8 @@ impl Drop for TcpStream {
 mod tests {
     use crate as orengine;
     use crate::io::{
-        buffer, get_fixed_buffer, AsyncAccept, AsyncBind, AsyncConnectStream, AsyncPeek,
-        AsyncPollSocket, AsyncRecv, AsyncSend, FixedBuffer,
+        AsyncAccept, AsyncBind, AsyncConnectStream, AsyncPeek, AsyncPollSocket, AsyncRecv,
+        AsyncSend, FixedBuffer, buffer, get_fixed_buffer,
     };
     use crate::local_executor;
     use crate::net::{BindConfig, Socket, Stream, TcpListener, TcpStream};
@@ -344,13 +344,13 @@ mod tests {
         assert_eq!(REQUEST, buffered_request.as_bytes());
 
         let wg = Rc::new(LocalWaitGroup::new());
-        wg.inc();
+        wg.inc().await;
         let wg_clone = wg.clone();
 
         local_executor().spawn_local(async move {
             let mut listener = TcpListener::bind(ADDR).await.expect("bind failed");
 
-            wg_clone.done();
+            wg_clone.done().await;
 
             let mut stream = listener.accept().await.expect("accept failed").0;
 
@@ -452,7 +452,7 @@ mod tests {
         let wg = Rc::new(LocalWaitGroup::new());
         let wg_clone = wg.clone();
 
-        wg.inc();
+        wg.inc().await;
 
         local_executor().spawn_local(async move {
             let mut listener = TcpListener::bind_with_config(ADDR, &BindConfig::new())
@@ -460,7 +460,7 @@ mod tests {
                 .expect("bind failed");
             let mut expected_state = 0;
 
-            wg_clone.done();
+            wg_clone.done().await;
 
             loop {
                 let mut guard = state_clone.lock().await;

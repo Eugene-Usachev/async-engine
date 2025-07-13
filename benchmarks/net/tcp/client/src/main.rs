@@ -261,7 +261,7 @@ fn bench_throughput() {
                 let wg = Rc::new(LocalWaitGroup::new());
 
                 for _ in 0..par {
-                    wg.add(1);
+                    wg.add(1).await;
                     let wg = wg.clone();
                     local_executor().spawn_local(async move {
                         let mut stream = orengine::net::TcpStream::connect::<&str>(ADDR.as_ref())
@@ -283,7 +283,7 @@ fn bench_throughput() {
                                 .unwrap();
                         }
 
-                        wg.done();
+                        wg.done().await;
                     });
                 }
 

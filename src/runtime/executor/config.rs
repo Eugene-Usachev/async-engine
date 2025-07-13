@@ -1,10 +1,10 @@
 //! This module provides the [`Config`] struct.
-use crate::io::IoWorkerConfig;
-use crate::utils::SpinLock;
 use crate::BUG_MESSAGE;
+use crate::io::IoWorkerConfig;
 use std::mem::discriminant;
+use std::sync::Mutex as SyncMutex;
 
-/// A shared config of the state of the all runtime.
+/// A shared config of the state of the whole runtime.
 /// It is used to prevent unsafe behavior in the runtime.
 ///
 /// For example, when the task that uses an IO worker is
@@ -18,7 +18,7 @@ struct ConfigStats {
 }
 
 impl ConfigStats {
-    /// Create a new config stats.
+    /// Create a new config stat.
     const fn new() -> Self {
         Self {
             number_of_executors_with_enabled_io_worker_and_work_sharing: 0,
@@ -29,8 +29,8 @@ impl ConfigStats {
     }
 }
 
-/// A shared config of the state of the all runtime.
-static GLOBAL_CONFIG_STATS: SpinLock<ConfigStats> = SpinLock::new(ConfigStats::new());
+/// A shared config of the state of the whole runtime.
+static GLOBAL_CONFIG_STATS: SyncMutex<ConfigStats> = SyncMutex::new(ConfigStats::new());
 
 /// The default [`buffers`](crate::io::Buffer) capacity.
 pub const DEFAULT_BUF_CAP: u32 = 4096;
@@ -60,7 +60,7 @@ impl ValidConfig {
 impl Drop for ValidConfig {
     fn drop(&mut self) {
         if self.work_sharing_level != usize::MAX {
-            let mut guard = Some(GLOBAL_CONFIG_STATS.lock());
+            let mut guard = Some(GLOBAL_CONFIG_STATS.lock().unwrap());
             let shared_config_stats = guard.as_mut().expect(BUG_MESSAGE);
             if self.io_worker_config.is_some() {
                 shared_config_stats.number_of_executors_with_enabled_io_worker_and_work_sharing -=
@@ -272,12 +272,14 @@ impl Config {
     #[must_use]
     pub(crate) fn validate(self) -> ValidConfig {
         if self.work_sharing_level != usize::MAX {
-            let mut shared_config_stats = GLOBAL_CONFIG_STATS.lock();
+            let mut shared_config_stats = GLOBAL_CONFIG_STATS.lock().unwrap();
 
             if self.io_worker_config.is_some() {
                 if shared_config_stats.number_of_executors_with_work_sharing_and_without_io_worker
                     != 0
                 {
+                    drop(shared_config_stats);
+
                     panic!("{AN_ATTEMPT_TO_CREATE_EXECUTOR_WITH_WORK_SHARING_AND_IO_WORKER}");
                 }
 
@@ -287,6 +289,8 @@ impl Config {
                 if shared_config_stats.number_of_executors_with_enabled_io_worker_and_work_sharing
                     != 0
                 {
+                    drop(shared_config_stats);
+
                     panic!(
                         "{AN_ATTEMPT_TO_CREATE_EXECUTOR_WITH_WORK_SHARING_AND_WITHOUT_IO_WORKER}"
                     );
@@ -300,6 +304,8 @@ impl Config {
                 if shared_config_stats.number_of_executors_with_work_sharing_and_without_thread_pool
                     != 0
                 {
+                    drop(shared_config_stats);
+
                     panic!("{AN_ATTEMPT_TO_CREATE_EXECUTOR_WITH_WORK_SHARING_AND_THREAD_POOL}");
                 }
 
@@ -309,6 +315,8 @@ impl Config {
                 if shared_config_stats.number_of_executors_with_enabled_thread_pool_and_work_sharing
                     != 0
                 {
+                    drop(shared_config_stats);
+
                     panic!(
                         "{AN_ATTEMPT_TO_CREATE_EXECUTOR_WITH_WORK_SHARING_AND_WITHOUT_THREAD_POOL}"
                     );
@@ -353,50 +361,21 @@ impl Eq for Config {}
 #[cfg(test)]
 pub(crate) mod tests {
     use crate as orengine;
-    use crate::bug_message::BUG_MESSAGE;
     use crate::runtime::{Config, DEFAULT_BUF_CAP};
     use std::panic;
-    use std::sync::atomic;
-    use std::sync::{Condvar as STDCvar, Mutex as STDMutex};
 
-    const NUMBER_OF_TESTS: usize = 6;
-
-    pub(crate) static WAS_READY: (STDMutex<bool>, STDCvar) = (STDMutex::new(false), STDCvar::new());
-    static NUMBER_OF_READY_TESTS: atomic::AtomicUsize = atomic::AtomicUsize::new(0);
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn handle_test_ready() {
-        let prev = NUMBER_OF_READY_TESTS.fetch_add(1, atomic::Ordering::SeqCst);
-        if prev == NUMBER_OF_TESTS - 1 {
-            *WAS_READY.0.lock().unwrap() = true;
-            WAS_READY.1.notify_all();
-        }
-
-        assert!(prev < NUMBER_OF_TESTS, "{}", BUG_MESSAGE);
-    }
-
-    fn get_lock() -> std::sync::MutexGuard<'static, ()> {
-        LOCK.lock().unwrap_or_else(|e| {
-            LOCK.clear_poison();
-            e.into_inner()
-        })
-    }
-
-    #[orengine::test::test_local]
+    #[orengine::test::test_local(exclusive_in = "config")]
     fn test_default_config() {
-        let lock = get_lock();
         let config = Config::default().validate();
+
         assert_eq!(config.buffer_cap, DEFAULT_BUF_CAP);
         assert!(config.io_worker_config.is_some());
         assert!(config.is_thread_pool_enabled());
         assert_ne!(config.work_sharing_level, usize::MAX);
-        drop(lock);
-        handle_test_ready();
     }
 
-    #[orengine::test::test_local]
+    #[orengine::test::test_local(exclusive_in = "config")]
     fn test_config() {
-        let lock = get_lock();
         let config = Config::default()
             .set_buffer_cap(1024)
             .set_io_worker_config(None)
@@ -410,16 +389,10 @@ pub(crate) mod tests {
         assert!(!config.is_thread_pool_enabled());
         assert_eq!(config.work_sharing_level, usize::MAX);
         assert!(!config.is_work_sharing_enabled());
-
-        drop(lock);
-        handle_test_ready();
     }
 
     fn handle_panic_in_config_test(func: impl FnOnce() + panic::UnwindSafe) {
-        let lock = get_lock();
         let res = panic::catch_unwind(func);
-        handle_test_ready();
-        drop(lock);
 
         if let Err(err) = res {
             panic::resume_unwind(err);
@@ -433,7 +406,7 @@ pub(crate) mod tests {
     // 2 - first config with work sharing and without io worker, next with io worker and work sharing
     // 3 - first config with work sharing and without blocking pool, next with blocking pool and work sharing
     // 4 - first config with blocking pool and work sharing, next with work sharing and without blocking pool
-    #[orengine::test::test_local]
+    #[orengine::test::test_local(exclusive_in = "config")]
     #[allow(
         clippy::should_panic_without_expect,
         reason = "panic message is too long"
@@ -451,7 +424,7 @@ pub(crate) mod tests {
         });
     }
 
-    #[orengine::test::test_local]
+    #[orengine::test::test_local(exclusive_in = "config")]
     #[allow(
         clippy::should_panic_without_expect,
         reason = "panic message is too long"
@@ -469,7 +442,7 @@ pub(crate) mod tests {
         });
     }
 
-    #[orengine::test::test_local]
+    #[orengine::test::test_local(exclusive_in = "config")]
     #[allow(
         clippy::should_panic_without_expect,
         reason = "panic message is too long"
@@ -486,7 +459,7 @@ pub(crate) mod tests {
         });
     }
 
-    #[orengine::test::test_local]
+    #[orengine::test::test_local(exclusive_in = "config")]
     #[allow(
         clippy::should_panic_without_expect,
         reason = "panic message is too long"

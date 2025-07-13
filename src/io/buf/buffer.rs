@@ -1,10 +1,10 @@
 //! This module contains [`Buffer`].
-use crate::io::buf_pool::{buf_pool, buffer, BufPool};
+use crate::io::buf_pool::{BufPool, buf_pool, buffer};
 #[cfg(target_os = "linux")]
 use crate::io::linux::linux_buffer::LinuxBuffer;
 use crate::io::slice::{Slice, SliceMut};
 use crate::io::{FixedBuffer, FixedBufferMut};
-use crate::utils::{likely, Sealed};
+use crate::utils::{Sealed, likely};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
@@ -27,11 +27,6 @@ impl std::error::Error for LenIsGreaterThanCapacity {}
 
 /// Buffer for data transfer. Buffer is allocated in heap.
 ///
-/// Buffer has `len` and `cap`.
-///
-/// - `len` is how many bytes have been written into the buffer.
-/// - `cap` is how many bytes have been allocated for the buffer.
-///
 /// # Why it is !Send
 ///
 /// [`Buffer`] is not `Send`, because it can be __fixed__.
@@ -42,22 +37,7 @@ impl std::error::Error for LenIsGreaterThanCapacity {}
 /// or [`full_buffer()`](crate::io::full_buffer).
 /// If you can use [`BufPool`], use it to have better performance.
 ///
-/// If it was gotten from [`BufPool`], it will come back after a drop.
-///
-/// # Buffer representation
-///
-/// ```text
-/// +---+---+---+---+---+---+---+---+
-/// | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
-/// +---+---+---+---+---+---+---+---+
-/// | X | X | X | X | X |   |   |   |
-/// +---+---+---+---+---+---+---+---+
-///                     ^           ^
-///                    len         cap
-///
-/// len = 5 (from 1 to 5 inclusive)
-/// 5 blocks occupied (X), 3 blocks free (blank)
-/// ```
+/// If it was gotten from [`BufPool`], it will return there after a drop.
 pub struct Buffer {
     #[cfg(not(target_os = "linux"))]
     os_buffer: ManuallyDrop<Vec<u8>>,

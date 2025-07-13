@@ -1,10 +1,10 @@
 //! This module contains [`BufPool`].
-#[cfg(target_os = "linux")]
-use crate::io::worker::local_worker;
 use crate::io::Buffer;
 #[cfg(target_os = "linux")]
 use crate::io::FixedBuffer;
-use crate::utils::{assert_hint, likely};
+#[cfg(target_os = "linux")]
+use crate::io::worker::local_worker;
+use crate::utils::{assert_hint, clear_with, likely};
 #[cfg(target_os = "linux")]
 use libc;
 use std::cell::UnsafeCell;
@@ -22,9 +22,12 @@ thread_local! {
 pub(crate) fn init_local_buf_pool(number_of_fixed_buffers: u16, default_buffer_cap: u32) {
     BUF_POOL.with(|buf_pool_static| {
         let buf_pool_ = unsafe { &mut *buf_pool_static.get() };
-        assert!(buf_pool_.is_none(), "BufPool is already initialized.");
 
-        *buf_pool_ = Some(BufPool::new(number_of_fixed_buffers, default_buffer_cap));
+        let _ = buf_pool_
+            .replace(BufPool::new(number_of_fixed_buffers, default_buffer_cap))
+            .is_none_or(|_| {
+                panic!("BufPool is already initialized.");
+            });
     });
 }
 
@@ -32,7 +35,6 @@ pub(crate) fn init_local_buf_pool(number_of_fixed_buffers: u16, default_buffer_c
 pub(crate) fn uninit_local_buf_pool() {
     BUF_POOL.with(|buf_pool_static| unsafe {
         let buf_pool_ = &mut *buf_pool_static.get();
-        assert!(buf_pool_.is_some(), "BufPool is not initialized.");
 
         *buf_pool_ = None;
     });
@@ -141,7 +143,7 @@ impl BufPool {
                     IoSliceMut::new(slice)
                 })
                 .collect();
-            let pool_of_fixed_buffers = fixed_buffers
+            let mut pool_of_fixed_buffers: Vec<Buffer> = fixed_buffers
                 .iter_mut()
                 .enumerate()
                 .map(|(i, buf)| {
@@ -159,7 +161,21 @@ impl BufPool {
                     iov_len: buf.len() as _,
                 })
                 .collect();
-            local_worker().register_buffers(&io_vectors);
+
+            if local_worker().register_buffers(&io_vectors).is_err() {
+                for buf in &mut fixed_buffers {
+                    unsafe { drop(Box::from_raw(std::ptr::from_mut::<[u8]>(buf.as_mut()))) };
+                }
+
+                unsafe { pool_of_fixed_buffers.set_len(0) };
+
+                return Self {
+                    fixed_buffers: Box::new([]),
+                    pool_of_fixed_buffers: Vec::new(),
+                    default_buffer_cap,
+                    pool_of_non_fixed_buffers: Vec::new(),
+                };
+            }
 
             Self {
                 fixed_buffers,
@@ -174,24 +190,18 @@ impl BufPool {
     fn deallocate_buffers(&mut self) {
         #[cfg(not(target_os = "linux"))]
         {
-            for buf in self.pool.drain(..) {
-                buf.deallocate();
-            }
+            clear_with(&mut self.pool, |buf| buf.deallocate());
         }
 
         #[cfg(target_os = "linux")]
         {
-            for buf in self.pool_of_non_fixed_buffers.drain(..) {
-                buf.deallocate();
-            }
+            clear_with(&mut self.pool_of_non_fixed_buffers, Buffer::deallocate);
 
             if crate::utils::unlikely(self.pool_of_fixed_buffers.is_empty()) {
                 return;
             }
 
-            for buf in self.pool_of_fixed_buffers.drain(..) {
-                buf.deallocate();
-            }
+            clear_with(&mut self.pool_of_fixed_buffers, Buffer::deallocate);
 
             local_worker().deregister_buffers();
 

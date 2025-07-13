@@ -135,10 +135,10 @@ mod tests {
     use crate as orengine;
     use crate::sleep;
     use crate::sync::{AsyncOnce, AsyncWaitGroup, CallOnceResult, Once, OnceState, WaitGroup};
-    use crate::test::sched_future_to_another_thread;
+    use crate::test::sched_future;
+    use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::SeqCst;
-    use std::sync::Arc;
     use std::time::Duration;
 
     #[orengine::test::test_shared]
@@ -146,15 +146,18 @@ mod tests {
         let a = Arc::new(AtomicBool::new(false));
         let wg = Arc::new(WaitGroup::new());
         let once = Arc::new(Once::new());
+
         assert_eq!(once.state(), OnceState::NotCalled);
         assert!(!once.is_completed());
 
         for _ in 0..10 {
             let a = a.clone();
             let wg = wg.clone();
-            wg.add(1);
             let once = once.clone();
-            sched_future_to_another_thread(async move {
+
+            wg.add(1).await;
+
+            sched_future(async move {
                 let _ = once
                     .call_once(async move {
                         sleep(Duration::from_millis(1)).await;
@@ -162,11 +165,12 @@ mod tests {
                         a.store(true, SeqCst);
                     })
                     .await;
-                wg.done();
+                wg.done().await;
             });
         }
 
         wg.wait().await;
+
         assert!(once.is_completed());
         assert_eq!(
             once.call_once(async {}).await,
@@ -179,24 +183,29 @@ mod tests {
         let a = Arc::new(AtomicBool::new(false));
         let wg = Arc::new(WaitGroup::new());
         let once = Arc::new(Once::new());
+
         assert_eq!(once.state(), OnceState::NotCalled);
         assert!(!once.is_completed());
 
         for _ in 0..10 {
             let a = a.clone();
             let wg = wg.clone();
-            wg.add(1);
             let once = once.clone();
-            sched_future_to_another_thread(async move {
+
+            wg.add(1).await;
+
+            sched_future(async move {
                 let _ = once.call_once_sync(|| {
                     assert!(!a.load(SeqCst));
                     a.store(true, SeqCst);
                 });
-                wg.done();
+
+                wg.done().await;
             });
         }
 
         wg.wait().await;
+
         assert!(once.is_completed());
         assert_eq!(
             once.call_once_sync(|| ()),

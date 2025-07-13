@@ -316,7 +316,7 @@ mod tests {
     use crate as orengine;
     use crate::sleep;
     use crate::sync::{AsyncWaitGroup, WaitGroup};
-    use crate::test::sched_future_to_another_thread;
+    use crate::test::sched_future;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -326,25 +326,35 @@ mod tests {
 
         let mutex = Arc::new(NaiveMutex::new(false));
         let wg = Arc::new(WaitGroup::new());
-
         let mutex_clone = mutex.clone();
         let wg_clone = wg.clone();
-        wg_clone.add(1);
-        sched_future_to_another_thread(async move {
+
+        wg_clone.add(1).await;
+
+        sched_future(async move {
             let mut value = mutex_clone.lock().await;
+
             println!("1");
+
             sleep(SLEEP_DURATION).await;
-            wg_clone.done();
+
+            wg_clone.done().await;
+
             println!("3");
+
             *value = true;
         });
 
         wg.wait().await;
+
         println!("2");
+
         let value = mutex.lock().await;
+
         println!("4");
 
         assert!(*value);
+
         drop(value);
     }
 
@@ -359,30 +369,46 @@ mod tests {
         let second_lock = Arc::new(WaitGroup::new());
         let second_lock_clone = second_lock.clone();
 
-        lock_wg.add(1);
-        unlock_wg.add(1);
-        sched_future_to_another_thread(async move {
+        lock_wg.add(1).await;
+        unlock_wg.add(1).await;
+
+        sched_future(async move {
             let mut value = mutex_clone.lock().await;
+
             println!("1");
-            lock_wg_clone.done();
+
+            lock_wg_clone.done().await;
+
             unlock_wg_clone.wait().await;
+
             println!("4");
+
             *value = true;
+
             drop(value);
-            second_lock_clone.done();
+
+            second_lock_clone.done().await;
         });
 
         lock_wg.wait().await;
+
         println!("2");
+
         let value = mutex.try_lock();
+
         println!("3");
+
         assert!(value.is_none());
-        second_lock.inc();
-        unlock_wg.done();
+
+        second_lock.inc().await;
+        unlock_wg.done().await;
 
         second_lock.wait().await;
+
         let value = mutex.try_lock();
+
         println!("5");
+
         match value {
             Some(v) => assert!(*v, "not waited"),
             None => panic!("can't acquire lock"),

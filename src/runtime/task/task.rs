@@ -1,9 +1,9 @@
 //! This module provides the [`Task`].
+use crate::Executor;
 #[cfg(debug_assertions)]
 use crate::local_executor;
-use crate::runtime::task::task_data::TaskData;
 use crate::runtime::Locality;
-use crate::Executor;
+use crate::runtime::task::task_data::TaskData;
 use std::future::Future;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
@@ -379,6 +379,18 @@ macro_rules! panic_if_shared_in_future {
 /// # Safety
 ///
 /// Provided `locality` is valid for the current [`task`](Task).
+///
+/// # Example
+///
+/// ```no_run
+/// use orengine::runtime::{Locality, update_current_task_locality};
+///
+/// # async fn foo() {
+/// unsafe { update_current_task_locality(Locality::local()).await };
+/// // Do some local work
+/// unsafe { update_current_task_locality(Locality::shared()).await };
+/// # }
+/// ```
 pub async unsafe fn update_current_task_locality(locality: Locality) {
     struct UpdateCurrentTaskLocality {
         locality: Locality,
@@ -407,7 +419,7 @@ pub async unsafe fn update_current_task_locality(locality: Locality) {
 mod tests {
     use super::*;
     use crate as orengine;
-    use crate::{local_executor, yield_now, Local};
+    use crate::{Local, local_executor, yield_now};
     use std::ptr;
 
     #[orengine::test::test_local]

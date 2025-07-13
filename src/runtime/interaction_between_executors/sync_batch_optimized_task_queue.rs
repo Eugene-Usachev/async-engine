@@ -50,7 +50,7 @@ impl SyncBatchOptimizedTaskQueue {
             #[cfg(debug_assertions)]
             {
                 for mut task in local_tasks.drain(..) {
-                    assert!(task.is_local());
+                    debug_assert!(task.is_local());
 
                     task.executor_id = executor_id;
 

@@ -53,6 +53,7 @@
     reason = "It allows to create more readable docs."
 )]
 pub(crate) mod bug_message;
+mod combinators;
 pub mod fs;
 pub mod io;
 pub mod local;
@@ -66,7 +67,6 @@ pub mod run;
 pub mod runtime;
 mod sleep;
 pub mod sync;
-pub mod sync_task_queue;
 pub mod test;
 #[cfg(feature = "unstable_features")]
 pub mod unstable;
@@ -78,10 +78,10 @@ pub use local::Local;
 pub use orengine_macros::select;
 pub use run::*;
 pub use runtime::{
-    executors_ids, local_executor, stop_all_executors, stop_executor, work_sharing_executors_ids,
-    Executor,
+    Executor, executors_ids, local_executor, stop_all_executors, stop_executor,
+    work_sharing_executors_ids,
 };
 pub use sleep::{sleep, sleep_until};
 pub use socket2;
 pub use test::{test_local, test_shared};
-pub use yield_now::{yield_now, Yield};
+pub use yield_now::{Yield, yield_now};

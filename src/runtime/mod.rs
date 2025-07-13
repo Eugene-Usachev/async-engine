@@ -30,6 +30,7 @@
 //! ```
 mod asyncify;
 mod call;
+pub mod epoch_gc;
 pub mod executor;
 mod global_state;
 #[cfg(not(feature = "disable_send_task_to"))]

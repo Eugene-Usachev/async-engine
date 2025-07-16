@@ -104,6 +104,13 @@ impl<T> WaitingSelectTaskDequePool<T> {
     }
 }
 
+//TODO
+impl<T> Drop for WaitingSelectTaskDequePool<T> {
+    fn drop(&mut self) {
+        unsafe { self.queues.set_len(0) };
+    }
+}
+
 thread_local! {
     /// A pool of [`waiting task`](WaitingTask) deques.
     static WAITING_TASK_DEQUE_POOL: UnsafeCell<WaitingSelectTaskDequePool<()>> = const { UnsafeCell::new(WaitingSelectTaskDequePool::new()) };

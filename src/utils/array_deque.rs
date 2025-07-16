@@ -1,9 +1,8 @@
 //! This module contains the [`ArrayDeque`].
 use crate::utils::assert_hint;
-use std::mem;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::{Deref, DerefMut};
-use std::ptr::drop_in_place;
+use std::{mem, ptr};
 
 /// `ArrayDeque` is a deque, but it uses an array on stack and can't be resized.
 pub struct ArrayDeque<T, const N: usize> {
@@ -61,7 +60,8 @@ impl<T, const N: usize> ArrayDeque<T, N> {
 
         let idx = self.to_physical_idx(self.len());
 
-        self.stack[idx] = value;
+        unsafe { ptr::write(self.stack.get_unchecked_mut(idx), value) };
+
         self.len += 1;
     }
 
@@ -73,12 +73,13 @@ impl<T, const N: usize> ArrayDeque<T, N> {
             let idx = self.head;
             self.head = self.to_physical_idx(1);
 
-            assert_hint(
-                self.stack.len() >= idx,
-                &format!("idx: {}, len: {}", idx, self.stack.len()),
-            );
+            // TODO
+            // assert_hint(
+            //     self.stack.len() > idx,
+            //     &format!("idx: {}, len: {}", idx, self.stack.len()),
+            // );
 
-            Some(unsafe { (&raw mut self.stack[idx]).read() })
+            Some(unsafe { ptr::read(self.stack.get_unchecked_mut(idx)) })
         } else {
             None
         }
@@ -87,10 +88,8 @@ impl<T, const N: usize> ArrayDeque<T, N> {
     /// Drops all elements in the deque and set the length to 0.
     pub fn clear(&mut self) {
         if mem::needs_drop::<T>() {
-            for i in 0..self.len() {
-                unsafe {
-                    drop_in_place(&raw mut self.stack[i]);
-                };
+            while let Some(value) = self.pop_front() {
+                drop(value);
             }
         }
 

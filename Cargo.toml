@@ -21,6 +21,7 @@ fallback_thread_pool = []
 disable_send_task_to = []
 unstable_features = []
 disable_task_pool = []
+disable_preemption = []
 
 [dependencies]
 orengine-macros = { version = "8.0.0", path = "./orengine-macros" }

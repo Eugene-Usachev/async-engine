@@ -327,7 +327,6 @@ fn maybe_can_be_simplified(
                     {
                         use orengine::sync::{AsyncReceiver, TryRecvErr, RecvErr};
 
-                        let mut __step__ = 0;
                         #var_declaration
 
                         loop {
@@ -337,13 +336,7 @@ fn maybe_can_be_simplified(
                                     TryRecvErr::Empty => break #default_body,
                                     TryRecvErr::Closed => { #error_result_initialization },
                                     TryRecvErr::Locked => {
-                                        for _ in 0..1 << __step__ {
-                                            std::hint::spin_loop();
-                                        }
-
-                                        if __step__ <= 6 {
-                                            __step__ += 1;
-                                        }
+                                        orengine::utils::short_preempt();
 
                                         continue;
                                     },
@@ -381,7 +374,6 @@ fn maybe_can_be_simplified(
                     {
                         use orengine::sync::{AsyncSender, TrySendErr};
 
-                        let mut __step__ = 0;
                         let mut value = #value;
                         #var_declaration
 
@@ -393,13 +385,8 @@ fn maybe_can_be_simplified(
                                     TrySendErr::Closed(var) => { #error_result_initialization },
                                     TrySendErr::Locked(var) => {
                                         value = var;
-                                        for _ in 0..1 << __step__ {
-                                            std::hint::spin_loop();
-                                        }
-
-                                        if __step__ <= 6 {
-                                            __step__ += 1;
-                                        }
+                                    
+                                        orengine::utils::short_preempt();
 
                                         continue;
                                     },
@@ -656,12 +643,7 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                                 return __SelectReady__::Default;
                             }
 
-                            for _ in 0..1 << 4 {
-                                std::hint::spin_loop();
-                                std::hint::spin_loop();
-                                std::hint::spin_loop();
-                                std::hint::spin_loop();
-                            }
+                            orengine::utils::short_preempt();
 
                             channels_len = channels.len();
                         }
@@ -766,17 +748,20 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                                 general_state,
                                 task_in_select_branch,
                             ) {
-                                SelectNonBlockingBranchResult::Success => {
-                                    // `recv_or_subscribe` have already woken the task up
+                                SelectNonBlockingBranchResult::Success | SelectNonBlockingBranchResult::AlreadyAcquired => {
+                                    // if SelectNonBlockingBranchResult::Success:
+                                    // `send_or_subscribe` have already woken the task up
                                     // and set the `resolved_branch_id`
+                                    
+                                    // if SelectNonBlockingBranchResult::AlreadyAcquired:
+                                    // Another thread already acquired the lock and waked the task up.
                                     return;
                                 }
                                 SelectNonBlockingBranchResult::NotReady => {
                                     // Go on, the receiver has been subscribed
                                 }
-                                SelectNonBlockingBranchResult::AlreadyAcquired => {
-                                    // Another thread already acquired the lock and waked the task up.
-                                    return;
+                                SelectNonBlockingBranchResult::Locked => {
+                                    channels.push_back(__Channels__::#receiver_enum_name(receiver));
                                 }
                             }
                         }
@@ -787,7 +772,7 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                     });
 
                     create_channel_variants.push(quote! {
-                        __Channels__::#receiver_enum_name(#channel)
+                        __Channels__::#receiver_enum_name((#channel).clone())
                     });
 
                     channels_enum_index_impls.push(quote! {
@@ -808,15 +793,15 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                     let sender_enum_name = format_ident!("Sender{idx}");
 
                     send_vars.push(quote! {
-                        let #var_name = #value;
+                        let mut #var_name = #value;
                     });
 
                     senders_provide_fn_args.push(quote! {
-                        &raw const #var_name
+                        orengine::utils::SendableNonNull::from(NonNull::from(&mut #var_name))
                     });
 
                     senders_fn_args.push(quote! {
-                        #var_name: *const #generic_name::Data
+                        #var_name: SendableNonNull<#generic_name::Data>
                     });
 
                     is_local_consts.push(quote! {
@@ -848,21 +833,24 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                     channels_enum_handle.push(quote! {
                         __Channels__::#sender_enum_name(sender) => {
                             match sender.send_or_subscribe(
-                                NonNull::new_unchecked(#var_name.cast_mut()),
+                                *#var_name,
                                 general_state,
                                 task_in_select_branch,
                             ) {
-                                SelectNonBlockingBranchResult::Success => {
+                                SelectNonBlockingBranchResult::Success | SelectNonBlockingBranchResult::AlreadyAcquired => {
+                                    // if SelectNonBlockingBranchResult::Success:
                                     // `send_or_subscribe` have already woken the task up
                                     // and set the `resolved_branch_id`
+                                    
+                                    // if SelectNonBlockingBranchResult::AlreadyAcquired:
+                                    // Another thread already acquired the lock and waked the task up.
                                     return;
                                 }
                                 SelectNonBlockingBranchResult::NotReady => {
                                     // Go on, the receiver has been subscribed
                                 }
-                                SelectNonBlockingBranchResult::AlreadyAcquired => {
-                                    // Another thread already acquired the lock and waked the task up.
-                                    return;
+                                SelectNonBlockingBranchResult::Locked => {
+                                    channels.push_back(__Channels__::#sender_enum_name(sender));
                                 }
                             }
                         }
@@ -873,7 +861,7 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                     });
 
                     create_channel_variants.push(quote! {
-                        __Channels__::#sender_enum_name(#channel)
+                        __Channels__::#sender_enum_name((#channel).clone())
                     });
 
                     channels_enum_index_impls.push(quote! {
@@ -891,7 +879,7 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
             {
                 use std::ptr::NonNull;
                 use orengine::local_executor;
-                use orengine::utils::SendableNonNull;
+                use orengine::utils::{SendableNonNull, ArrayDeque};
                 use orengine::sync::channels::waiting_task::{TaskInSelect, TaskInSelectBranch};
                 use orengine::sync::channels::select::SelectNonBlockingBranchResult;
                 use orengine::sync::channels::{RecvErr, SendErr, SelectReceiver, SelectSender};
@@ -923,15 +911,19 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                 unsafe impl<#(#union_generics),*> Send for __RecvSlot__<#(#union_generic_params),*> {}
 
                 #[allow(clippy::too_many_arguments)]
-                fn __select__<#(#generics),*>(
+                async fn __select__<#(#generics),*>(
                     recv_slot: SendableNonNull<__RecvSlot__<#(#union_generic_params),*>>,
                     resolved_branch_id: SendableNonNull<usize>,
                     general_state: orengine::sync::channels::CallStatePtr,
                     task: orengine::runtime::Task,
-                    mut channels: [__Channels__<#(#generics_names),*>; #branches_len],
+                    mut channels: ArrayDeque<__Channels__<#(#generics_names),*>, #branches_len>,
                     #(#senders_fn_args),*
                 ) {
                     let __is_all_local: bool = #(#is_local_consts) &&*;
+
+                    if !__is_all_local {
+                        unsafe { orengine::runtime::update_current_task_locality(orengine::runtime::Locality::shared()).await };
+                    }
 
                     // We need to check whether `local` task is used in `shared` channel.
                     debug_assert!(
@@ -944,13 +936,24 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                     let task_in_select = TaskInSelect::acquire_for_task(task, *resolved_branch_id);
 
                     unsafe {
-                        for i in 0..#branches_len {
-                            let chan_ref = channels.get_unchecked_mut(i);
-                            let task_in_select_branch = TaskInSelectBranch::new(task_in_select.clone(), chan_ref.index());
+                        let mut channels_len = #branches_len;
+                        loop {
+                            for _ in 0..channels_len {
+                                let chan = orengine::utils::hints::unwrap_or_bug_hint(channels.pop_front());
+                                let task_in_select_branch = TaskInSelectBranch::new(task_in_select.clone(), chan.index());
 
-                            match chan_ref {
-                                #(#channels_enum_handle),*
+                                match chan {
+                                    #(#channels_enum_handle),*
+                                }
                             }
+
+                            if channels.is_empty() {
+                                break;
+                            }
+
+                            orengine::yield_now().await;
+
+                            channels_len = channels.len();
                         }
                     };
 
@@ -970,30 +973,18 @@ pub(crate) fn select(input: TokenStream, is_sequenced: bool) -> TokenStream {
                 let __recv_slot_ptr = SendableNonNull::from(&mut __recv_slot);
                 let __resolved_branch_id_ptr = SendableNonNull::from(&mut __resolved_branch_id);
 
-                let mut select_closure = |task| {
-                    __select__(
+                unsafe {
+                    let select_fut = __select__(
                         __recv_slot_ptr,
                         __resolved_branch_id_ptr,
                         __general_state_ptr,
-                        task,
-                        [#(#create_channel_variants),*],
+                        orengine::runtime::Task::get_current().await,
+                        ArrayDeque::from([#(#create_channel_variants),*]),
                         #(#senders_provide_fn_args),*
                     );
-                };
 
-                unsafe {
-                    local_executor()
-                        .invoke_call(
-                            orengine::runtime::Call::call_fn(
-                                std::mem::transmute::<
-                                    &mut dyn FnMut(orengine::runtime::Task),
-                                    *mut dyn FnMut(orengine::runtime::Task)
-                                >(&mut select_closure)
-                            ),
-                        );
+                    local_executor().spawn_local(select_fut);
 
-                    // TODO rewrite to Future and bench performance + memory.
-                    // Should be a bit better
                     orengine::runtime::Task::park_current_task().await;
                 };
 

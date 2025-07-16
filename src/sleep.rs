@@ -105,7 +105,6 @@ pub fn sleep_until(instant: impl Into<OrengineInstant>) -> impl Future<Output = 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate as orengine;
     use crate::local::Local;
     use crate::yield_now;

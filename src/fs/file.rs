@@ -298,7 +298,6 @@ impl Drop for File {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate as orengine;
     use crate::fs::test_helper::{create_test_dir_if_not_exist, is_exists, TEST_DIR_PATH};
     use crate::io::{full_buffer, get_fixed_buffer, get_full_fixed_buffer, FixedBuffer};

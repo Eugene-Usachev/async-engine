@@ -2,9 +2,10 @@
 //! information.
 #[cfg(debug_assertions)]
 use crate::utils::OrengineInstant;
+use crate::utils::{likely, long_preempt, short_preempt};
 use core::cell::Cell;
 use core::fmt;
-use std::hint::spin_loop;
+// TODO update docs
 
 const SPIN_LIMIT: u32 = 6;
 
@@ -61,11 +62,9 @@ impl Backoff {
             self.panic_if_possible_deadlock();
         }
 
-        for _ in 0..1 << self.step.get() {
-            spin_loop();
-        }
+        short_preempt();
 
-        if self.step.get() <= SPIN_LIMIT {
+        if self.step.get() < SPIN_LIMIT {
             self.step.set(self.step.get() + 1);
         }
     }
@@ -78,42 +77,37 @@ impl Backoff {
             self.panic_if_possible_deadlock();
         }
 
-        if self.step.get() <= SPIN_LIMIT {
-            for _ in 0..1 << self.step.get() {
-                spin_loop();
-            }
-        } else {
-            std::thread::yield_now();
-        }
+        if likely(self.step.get() < SPIN_LIMIT) {
+            short_preempt();
 
-        if self.step.get() <= SPIN_LIMIT {
             self.step.set(self.step.get() + 1);
+        } else {
+            long_preempt();
+
+            self.step.set(0);
         }
     }
 
     /// It is worked from `crossbeam::Backoff`, read it for more information.
     #[inline]
     pub fn is_completed(&self) -> bool {
-        self.step.get() > SPIN_LIMIT
+        self.step.get() >= SPIN_LIMIT
     }
 }
 
 impl fmt::Debug for Backoff {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug_struct = f.debug_struct("Backoff");
-        let updated = debug_struct
+        let mut updated = debug_struct
             .field("step", &self.step)
             .field("is_completed", &self.is_completed());
 
         #[cfg(debug_assertions)]
         {
-            updated.field("start", &self.start).finish()
+            updated = updated.field("start", &self.start);
         }
 
-        #[cfg(not(debug_assertions))]
-        {
-            updated.finish()
-        }
+        updated.finish()
     }
 }
 

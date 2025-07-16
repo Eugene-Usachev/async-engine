@@ -6,6 +6,7 @@
 //! you don't need to read it.
 pub mod receiver;
 mod result;
+mod select_macro;
 pub mod sender;
 #[cfg(test)]
 mod test;

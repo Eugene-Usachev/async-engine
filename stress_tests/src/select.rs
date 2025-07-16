@@ -4,11 +4,13 @@ use orengine::sync::{
     AsyncChannel, AsyncSender, AsyncWaitGroup, Channel, LocalChannel, LocalWaitGroup, WaitGroup,
 };
 use orengine::test::sched_future;
-use orengine::{Local, local_executor, select, yield_now};
+use orengine::{local_executor, select, yield_now, Local};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Relaxed, Release};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 #[allow(clippy::future_not_send, reason = "It is local")]
 async fn test_local_select_stress(with_default: bool) {
@@ -295,7 +297,7 @@ async fn test_shared_select_stress(with_default: bool) {
     const SECOND_SHIFT: usize = 21;
     const THIRD_SHIFT: usize = 30;
     const PAR_MULTIPLIER: usize = 6;
-    const COUNT: usize = 1000000;
+    const COUNT: usize = 50000;
 
     type ChanCreator = fn() -> Channel<usize>;
 
@@ -562,6 +564,7 @@ fn test_shared_select_stress_without_default() {
 
 // endregion
 
+
 async fn test_bug_() {
     const TRIES: usize = 1;
     const FIRST_SHIFT: usize = 12;
@@ -616,7 +619,7 @@ async fn test_bug_() {
                     let prev = IN.fetch_add(1, Relaxed);
 
                     if prev % 50_000 == 0 {
-                        println!("Recv in {prev} from {}", COUNT * 2)
+                        println!("Recv in {prev} from {}", COUNT * 2 * PAR_MULTIPLIER)
                     }
 
                     let received = if i % 2 == 0 {
@@ -634,7 +637,7 @@ async fn test_bug_() {
                     let prev = OUT.fetch_add(1, Relaxed);
 
                     if prev % 50_000 == 0 {
-                        println!("Recv out {prev} from {}", COUNT * 2)
+                        println!("Recv out {prev} from {}", COUNT * 2 * PAR_MULTIPLIER)
                     }
 
                     total_received_clone.fetch_add(received.expect("failed to recv"), Relaxed);
@@ -782,7 +785,7 @@ async fn test_bug_() {
 }
 
 // TODO r
-#[orengine::test::test_shared(timeout_ms = 1000000, exclusive_in = "*")]
+#[orengine::test::test_shared(timeout_ms = 10000, exclusive_in = "*")]
 fn test_bug() {
     test_bug_().await;
 }

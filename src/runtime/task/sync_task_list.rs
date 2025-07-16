@@ -2,11 +2,11 @@
 
 use crate::runtime::Task;
 use crate::utils::{
-    LockFreeTaskStack, NeverWaitLock, TaskVecFromPool, acquire_task_vec_from_pool, assert_hint,
-    likely,
+    acquire_task_vec_from_pool, assert_hint, likely, long_preempt, short_preempt,
+    LockFreeTaskStack, NeverWaitLock, TaskVecFromPool,
 };
 use std::mem::MaybeUninit;
-use std::{ptr, thread};
+use std::ptr;
 // TODO impl 1
 // pub struct SyncTaskList {
 //     stack: LockFreeTaskStack,
@@ -95,7 +95,7 @@ impl SyncTaskList {
     }
 
     pub fn push(&self, task: Task) {
-        if let Some(mut fast_list) = self.fast_list.try_lock_with_spinning() {
+        if let Some(mut fast_list) = self.fast_list.try_lock_with_preemption() {
             fast_list.push(task);
         } else {
             self.slow_list.push(task);
@@ -104,7 +104,7 @@ impl SyncTaskList {
 
     pub fn try_pop(&self) -> Option<Task> {
         self.fast_list
-            .try_lock_with_spinning()
+            .try_lock_with_preemption()
             .map_or_else(|| self.slow_list.try_pop(), |mut fast_list| fast_list.pop())
     }
 
@@ -114,21 +114,25 @@ impl SyncTaskList {
 
             loop {
                 for _ in 0..4 {
-                    if let Some(mut fast_list) = this.fast_list.try_lock_with_spinning() {
+                    if let Some(mut fast_list) = this.fast_list.try_lock() {
                         if let Some(task) = fast_list.pop() {
                             return task;
                         }
+
+                        continue;
                     }
+
+                    short_preempt();
                 }
 
                 if let Some(task) = this.slow_list.try_pop() {
                     return task;
                 }
 
-                // It looks like another thread has locked the fast_list and was preempted by OS.
+                // It looks like another thread has locked the `fast_list` and was preempted by OS.
                 // Unlikely, but we have to handle it.
 
-                thread::yield_now();
+                long_preempt();
             }
         }
 
@@ -141,7 +145,7 @@ impl SyncTaskList {
             }
 
             if step == 2 {
-                // Maybe we have fast_list starvation.
+                // Maybe we have `fast_list` starvation.
                 // From here we can't correct it, but we can at least reduce slow_list polling.
 
                 return fast_list_starvation_case(self);
@@ -161,7 +165,7 @@ impl SyncTaskList {
 
             loop {
                 for _ in 0..4 {
-                    if let Some(mut fast_list) = this.fast_list.try_lock_with_spinning() {
+                    if let Some(mut fast_list) = this.fast_list.try_lock() {
                         let fast_len = fast_list.len();
                         let want = dst.len() - popped;
 
@@ -185,6 +189,8 @@ impl SyncTaskList {
                             }
                         }
                     }
+
+                    short_preempt();
                 }
 
                 if let Some(task) = this.slow_list.try_pop() {
@@ -197,7 +203,7 @@ impl SyncTaskList {
                 }
 
                 // It's possible a thread is holding the lock and got preempted
-                thread::yield_now();
+                long_preempt();
             }
         }
 

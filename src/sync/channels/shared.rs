@@ -1,8 +1,8 @@
 //! This module contains the implementation of the [`Channel`].
 use crate::panic_if_local_in_future;
-use crate::runtime::Call;
 use crate::runtime::waiting_task::WaitingTask;
-use crate::runtime::{IsLocal, Task, TaskWithDeadline, local_executor};
+use crate::runtime::Call;
+use crate::runtime::{local_executor, IsLocal, Task, TaskWithDeadline};
 use crate::sync::channels::select::SelectNonBlockingBranchResult;
 use crate::sync::channels::state::{CallState, CallStatePtr};
 use crate::sync::channels::waiting_task::waiting_select_task_deque::WaitingTaskSharedDequeGuard;
@@ -14,13 +14,13 @@ use crate::sync::{
     AsyncChannel, AsyncMutex, AsyncReceiver, AsyncSender, RecvErr, RecvTimeoutErr, SendErr,
     SendTimeoutErr, TryRecvErr, TrySendErr, Unlock,
 };
-use crate::utils::{OrengineInstant, Ptr, unwrap_or_bug_hint};
 use crate::utils::{unlikely, unreachable_hint};
+use crate::utils::{unwrap_or_bug_hint, OrengineInstant, Ptr};
 use std::collections::VecDeque;
 use std::future::Future;
 use std::mem::ManuallyDrop;
 use std::panic::{RefUnwindSafe, UnwindSafe};
-use std::ptr::{NonNull, copy_nonoverlapping};
+use std::ptr::{copy_nonoverlapping, NonNull};
 use std::task::{Context, Poll};
 use std::{mem, ptr};
 
@@ -613,29 +613,8 @@ macro_rules! generate_send_or_subscribe {
             state: CallStatePtr,
             task_in_select_branch: TaskInSelectBranch,
         ) -> SelectNonBlockingBranchResult {
-            let mut inner_lock = {
-                let backoff = $crate::utils::Backoff::new();
-                // TODO r
-                let mut attempts = 0;
-
-                loop {
-                    let Some(inner_lock) = self.inner.try_lock() else {
-                        backoff.snooze();
-
-                        continue;
-                    };
-
-                    attempts += 1;
-
-                    if attempts % 10 == 0 {
-                        println!(
-                            "Executor with id {}, tried {attempts} times",
-                            local_executor().id()
-                        );
-                    }
-
-                    break inner_lock;
-                }
+            let Some(mut inner_lock) = self.inner.try_lock() else {
+                return SelectNonBlockingBranchResult::Locked;
             };
 
             if unlikely(inner_lock.is_closed) {
@@ -796,18 +775,8 @@ macro_rules! generate_recv_or_subscribe {
             state: CallStatePtr,
             task_in_select_branch: TaskInSelectBranch,
         ) -> SelectNonBlockingBranchResult {
-            let mut inner_lock = {
-                let backoff = $crate::utils::Backoff::new();
-
-                loop {
-                    let Some(inner_lock) = self.inner.try_lock() else {
-                        backoff.snooze();
-
-                        continue;
-                    };
-
-                    break inner_lock;
-                }
+            let Some(mut inner_lock) = self.inner.try_lock() else {
+                return SelectNonBlockingBranchResult::Locked;
             };
 
             if unlikely(inner_lock.is_closed) {
@@ -1201,8 +1170,8 @@ mod tests {
         SendErr, SendTimeoutErr, TryRecvErr, TrySendErr, WaitGroup,
     };
     use crate::test::sched_future;
-    use crate::utils::Ptr;
     use crate::utils::droppable_element::DroppableElement;
+    use crate::utils::Ptr;
 
     #[orengine::test::test_shared]
     fn test_zero_capacity_shared_channel() {

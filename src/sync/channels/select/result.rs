@@ -8,12 +8,13 @@
 ///
 /// For more details read [`SelectNonBlockingBranchResult::Success`],
 /// [`SelectNonBlockingBranchResult::AlreadyAcquired`],
+/// [`SelectNonBlockingBranchResult::Locked`],
 /// [`SelectNonBlockingBranchResult::NotReady`].
 ///
 /// [`SelectReceiver::recv_or_subscribe`]: crate::sync::channels::SelectReceiver::recv_or_subscribe
 /// [`SelectSender::send_or_subscribe`]: crate::sync::channels::SelectSender::send_or_subscribe
 pub enum SelectNonBlockingBranchResult {
-    /// The [`TaskInSelectBranch`] was acquired successfully and the value from the provided slot
+    /// The [`TaskInSelectBranch`] was acquired successfully, and the value from the provided slot
     /// was written successfully
     /// or a value from a channel was successfully written to the provided slot.
     ///
@@ -24,7 +25,9 @@ pub enum SelectNonBlockingBranchResult {
     ///
     /// [`TaskInSelectBranch`]: crate::sync::channels::waiting_task::TaskInSelectBranch
     AlreadyAcquired,
-    /// A channel is still not ready and the [`TaskInSelectBranch`] was subscribed to it.
+    /// The channel is locked now, should retry after some time.
+    Locked,
+    /// A channel is still not ready, and the [`TaskInSelectBranch`] was subscribed to it.
     ///
     /// [`TaskInSelectBranch`]: crate::sync::channels::waiting_task::TaskInSelectBranch
     NotReady,

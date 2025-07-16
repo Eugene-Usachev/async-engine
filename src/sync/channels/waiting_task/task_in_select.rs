@@ -19,7 +19,7 @@ use std::cell::UnsafeCell;
 use std::ptr;
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst};
-use std::sync::atomic::{AtomicUsize, fence};
+use std::sync::atomic::{fence, AtomicUsize};
 
 /// It means that [`TaskInSelect`] is not acquired.
 const NOT_ACQUIRED: usize = 0;
@@ -249,9 +249,11 @@ impl TaskInSelectBranch {
 
                     // Another thread acquires the first of two tasks and tries to acquire the second one.
                     // It may fail (and set `NOT_ACQUIRED`) or succeed (and set `ACQUIRED`).
-                    // We will for this update. It is not a performance issue because it
+                    // We will wait for this update. It is not a performance issue because it
                     // happens very rarely, and we wait at the max time of `load` + `store`.
                     backoff.snooze();
+                    // TODO
+                    println!("1");
                 } else {
                     self.task_in_select
                         .set_resolved_branch_id(self.associated_branch_id);
@@ -518,6 +520,8 @@ impl TaskInSelectBranch {
                                 return PopIfAcquiredResult::NoData(self);
                             }
                             ACQUIRING_NOW => {
+                                // TODO
+                                println!("2");
                                 if !backoff.is_completed() {
                                     backoff.snooze();
                                 } else {
@@ -653,7 +657,7 @@ impl Drop for TaskInSelectPool {
 }
 
 thread_local! {
-    /// Thread-local [`TaskInSelectPool`] therefore, it is lockless.
+    /// Thread-local [`TaskInSelectPool`]; therefore, it is lockless.
     // Before refactor: it must be thread-local, or rewrite drop logic in `TaskInSelect`.
     static TASK_IN_SELECT_POOL: UnsafeCell<TaskInSelectPool> = const {
         UnsafeCell::new(TaskInSelectPool::new())

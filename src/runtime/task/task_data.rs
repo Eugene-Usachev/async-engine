@@ -18,7 +18,7 @@ pub(crate) struct TaskData {
     #[cfg(not(target_pointer_width = "64"))]
     is_local: bool,
     #[cfg(target_pointer_width = "64")]
-    future_tagged_ptr: *mut dyn Future<Output = ()>,
+    future_tagged_ptr: i128,
 }
 
 impl TaskData {
@@ -32,18 +32,13 @@ impl TaskData {
         };
 
         #[cfg(target_pointer_width = "64")]
-        #[allow(clippy::transmute_undefined_repr, reason = "dark magic")]
         {
             let mut tagged_ptr =
                 unsafe { std::mem::transmute::<*mut dyn Future<Output = ()>, i128>(future) };
 
-            tagged_ptr |= locality.value;
-
             #[allow(clippy::useless_transmute, reason = "false positive")]
             Self {
-                future_tagged_ptr: unsafe {
-                    std::mem::transmute::<i128, *mut dyn Future<Output = ()>>(tagged_ptr)
-                },
+                future_tagged_ptr: tagged_ptr | locality.value
             }
         }
     }
@@ -55,16 +50,10 @@ impl TaskData {
         return self.future_ptr;
 
         #[cfg(target_pointer_width = "64")]
-        #[allow(clippy::transmute_undefined_repr, reason = "dark magic")]
         {
-            let future_tagged_ptr = unsafe {
-                std::mem::transmute::<*mut dyn Future<Output = ()>, i128>(self.future_tagged_ptr)
-            };
-
-            #[allow(clippy::useless_transmute, reason = "false positive")]
             unsafe {
                 std::mem::transmute::<i128, *mut dyn Future<Output = ()>>(
-                    future_tagged_ptr & TASK_MASK,
+                    self.future_tagged_ptr & TASK_MASK,
                 )
             }
         }
@@ -77,13 +66,8 @@ impl TaskData {
         return self.is_local;
 
         #[cfg(target_pointer_width = "64")]
-        #[allow(clippy::transmute_undefined_repr, reason = "dark magic")]
         {
-            let future_tagged_ptr = unsafe {
-                std::mem::transmute::<*mut dyn Future<Output = ()>, i128>(self.future_tagged_ptr)
-            };
-
-            (future_tagged_ptr & IS_LOCAL_MASK) != 0
+            (self.future_tagged_ptr & IS_LOCAL_MASK) != 0
         }
     }
 
@@ -96,20 +80,9 @@ impl TaskData {
         }
 
         #[cfg(target_pointer_width = "64")]
-        #[allow(clippy::transmute_undefined_repr, reason = "dark magic")]
         {
-            let future_tagged_ptr = unsafe {
-                std::mem::transmute::<*mut dyn Future<Output = ()>, i128>(self.future_tagged_ptr)
-            };
-
-            let tagged_ptr = future_tagged_ptr & !IS_LOCAL_MASK;
-            let tagged_ptr = tagged_ptr | locality.value;
-
-            #[allow(clippy::useless_transmute, reason = "false positive")]
             {
-                self.future_tagged_ptr = unsafe {
-                    std::mem::transmute::<i128, *mut dyn Future<Output = ()>>(tagged_ptr)
-                };
+                self.future_tagged_ptr = (self.future_tagged_ptr & TASK_MASK) | locality.value;
             }
         }
     }
@@ -117,7 +90,6 @@ impl TaskData {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate as orengine;
     use crate::runtime::Task;
     use crate::{local_executor, Local};

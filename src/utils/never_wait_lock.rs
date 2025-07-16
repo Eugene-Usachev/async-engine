@@ -1,8 +1,8 @@
 //! This module contains the [`NeverWaitLock`].
 
 use crate::sync::Unlock;
+use crate::utils::short_preempt;
 use std::cell::UnsafeCell;
-use std::hint::spin_loop;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
@@ -134,21 +134,19 @@ impl<T: ?Sized> NeverWaitLock<T> {
 
     /// If `NeverWaitLock` is unlocked returns [`NeverWaitLockGuard`], otherwise returns [`None`].
     ///
-    /// It spins at most few times, but it can be more useful in cases where the lock is very likely to be locked for
-    /// __less than 30 nanoseconds__.
-    pub fn try_lock_with_spinning(&self) -> Option<NeverWaitLockGuard<T>> {
-        let mut step = 0;
+    /// It preempts the current task on failure, but it can be more useful in cases
+    /// where the lock is very likely to be locked for __less than 100 nanoseconds__.
+    ///
+    /// It is `pub(crate)` because users can misuse it and fill the preempt stack.
+    pub(crate) fn try_lock_with_preemption(&self) -> Option<NeverWaitLockGuard<T>> {
+        if let Some(guard) = self.try_lock() {
+            return Some(guard);
+        }
 
-        while step <= 6 {
-            if let Some(guard) = self.try_lock() {
-                return Some(guard);
-            }
+        short_preempt();
 
-            for _ in 0..(1 << step) {
-                spin_loop();
-            }
-
-            step += 1;
+        if let Some(guard) = self.try_lock() {
+            return Some(guard);
         }
 
         None

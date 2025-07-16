@@ -1,8 +1,8 @@
 //! This module contains the [`ExecutorSharedTaskList`].
 use crate::runtime::Task;
+use crate::utils::extend_vec_deque_by_task_slice;
 use crate::utils::never_wait_lock::{NeverWaitLock, NeverWaitLockGuard};
 use std::collections::VecDeque;
-use std::ptr;
 
 /// `ExecutorSharedTaskList` is a list of tasks that can be shared between executors.
 ///
@@ -35,16 +35,17 @@ impl ExecutorSharedTaskList {
 
     /// Takes at most `limit` tasks from the list and puts them in `other_list`.
     #[inline]
-    pub(crate) fn take_batch(&self, other_list: &mut VecDeque<Task>, limit: usize) {
+    pub(crate) fn take_at_most(&self, other_list: &mut VecDeque<Task>, limit: usize) {
         if let Some(mut guard) = self.list.try_lock() {
             let number_of_elems = guard.len().min(limit);
             let new_len = guard.len() - number_of_elems;
-            let mut first_index = new_len;
+            let first_index = new_len;
 
-            while first_index != guard.len() {
-                other_list.push_back(unsafe { ptr::read(guard.get_unchecked(first_index)) });
-                first_index += 1;
-            }
+            extend_vec_deque_by_task_slice(
+                other_list,
+                &guard[first_index..first_index + number_of_elems],
+            );
+
             unsafe { guard.set_len(new_len) };
         }
     }

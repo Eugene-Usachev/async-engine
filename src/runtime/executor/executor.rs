@@ -1,44 +1,44 @@
 //! This module provides the [`Executor`] struct and the [`local_executor`] function.
 use crate::bug_message::BUG_MESSAGE;
 use crate::io::sys::WorkerSys;
-use crate::io::worker::{IoWorker, get_local_worker_ref, init_local_worker};
+use crate::io::worker::{get_local_worker_ref, init_local_worker, IoWorker};
 use crate::io::{init_local_buf_pool, uninit_local_buf_pool};
-#[cfg(not(feature = "disable_task_pool"))]
-use crate::runtime::TaskPool;
 use crate::runtime::call::Call;
 use crate::runtime::epoch_gc::{local_epoch_gc, register_local_epoch_gc};
 use crate::runtime::executor::end_local_thread_and_write_into_ptr::FinishLocalExecutorAndWriteIntoPtr;
 use crate::runtime::executor::sleeping_manager::SleepingManager;
-use crate::runtime::global_state::{SubscribedState, register_local_executor};
+use crate::runtime::global_state::{register_local_executor, SubscribedState};
 #[cfg(not(feature = "disable_send_task_to"))]
 use crate::runtime::interaction_between_executors::{ExecutorIsNotRegisteredErr, Interactor};
 use crate::runtime::local_thread_pool::LocalThreadWorkerPool;
 use crate::runtime::task::Task;
 use crate::runtime::waker::create_waker;
-use crate::runtime::{Config, ValidConfig};
+#[cfg(not(feature = "disable_task_pool"))]
+use crate::runtime::TaskPool;
 use crate::runtime::{
-    ExecutorSharedTaskList, Locality, TaskWithDeadline, get_core_id_for_executor,
+    get_core_id_for_executor, ExecutorSharedTaskList, Locality, TaskWithDeadline,
 };
-use crate::sync::Unlock;
-use crate::sync::channels::CallStatePtr;
+use crate::runtime::{Config, ValidConfig};
 use crate::sync::channels::waiting_task::TaskInSelectBranch;
+use crate::sync::channels::CallStatePtr;
+use crate::sync::Unlock;
 use crate::utils::{
-    CoreId, OrengineInstant, ProgressiveTimeout, assert_hint, likely, unlikely, unwrap_or_bug_hint,
-    unwrap_or_bug_message_hint,
+    assert_hint, likely, unlikely, unwrap_or_bug_hint, unwrap_or_bug_message_hint, CoreId, OrengineInstant,
+    ProgressiveTimeout,
 };
 use fastrand::Rng;
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::Ordering::{AcqRel, Release};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use std::{mem, ptr, thread};
 
-macro_rules! shrink {
+macro_rules! maybe_shrink {
     ($list:expr) => {
         if unlikely($list.capacity() > 512 && $list.len() * 3 < $list.capacity()) {
             let new_len = $list.len() * 2 + 1;
@@ -168,8 +168,9 @@ pub struct Executor {
 
     local_worker: &'static mut Option<WorkerSys>,
     thread_pool: LocalThreadWorkerPool,
-
     sleeping_manager: SleepingManager,
+    #[cfg(not(feature = "disable_preemption"))]
+    was_already_polled: bool,
 }
 
 /// The next id of the executor. It is used to generate the unique executor id.
@@ -181,6 +182,17 @@ pub(crate) static FREE_EXECUTOR_ID: AtomicUsize = AtomicUsize::new(0);
 /// `MAX_NUMBER_OF_TASKS_TAKEN` is the maximum number of tasks that can be taken from
 /// other executors shared lists.
 const MAX_NUMBER_OF_TASKS_TAKEN: usize = 16;
+/// `MAX_EXEC_TASK_SERIES_LEN`
+/// is the maximum number of tasks that can be executed in a row before spawning.
+///
+/// It should be small not to overflow the stack.
+const MAX_EXEC_TASK_SERIES_LEN: usize = 16;
+/// `MAX_EXEC_NEXT_TASK_SERIES_LEN`
+/// is the number of tasks
+/// that can be executed in a row by calling [`short_preempt`](crate::utils::short_preempt).
+///
+/// It should be small not to overflow the stack.
+const MAX_EXEC_NEXT_TASK_SERIES_LEN: usize = 8;
 
 macro_rules! generate_run_and_block_on_function {
     ($func:expr, $future:expr, $executor:expr) => {{
@@ -275,6 +287,8 @@ impl Executor {
                 local_worker: get_local_worker_ref(),
                 thread_pool: LocalThreadWorkerPool::new(number_of_thread_workers),
                 sleeping_manager: SleepingManager::new(),
+                #[cfg(not(feature = "disable_preemption"))]
+                was_already_polled: false,
             });
 
             local_executor()
@@ -518,7 +532,12 @@ impl Executor {
     /// If the provided [`Task`] can't be executed.
     /// For more details read [`Task::check_safety`].
     pub fn exec_task_now(&mut self, mut task: Task) {
-        self.future_call_stack_depth += 1;
+        debug_assert!(
+            self.future_call_stack_depth < 100,
+            "Excessive use of the `exec_task_now` method has been detected. \
+            Sooner or later, this will lead to a stack overflow. \
+            Make sure that tasks awakened by the `exec_task_now` method do not trigger it."
+        );
 
         let future = unsafe { &mut *task.future_ptr() };
         #[cfg(debug_assertions)]
@@ -559,7 +578,6 @@ impl Executor {
             }
         }
 
-        self.future_call_stack_depth -= 1;
         self.executed_tasks_count_in_current_round += 1;
     }
 
@@ -576,13 +594,46 @@ impl Executor {
     /// For more details read [`Task::check_safety`].
     #[inline]
     pub fn exec_task(&mut self, task: Task) {
-        if likely(self.future_call_stack_depth < 8) {
+        if likely(self.future_call_stack_depth < MAX_EXEC_TASK_SERIES_LEN) {
+            self.future_call_stack_depth += 1;
+
             self.exec_task_now(task);
+
+            self.future_call_stack_depth -= 1;
 
             return;
         }
 
         self.spawn_task(task);
+    }
+
+    /// Likely executes the next [`task`](Task) of the current [`executor`](Executor).
+    /// Unlikely executes [`std::hint::spin_loop`] instead.
+    ///
+    /// This method is created for the [`short_preempt`](crate::utils::short_preempt) function.
+    #[cfg(not(feature = "disable_preemption"))]
+    #[inline(never)]
+    pub(crate) fn exec_next_task_or_spin(&mut self) {
+        let current = self.future_call_stack_depth;
+        if current < MAX_EXEC_TASK_SERIES_LEN + MAX_EXEC_NEXT_TASK_SERIES_LEN {
+            self.future_call_stack_depth = if current < MAX_EXEC_TASK_SERIES_LEN {
+                MAX_EXEC_TASK_SERIES_LEN
+            } else {
+                self.future_call_stack_depth + 1
+            };
+
+            if let Some(task) = self.local_tasks.pop_back() {
+                self.exec_task_now(task);
+            } else if let Some(task) = self.shared_tasks.pop_back() {
+                self.exec_task_now(task);
+            } else {
+                std::hint::spin_loop();
+            }
+
+            self.future_call_stack_depth = current;
+        } else {
+            std::hint::spin_loop();
+        }
     }
 
     /// Creates a `local` [`task`](Task) from a provided [`future`](Future)
@@ -997,8 +1048,10 @@ impl Executor {
             return;
         }
 
-        if let Some(shared_task_list) = self.shared_tasks_list.as_mut() {
-            if let Some(mut shared_task_list) = shared_task_list.try_lock_and_return_as_vec() {
+        let mut want_to_take = MAX_NUMBER_OF_TASKS_TAKEN;
+
+        if let Some(shared_task_list_) = self.shared_tasks_list.as_mut() {
+            if let Some(mut shared_task_list) = shared_task_list_.try_lock_and_return_as_vec() {
                 if !shared_task_list.is_empty() {
                     let limit = self.config.work_sharing_level - self.shared_tasks.len(); // Always bigger than 0, because of previous checks
                     for _ in 0..limit {
@@ -1007,7 +1060,7 @@ impl Executor {
                         }
                     }
 
-                    shrink!(shared_task_list);
+                    maybe_shrink!(shared_task_list);
 
                     return;
                 }
@@ -1022,13 +1075,13 @@ impl Executor {
                     let max_number_of_tries = self.rng.usize(0..lists.len()) + 1;
 
                     for i in 0..max_number_of_tries {
-                        let list = lists.get(i).expect(BUG_MESSAGE);
+                        let list = unwrap_or_bug_hint(lists.get(i));
                         let limit = MAX_NUMBER_OF_TASKS_TAKEN - self.shared_tasks.len();
                         if limit == 0 {
                             return;
                         }
 
-                        list.take_batch(&mut self.shared_tasks, limit);
+                        list.take_at_most(&mut self.shared_tasks, limit);
                     }
                 });
             }
@@ -1111,6 +1164,86 @@ impl Executor {
             } else {
                 // The executor shared its tasks with another one.
                 break;
+            }
+        }
+    }
+
+    /// Polls all pollers.
+    #[inline(never)]
+    pub(crate) fn next_poll(&mut self) {
+        #[cfg(not(feature = "disable_preemption"))]
+        { self.was_already_polled = true; }
+
+        self.take_work_if_needed();
+
+        self.thread_pool.poll(&mut self.local_tasks);
+
+        let nearest_timeout_option = self.check_sleeping_tasks();
+
+        // We need to consider 8 cases from 3 variables:
+        // has cpu work (self.number_of_spawned_tasks() != 0 or self.config.is_work_sharing_enabled()),
+        // has io work and has sleeping tasks
+        let has_cpu_work = self.number_of_spawned_tasks() > 0;
+        if self.local_worker.is_some() {
+            let worker = unwrap_or_bug_hint(self.local_worker.as_mut());
+            if worker.has_work() {
+                if !has_cpu_work {
+                    let max_timeout = self.progressive_timeout.timeout_with_shift(2);
+                    if let Some(nearest_timeout) = nearest_timeout_option {
+                        // case 1: we don't have cpu work, but we have sleeping tasks and io work
+                        worker.must_poll(Some(nearest_timeout.min(max_timeout)));
+                    } else {
+                        // case 2: we don't have cpu work nor sleeping tasks, but we io work
+                        worker.must_poll(Some(max_timeout));
+                    }
+                } else {
+                    // It processes 2 cases:
+                    // case 3: we have cpu work, sleeping tasks and io work
+                    // case 4: we have cpu work, io work, but we don't have sleeping tasks
+                    self.progressive_timeout.reset();
+                    worker.must_poll(None);
+                }
+            } else if !has_cpu_work {
+                let max_timeout = self.progressive_timeout.timeout();
+                if let Some(nearest_timeout) = nearest_timeout_option {
+                    // case 5: we don't have io work nor cpu work, but we have sleeping tasks
+                    self.sleep_at_most(nearest_timeout.min(max_timeout));
+                } else {
+                    // case 6: we don't have any work
+                    self.sleep_at_most(max_timeout);
+                }
+            } else {
+                // It processes 2 cases:
+                // case 7: we have cpu work, sleeping tasks, but don't have io work
+                // case 8: we have cpu work, but don't have io work nor sleeping tasks
+
+                self.progressive_timeout.reset();
+
+                // Continue processing cpu tasks
+            }
+        } else {
+            // Here we don't have a worker, therefore, we need to consider only 4 cases
+
+            let max_timeout = self.progressive_timeout.timeout();
+
+            if let Some(nearest_timeout) = nearest_timeout_option {
+                if has_cpu_work {
+                    // case 1: we have cpu work and sleeping tasks
+                    // Continue processing cpu tasks
+                } else {
+                    // case 2: we have sleeping tasks, but we don't have cpu work
+                    self.sleep_at_most(nearest_timeout.min(max_timeout));
+                }
+
+                self.progressive_timeout.reset();
+            } else if has_cpu_work {
+                // case 3: we have cpu work, but we don't have sleeping tasks
+                // Continue processing cpu tasks
+
+                self.progressive_timeout.reset();
+            } else {
+                // case 4: we don't have cpu work nor sleeping tasks
+                self.sleep_at_most(max_timeout);
             }
         }
     }
@@ -1204,16 +1337,17 @@ impl Executor {
         let mut prev_print_time = Instant::now();
 
         loop {
-            if prev_print_time + Duration::from_millis(1000) < Instant::now() {
-                prev_print_time = Instant::now();
-
-                // TODO r
-                println!(
-                    "Number of tasks: {}, id: {}",
-                    self.number_of_spawned_tasks(),
-                    self.id(),
-                ); // TODO
-            }
+            // TODO
+            // if prev_print_time + Duration::from_millis(1000) < Instant::now() {
+            //     prev_print_time = Instant::now();
+            //
+            //     // // TODO r
+            //     // println!(
+            //     //     "Number of tasks: {}, id: {}",
+            //     //     self.number_of_spawned_tasks(),
+            //     //     self.id(),
+            //     // ); // TODO
+            // }
 
             self.subscribed_state.check_version_and_update_if_needed(
                 self.id,
@@ -1239,80 +1373,21 @@ impl Executor {
 
             local_epoch_gc().maybe_pass_epoch(self.start_round_time);
 
-            self.take_work_if_needed();
-
-            self.thread_pool.poll(&mut self.local_tasks);
-
-            let nearest_timeout_option = self.check_sleeping_tasks();
-
-            // We need to consider 8 cases from 3 variables:
-            // has cpu work (self.number_of_spawned_tasks() != 0 or self.config.is_work_sharing_enabled()),
-            // has io work and has sleeping tasks
-            let has_cpu_work = self.number_of_spawned_tasks() > 0;
-            if self.local_worker.is_some() {
-                let worker = unwrap_or_bug_hint(self.local_worker.as_mut());
-                if worker.has_work() {
-                    if !has_cpu_work {
-                        let max_timeout = self.progressive_timeout.timeout_with_shift(2);
-                        if let Some(nearest_timeout) = nearest_timeout_option {
-                            // case 1: we don't have cpu work, but we have sleeping tasks and io work
-                            worker.must_poll(Some(nearest_timeout.min(max_timeout)));
-                        } else {
-                            // case 2: we don't have cpu work nor sleeping tasks, but we io work
-                            worker.must_poll(Some(max_timeout));
-                        }
-                    } else {
-                        // It processes 2 cases:
-                        // case 3: we have cpu work, sleeping tasks and io work
-                        // case 4: we have cpu work, io work, but we don't have sleeping tasks
-                        self.progressive_timeout.reset();
-                        worker.must_poll(None);
-                    }
-                } else if !has_cpu_work {
-                    let max_timeout = self.progressive_timeout.timeout();
-                    if let Some(nearest_timeout) = nearest_timeout_option {
-                        // case 5: we don't have io work nor cpu work, but we have sleeping tasks
-                        self.sleep_at_most(nearest_timeout.min(max_timeout));
-                    } else {
-                        // case 6: we don't have any work
-                        self.sleep_at_most(max_timeout);
-                    }
-                } else {
-                    // It processes 2 cases:
-                    // case 7: we have cpu work, sleeping tasks, but don't have io work
-                    // case 8: we have cpu work, but don't have io work nor sleeping tasks
-
-                    self.progressive_timeout.reset();
-
-                    // Continue processing cpu tasks
+            #[cfg(not(feature = "disable_preemption"))]
+            {
+                if !self.was_already_polled {
+                    self.next_poll();
                 }
-            } else {
-                // Here we don't have a worker, therefore, we need to consider only 4 cases
 
-                let max_timeout = self.progressive_timeout.timeout();
-
-                if let Some(nearest_timeout) = nearest_timeout_option {
-                    if has_cpu_work {
-                        // case 1: we have cpu work and sleeping tasks
-                        // Continue processing cpu tasks
-                    } else {
-                        // case 2: we have sleeping tasks, but we don't have cpu work
-                        self.sleep_at_most(nearest_timeout.min(max_timeout));
-                    }
-
-                    self.progressive_timeout.reset();
-                } else if has_cpu_work {
-                    // case 3: we have cpu work, but we don't have sleeping tasks
-                    // Continue processing cpu tasks
-
-                    self.progressive_timeout.reset();
-                } else {
-                    // case 4: we don't have cpu work nor sleeping tasks
-                    self.sleep_at_most(max_timeout);
-                }
+                self.was_already_polled = false;
             }
 
-            shrink!(self.local_tasks);
+            #[cfg(feature = "disable_preemption")]
+            {
+                self.next_poll();
+            }
+
+            maybe_shrink!(self.local_tasks);
         }
 
         unsafe { self.graceful_stop() };

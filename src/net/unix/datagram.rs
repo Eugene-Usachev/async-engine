@@ -209,7 +209,6 @@ impl Drop for UnixDatagram {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate as orengine;
     use crate::io::{AsyncBind, AsyncRecv, AsyncSend};
     use crate::runtime::local_executor;

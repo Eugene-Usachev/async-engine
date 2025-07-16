@@ -144,7 +144,6 @@ mod tests {
     use std::time::Duration;
     use std::{io, thread};
 
-    use super::*;
     use crate as orengine;
     use crate::fs;
 

@@ -3,11 +3,6 @@ use crate::runtime::waiting_task::WaitingTask;
 use crate::utils::{likely, unlikely, unwrap_or_bug_hint};
 use std::collections::VecDeque;
 
-/// Each receiver adds 1 to the counter of [`SenderReceiverQueue`]
-const RECEIVER_DELTA: isize = 1;
-/// Each sender subtracts 1 from the counter of [`SenderReceiverQueue`]
-const SENDER_DELTA: isize = -1;
-
 /// Current state of [`SenderReceiverQueue`].
 ///
 /// Read [`SenderReceiverQueueOption::Empty`], [`SenderReceiverQueueOption::Sender`],
@@ -182,6 +177,6 @@ impl<T> SenderReceiverQueue<T> {
 
 impl<T> Drop for SenderReceiverQueue<T> {
     fn drop(&mut self) {
-        debug_assert!(self.is_empty());
+        debug_assert!(self.is_empty(), "SenderReceiverQueue is not empty");
     }
 }

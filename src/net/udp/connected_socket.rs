@@ -177,7 +177,6 @@ mod tests {
     use std::time::Duration;
     use std::{io, thread};
 
-    use super::*;
     use crate as orengine;
 
     const REQUEST: &[u8] = b"GET / HTTP/1.1\r\n\r\n";

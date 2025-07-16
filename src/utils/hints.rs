@@ -1,5 +1,6 @@
 //! Hints to the compiler that affects how code should be emitted or optimized.
 use crate::bug_message::BUG_MESSAGE;
+use crate::local_executor;
 
 /// Do the same as [`assert_unchecked`](std::hint::assert_unchecked), but instead of UB,
 /// it panics with `debug_assertions`.
@@ -61,10 +62,16 @@ pub const fn unlikely(b: bool) -> bool {
 }
 
 /// A trait that is implemented by [`Option`] and [`Result`].
-pub(crate) trait UnwrapOrPanic<T> {
+pub trait UnwrapOrPanic<T> {
     /// Unwraps a value, panicking if it is [`None`] or [`Err`].
     fn unwrap_or_panic(self, message: &'static str) -> T;
     /// Unwraps a value, UB if it is [`None`] or [`Err`].
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it can break the program if the provided value is used
+    /// with wrong arguments.
+    /// The caller __must__ be sure that the value is not `None` or `Err`.
     unsafe fn unwrap_unchecked(self) -> T;
     // `unwrap_or_bug_hint` is not described here not to extend the `Option` and `Result` even more
 }
@@ -97,7 +104,7 @@ impl<T, E> UnwrapOrPanic<T> for Result<T, E> {
 ///
 /// Else hints to the compiler that the value is not `None` or `Err`.
 #[track_caller]
-pub(crate) fn unwrap_or_bug_hint<T>(item: impl UnwrapOrPanic<T>) -> T {
+pub fn unwrap_or_bug_hint<T>(item: impl UnwrapOrPanic<T>) -> T {
     if cfg!(debug_assertions) {
         item.unwrap_or_panic(BUG_MESSAGE)
     } else {
@@ -110,10 +117,7 @@ pub(crate) fn unwrap_or_bug_hint<T>(item: impl UnwrapOrPanic<T>) -> T {
 /// Else hints to the compiler that the value is not `None` or `Err`.
 #[allow(unused_variables, reason = "It contains #[cfg(debug_assertions)]")]
 #[track_caller]
-pub(crate) fn unwrap_or_bug_message_hint<T>(
-    item: impl UnwrapOrPanic<T>,
-    message: &'static str,
-) -> T {
+pub fn unwrap_or_bug_message_hint<T>(item: impl UnwrapOrPanic<T>, message: &'static str) -> T {
     if cfg!(debug_assertions) {
         item.unwrap_or_panic(message)
     } else {

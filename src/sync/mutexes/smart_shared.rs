@@ -4,7 +4,6 @@
 //! ownership-based locking through [`MutexGuard`].
 use std::cell::UnsafeCell;
 use std::future::Future;
-use std::hint::spin_loop;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::panic::{RefUnwindSafe, UnwindSafe};
@@ -15,11 +14,11 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::task::{Context, Poll};
 
 use crate::panic_if_local_in_future;
+use crate::runtime::{local_executor, IsLocal, Task};
 use crate::runtime::{Call, SyncTaskList};
-use crate::runtime::{IsLocal, Task, local_executor};
 use crate::sync::mutexes::AsyncSubscribableMutex;
 use crate::sync::{AsyncMutex, AsyncMutexGuard, Unlock};
-use crate::utils::{PairedWithLock, likely};
+use crate::utils::{likely, short_preempt, PairedWithLock};
 
 /// An RAII implementation of a "scoped lock" of a mutex. When this structure is
 /// dropped (falls out of scope), the lock will be unlocked.
@@ -103,7 +102,7 @@ impl<'mutex, T: ?Sized> Future for MutexWait<'mutex, T> {
         unsafe { panic_if_local_in_future!(cx, "Mutex") };
 
         if !this.was_called {
-            if let Some(guard) = this.mutex.try_lock_with_spinning() {
+            if let Some(guard) = this.mutex.try_lock_with_preemption() {
                 return Poll::Ready(guard);
             }
 
@@ -211,37 +210,41 @@ impl<T: ?Sized> Mutex<T> {
     /// If the mutex is unlocked, returns [`MutexGuard`] that allows access to the inner value,
     /// otherwise returns [`None`].
     ///
-    /// # The difference between `try_lock_with_spinning` and [`try_lock`](Mutex::try_lock)
+    /// # The difference between `try_lock_with_spinning` and [`try_lock`](AsyncMutex::try_lock)
     ///
     /// `try_lock_with_spinning` tries to acquire the lock in a loop with a small delay a few times.
     /// It can be more useful in cases where the lock is very likely to be locked for
-    /// __less than 30 nanoseconds__.
+    /// __less than 100 nanoseconds__.
+    ///
+    /// It is `pub(crate)` because users can misuse it and fill the preempt stack.
     #[inline]
-    pub fn try_lock_with_spinning(&self) -> Option<MutexGuard<T>> {
-        for step in 0..=6 {
-            let lock_res = self.counter.compare_exchange(
-                DEFAULT_COUNTER,
-                DEFAULT_COUNTER + 1,
-                Acquire,
-                Acquire,
-            );
-            return match lock_res {
-                Ok(_) => Some(MutexGuard::new(self)),
-                Err(count) => {
-                    if count == DEFAULT_COUNTER + 1 {
-                        for _ in 0..1 << step {
-                            spin_loop();
-                        }
+    pub(crate) fn try_lock_with_preemption(&self) -> Option<MutexGuard<T>> {
+        let lock_res = self.counter.compare_exchange(
+            DEFAULT_COUNTER,
+            DEFAULT_COUNTER + 1,
+            Acquire,
+            Acquire,
+        );
 
-                        continue;
-                    }
-
-                    None
+        match lock_res {
+            Ok(_) => Some(MutexGuard::new(self)),
+            Err(count) => {
+                if count != DEFAULT_COUNTER + 1 {
+                    return None;
                 }
-            };
-        }
 
-        None
+                short_preempt();
+
+                let lock_res = self.counter.compare_exchange(
+                    DEFAULT_COUNTER,
+                    DEFAULT_COUNTER + 1,
+                    Acquire,
+                    Relaxed,
+                );
+
+                lock_res.map_or(None, |_| Some(MutexGuard::new(self)))
+            }
+        }
     }
 }
 
@@ -521,6 +524,6 @@ mod tests {
 
     #[orengine::test::test_shared]
     fn test_try_with_spinning_shared_mutex() {
-        test_try_mutex(Mutex::try_lock_with_spinning).await;
+        test_try_mutex(Mutex::try_lock_with_preemption).await;
     }
 }

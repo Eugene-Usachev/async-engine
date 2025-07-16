@@ -3,7 +3,6 @@
 //! It allows for asynchronous locking and unlocking, and provides
 //! ownership-based locking through [`NaiveMutexGuard`].
 use std::cell::UnsafeCell;
-use std::hint::spin_loop;
 use std::mem;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
@@ -209,14 +208,14 @@ impl<T: ?Sized> AsyncMutex<T> for NaiveMutex<T> {
         T: 'mutex,
     {
         loop {
-            for step in 0..=6 {
-                if let Some(guard) = self.try_lock() {
-                    return guard;
-                }
+            if let Some(guard) = self.try_lock() {
+                return guard;
+            }
 
-                for _ in 0..1 << step {
-                    spin_loop();
-                }
+            crate::utils::short_preempt();
+
+            if let Some(guard) = self.try_lock() {
+                return guard;
             }
 
             yield_now().await;
@@ -312,7 +311,6 @@ fn test_compile_naive_mutex() {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate as orengine;
     use crate::sleep;
     use crate::sync::{AsyncWaitGroup, WaitGroup};

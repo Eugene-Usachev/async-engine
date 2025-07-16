@@ -1,4 +1,4 @@
-//! This module contains test for the [`select`](crate::select) macro.
+//! This module contains tests for the [`select`](crate::select) macro.
 use crate as orengine;
 use crate::sync::{AsyncChannel, AsyncReceiver, AsyncSender, Channel, LocalChannel, SendErr};
 use crate::{local_executor, sleep};
@@ -135,16 +135,16 @@ fn test_local_select_without_default_non_blocking() {
     {
         const RES: u32 = 31;
 
-        let ch1 = LocalChannel::<u32>::bounded(1);
-        let ch2 = LocalChannel::<u32>::bounded(1);
-        let ch3 = LocalChannel::<u32>::bounded(0);
+        let ch1 = Rc::new(LocalChannel::<u32>::bounded(1));
+        let ch2 = Rc::new(LocalChannel::<u32>::bounded(1));
+        let ch3 = Rc::new(LocalChannel::<u32>::bounded(0));
 
         ch2.send(31).await.expect("failed to send");
 
         let a = select! {
-            recv(&ch1) -> var => var.unwrap()
-            recv(&ch2) -> var => var.unwrap()
-            send(&ch3, 20) -> _var => 1
+            recv(ch1) -> var => var.unwrap()
+            recv(ch2) -> var => var.unwrap()
+            send(ch3, 20) -> _var => 1
         };
 
         assert_eq!(a, RES, "non-blocking without default recv assertion failed");
@@ -159,12 +159,12 @@ fn test_local_select_without_default_non_blocking() {
         let chan_clone = chan.clone();
 
         local_executor().spawn_local(async move {
-            let ch2 = LocalChannel::<u32>::bounded(1);
-            let ch3 = LocalChannel::<u32>::bounded(1);
+            let ch2 = Rc::new(LocalChannel::<u32>::bounded(1));
+            let ch3 = Rc::new(LocalChannel::<u32>::bounded(1));
             select! {
-                recv(&ch2) -> _var => ()
-                recv(&ch3) -> _var => ()
-                send(&chan_clone, RES) -> res => {
+                recv(ch2) -> _var => ()
+                recv(ch3) -> _var => ()
+                send(chan_clone, RES) -> res => {
                     res.expect("channel is closed");
                 }
                 default => ()
@@ -173,12 +173,12 @@ fn test_local_select_without_default_non_blocking() {
 
         assert_eq!(chan.recv().await.expect("failed to receive"), RES);
 
-        let ch1 = LocalChannel::<u32>::bounded(1);
-        let ch2 = LocalChannel::<u32>::bounded(1);
+        let ch1 = Rc::new(LocalChannel::<u32>::bounded(1));
+        let ch2 = Rc::new(LocalChannel::<u32>::bounded(1));
         let a = select! {
-            recv(&ch1) -> var => var.unwrap()
-            recv(&ch2) -> var => var.unwrap()
-            send(&chan, 20) -> _var => SENT
+            recv(ch1) -> var => var.unwrap()
+            recv(ch2) -> var => var.unwrap()
+            send(chan, 20) -> _var => SENT
         };
 
         assert_eq!(
@@ -189,34 +189,34 @@ fn test_local_select_without_default_non_blocking() {
 
     // non-blocking recv error
     {
-        let ch1 = LocalChannel::<u32>::bounded(1);
-        let ch2 = LocalChannel::<u32>::bounded(1);
-        let ch3 = LocalChannel::<u32>::bounded(0);
+        let ch1 = Rc::new(LocalChannel::<u32>::bounded(1));
+        let ch2 = Rc::new(LocalChannel::<u32>::bounded(1));
+        let ch3 = Rc::new(LocalChannel::<u32>::bounded(0));
 
         ch2.close().await;
 
         select! {
-            recv(&ch1) -> _var => panic!("non-blocking without default recv with error failed")
-            recv(&ch2) -> var => match var {
+            recv(ch1) -> _var => panic!("non-blocking without default recv with error failed")
+            recv(ch2) -> var => match var {
                 Ok(_) => panic!("non-blocking without default recv with error failed"),
                 Err(e) => assert!(matches!(e, RecvErr::Closed), "non-blocking recv with error failed"),
             }
-            send(&ch3, 20) -> _var => panic!("non-blocking without default recv with error failed")
+            send(ch3, 20) -> _var => panic!("non-blocking without default recv with error failed")
         }
     }
 
     // non-blocking send error
     {
-        let ch1 = LocalChannel::<u32>::bounded(1);
-        let ch2 = LocalChannel::<u32>::bounded(1);
-        let ch3 = LocalChannel::<u32>::bounded(1);
+        let ch1 = Rc::new(LocalChannel::<u32>::bounded(1));
+        let ch2 = Rc::new(LocalChannel::<u32>::bounded(1));
+        let ch3 = Rc::new(LocalChannel::<u32>::bounded(1));
 
         ch3.close().await;
 
         select! {
-            recv(&ch1) -> _var => panic!("non-blocking without default send with error failed")
-            recv(&ch2) -> _var => panic!("non-blocking without default send with error failed")
-            send(&ch3, 20) -> var => match var {
+            recv(ch1) -> _var => panic!("non-blocking without default send with error failed")
+            recv(ch2) -> _var => panic!("non-blocking without default send with error failed")
+            send(ch3, 20) -> var => match var {
                 Ok(()) => panic!("non-blocking without default send with error failed"),
                 Err(e) => match e {
                     SendErr::Closed(20) => (),
@@ -233,10 +233,10 @@ fn test_local_select_without_default_blocking() {
     {
         const RES: u32 = 39;
 
-        let ch1 = LocalChannel::<u32>::bounded(1);
+        let ch1 = Rc::new(LocalChannel::<u32>::bounded(1));
         let ch2 = Rc::new(LocalChannel::<u32>::bounded(1));
         let ch2_clone = ch2.clone();
-        let ch3 = LocalChannel::<u32>::bounded(0);
+        let ch3 = Rc::new(LocalChannel::<u32>::bounded(0));
 
         local_executor().spawn_local(async move {
             sleep(Duration::from_micros(100)).await;
@@ -263,15 +263,15 @@ fn test_local_select_without_default_blocking() {
         local_executor().spawn_local(async move {
             const SENT: u32 = 131;
 
-            let ch1 = LocalChannel::<u32>::bounded(1);
-            let ch2 = LocalChannel::<u32>::bounded(1);
+            let ch1 = Rc::new(LocalChannel::<u32>::bounded(1));
+            let ch2 = Rc::new(LocalChannel::<u32>::bounded(1));
 
             sleep(Duration::from_micros(100)).await;
 
             let a = select! {
-                recv(&ch1) -> var => var.unwrap()
-                recv(&ch2) -> var => var.unwrap()
-                send(&ch3_clone, RES) -> _var => SENT
+                recv(ch1) -> var => var.unwrap()
+                recv(ch2) -> var => var.unwrap()
+                send(ch3_clone, RES) -> _var => SENT
             };
 
             assert_eq!(a, SENT, "blocking send assertion failed");
@@ -286,10 +286,10 @@ fn test_local_select_without_default_blocking() {
 
     // blocking recv err
     {
-        let ch1 = LocalChannel::<u32>::bounded(1);
+        let ch1 = Rc::new(LocalChannel::<u32>::bounded(1));
         let ch2 = Rc::new(LocalChannel::<u32>::bounded(1));
         let ch2_clone = ch2.clone();
-        let ch3 = LocalChannel::<u32>::bounded(0);
+        let ch3 = Rc::new(LocalChannel::<u32>::bounded(0));
 
         local_executor().spawn_local(async move {
             sleep(Duration::from_micros(100)).await;
@@ -298,16 +298,16 @@ fn test_local_select_without_default_blocking() {
         });
 
         select! {
-            recv(&ch1) -> _var => panic!("blocking recv with error failed")
-            recv(&ch2) -> var => assert!(var.is_err(), "blocking recv with error failed")
-            send(&ch3, 20) -> _var => panic!("blocking recv with error failed")
+            recv(ch1) -> _var => panic!("blocking recv with error failed")
+            recv(ch2) -> var => assert!(var.is_err(), "blocking recv with error failed")
+            send(ch3, 20) -> _var => panic!("blocking recv with error failed")
         }
     }
 
     // blocking send err
     {
-        let ch1 = LocalChannel::<u32>::bounded(1);
-        let ch2 = LocalChannel::<u32>::bounded(1);
+        let ch1 = Rc::new(LocalChannel::<u32>::bounded(1));
+        let ch2 = Rc::new(LocalChannel::<u32>::bounded(1));
         let ch3 = Rc::new(LocalChannel::<u32>::bounded(0));
         let ch3_clone = ch3.clone();
 
@@ -318,9 +318,9 @@ fn test_local_select_without_default_blocking() {
         });
 
         select! {
-            recv(&ch1) -> _var => panic!("blocking send with error failed")
-            recv(&ch2) -> _var => panic!("blocking send with error failed")
-            send(&ch3, 30) -> var => match var {
+            recv(ch1) -> _var => panic!("blocking send with error failed")
+            recv(ch2) -> _var => panic!("blocking send with error failed")
+            send(ch3, 30) -> var => match var {
                 Err(SendErr::Closed(30)) => (),
                 _ => panic!("blocking send with error failed"),
             }
@@ -458,9 +458,9 @@ fn test_shared_select_without_default_non_blocking() {
     {
         const RES: u32 = 31;
 
-        let ch1 = Channel::<u32>::bounded(1);
-        let ch2 = Channel::<u32>::bounded(1);
-        let ch3 = Channel::<u32>::bounded(0);
+        let ch1 = Arc::new(Channel::<u32>::bounded(1));
+        let ch2 = Arc::new(Channel::<u32>::bounded(1));
+        let ch3 = Arc::new(Channel::<u32>::bounded(0));
 
         ch2.send(31).await.expect("failed to send");
 
@@ -496,8 +496,8 @@ fn test_shared_select_without_default_non_blocking() {
 
         assert_eq!(chan.recv().await.expect("failed to receive"), RES);
 
-        let ch1 = Channel::<u32>::bounded(1);
-        let ch2 = Channel::<u32>::bounded(1);
+        let ch1 = Arc::new(Channel::<u32>::bounded(1));
+        let ch2 = Arc::new(Channel::<u32>::bounded(1));
         let a = select! {
             recv(&ch1) -> var => var.unwrap()
             recv(&ch2) -> var => var.unwrap()
@@ -512,9 +512,9 @@ fn test_shared_select_without_default_non_blocking() {
 
     // non-blocking recv error
     {
-        let ch1 = Channel::<u32>::bounded(1);
-        let ch2 = Channel::<u32>::bounded(1);
-        let ch3 = Channel::<u32>::bounded(0);
+        let ch1 = Arc::new(Channel::<u32>::bounded(1));
+        let ch2 = Arc::new(Channel::<u32>::bounded(1));
+        let ch3 = Arc::new(Channel::<u32>::bounded(0));
 
         ch2.close().await;
 
@@ -530,9 +530,9 @@ fn test_shared_select_without_default_non_blocking() {
 
     // non-blocking send error
     {
-        let ch1 = Channel::<u32>::bounded(1);
-        let ch2 = Channel::<u32>::bounded(1);
-        let ch3 = Channel::<u32>::bounded(1);
+        let ch1 = Arc::new(Channel::<u32>::bounded(1));
+        let ch2 = Arc::new(Channel::<u32>::bounded(1));
+        let ch3 = Arc::new(Channel::<u32>::bounded(1));
 
         ch3.close().await;
 
@@ -556,10 +556,10 @@ fn test_shared_select_without_default_blocking() {
     {
         const RES: u32 = 39;
 
-        let ch1 = Channel::<u32>::bounded(1);
+        let ch1 = Arc::new(Channel::<u32>::bounded(1));
         let ch2 = Arc::new(Channel::<u32>::bounded(1));
         let ch2_clone = ch2.clone();
-        let ch3 = Channel::<u32>::bounded(0);
+        let ch3 = Arc::new(Channel::<u32>::bounded(0));
 
         local_executor().spawn_shared(async move {
             sleep(Duration::from_micros(100)).await;
@@ -585,8 +585,8 @@ fn test_shared_select_without_default_blocking() {
         local_executor().spawn_shared(async move {
             const SENT: u32 = 131;
 
-            let ch1 = Channel::<u32>::bounded(1);
-            let ch2 = Channel::<u32>::bounded(1);
+            let ch1 = Arc::new(Channel::<u32>::bounded(1));
+            let ch2 = Arc::new(Channel::<u32>::bounded(1));
 
             sleep(Duration::from_micros(100)).await;
 
@@ -608,10 +608,10 @@ fn test_shared_select_without_default_blocking() {
 
     // blocking recv err
     {
-        let ch1 = Channel::<u32>::bounded(1);
+        let ch1 = Arc::new(Channel::<u32>::bounded(1));
         let ch2 = Arc::new(Channel::<u32>::bounded(1));
         let ch2_clone = ch2.clone();
-        let ch3 = Channel::<u32>::bounded(0);
+        let ch3 = Arc::new(Channel::<u32>::bounded(0));
 
         local_executor().spawn_shared(async move {
             sleep(Duration::from_micros(100)).await;
@@ -628,8 +628,8 @@ fn test_shared_select_without_default_blocking() {
 
     // blocking send err
     {
-        let ch1 = Channel::<u32>::bounded(1);
-        let ch2 = Channel::<u32>::bounded(1);
+        let ch1 = Arc::new(Channel::<u32>::bounded(1));
+        let ch2 = Arc::new(Channel::<u32>::bounded(1));
         let ch3 = Arc::new(Channel::<u32>::bounded(0));
         let ch3_clone = ch3.clone();
 

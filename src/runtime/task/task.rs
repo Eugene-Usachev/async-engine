@@ -1,9 +1,9 @@
 //! This module provides the [`Task`].
-use crate::Executor;
 #[cfg(debug_assertions)]
 use crate::local_executor;
-use crate::runtime::Locality;
 use crate::runtime::task::task_data::TaskData;
+use crate::runtime::Locality;
+use crate::Executor;
 use std::future::Future;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
@@ -49,7 +49,7 @@ pub struct Task {
 
 impl Task {
     /// Creates and allocates a [`Task`] with the given future.
-    pub(crate) fn allocate_new<F: Future<Output = ()> + 'static>(
+    pub(crate) fn allocate_new<F: Future<Output=()> + 'static>(
         future: F,
         locality: Locality,
     ) -> Self {
@@ -70,6 +70,7 @@ impl Task {
             )),
         }
     }
+
 
     /// Returns a [`Task`] with the given future.
     ///
@@ -226,6 +227,8 @@ impl Task {
     /// to another executor.
     #[cfg(debug_assertions)]
     pub fn check_safety(&mut self) {
+        let is_local = self.is_local();
+
         if unsafe {
             self.is_executing
                 .as_ref()
@@ -417,9 +420,8 @@ pub async unsafe fn update_current_task_locality(locality: Locality) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate as orengine;
-    use crate::{Local, local_executor, yield_now};
+    use crate::{local_executor, yield_now, Local};
     use std::ptr;
 
     #[orengine::test::test_local]
